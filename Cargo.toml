@@ -1,0 +1,6 @@
+[package]
+name = "rust-blockchain-store"
+version = "0.1.0"
+authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
+
+[dependencies]
