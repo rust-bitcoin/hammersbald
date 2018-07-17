@@ -1,7 +1,7 @@
 # Fast Blockchain store in Rust
 A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
 
-##Motivation
+## Motivation
 Generic databases and key-value stores offer much more functionality 
 than needed to store and process a blockchain. Superflous functionality (for a blockchain)
 comes at a high cost in speed. 
