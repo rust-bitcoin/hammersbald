@@ -51,11 +51,15 @@ Numbers stored in big endian.
 ### Blocks
 
 The block is the unit of read and expansion for the data and key file. A block consists of
-a payload and a used length less or equal to 4094 
+a payload and a used length less or equal to 4088 
 
 <pre>
-+----+-------------------------------+
++------------------------------------+
 |    | payload                       |
++----+-------------------------------+
+|u48 | block offset                  |
++----+-------------------------------+
+|u8  | padding                       |
 +----+-------------------------------+
 |u16 | used length                   |
 +----+-------------------------------+
@@ -187,12 +191,14 @@ Therafter any number of block offset and content tuples.
 |  +--------+-------------------------------+  |
 |  |u8      | magic (00)                    |  |
 |  +--------+-------------------------------+  |
-|  +--------+-------------------------------+  |
 |  | u48    | last correct data file size   |  |
 |  +--------+-------------------------------+  |
 |  | u48    | last correct table file size  |  |
 |  +--------+-------------------------------+  |
-|  | u48    | block offset                  |  |
+|  |        | padding zeros                 |  |
+|  +--------+-------------------------------+  |
++----------------------------------------------+
++------------- block       --------------------+
 |  +--------+-------------------------------+  |
 |  | [u8]   | block as before batch start   |  |
 |  +--------+-------------------------------+  |
