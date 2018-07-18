@@ -114,7 +114,7 @@ Spill over must not be the last data element in the data file.
 +----+-------------------------------------+
 |u256| id                                  |
 +----+-------------------------------------+
-|[u8]| data                                |
+|[u8]| serialized transaction or app data  |
 +----+-------------------------------------+
 </pre>
 
