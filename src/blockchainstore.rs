@@ -14,23 +14,20 @@
 // limitations under the License.
 //
 //!
-//! # Blockchain store
+//! # the blockchain store
 //!
-//! A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
-//!
+//! This is the public API to this library
 
-#![deny(non_upper_case_globals)]
-#![deny(non_camel_case_types)]
-#![deny(non_snake_case)]
-#![deny(unused_mut)]
-#![deny(missing_docs)]
-#![deny(unused_must_use)]
 
-mod block;
-mod types;
-mod inmemory;
-mod infile;
-mod blockpool;
-mod blockdb;
-pub mod error;
-pub mod blockchainstore;
+/// The blockchain store API
+pub struct BlockchainStore {
+
+}
+
+impl BlockchainStore {
+
+    /// create an in-memory store useful for tests
+    pub fn in_memory () {
+
+    }
+}

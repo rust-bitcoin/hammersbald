@@ -82,9 +82,9 @@ Thereafter any number or data elements stored prefixed with a length and type.
 |   |u8  | magic (DA)                    |  |  
 |   +----+-------------------------------+  |
 |   +----+-------------------------------+  |
-|   |u24 | data length                   |  |
-|   +----+-------------------------------+  |
 |   |u8  | data type                     |  |
+|   +----+-------------------------------+  |
+|   |u24 | data length                   |  |
 |   +----+-------------------------------+  |
 |   |[u8]| data                          |  |
 |   +----+-------------------------------+  |
@@ -103,9 +103,9 @@ Spill over must not be the last data element in the data file.
 
 #### Data types
 
-* 0 spill over
-* 1 transaction or application defined data
-* 2 header or block
+* 0 transaction or application defined data
+* 1 header or block
+* 2 spill over of the hash table
 
 ##### Transaction or application specific data
 <pre>
@@ -151,8 +151,8 @@ is the id of the tip with known u256 representation.
 
 ### Table file
 
-The data file starts with a magic number in two bytes spelling BCFF in hex.
-Thereafter any number of buckets storing 5 byte pointers into data.
+The data file starts with a magic number in two bytes spelling BCDB (for blockchain data base) 
+in hex. Thereafter any number of buckets storing 5 byte pointers into data.
 
 The length of the table file allows calculation of current S and L of linear hashing:
 
@@ -166,7 +166,7 @@ The length of the table file allows calculation of current S and L of linear has
 |  +--------+-------------------------------+  |
 |  |u8      | magic (BC)                    |  |
 |  +--------+-------------------------------+  |
-|  |u8      | magic (FF)                    |  |
+|  |u8      | magic (DB)                    |  |
 |  +--------+-------------------------------+  |
 |  +--------+-------------------------------+  |
 |  | u48    | data offset                   |  |

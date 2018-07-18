@@ -25,8 +25,12 @@ use std::io;
 pub enum BCSError {
     /// offset is invalid (> 2^48)
     InvalidOffset,
+    /// corrupted data
+    Corrupted,
     /// Data does not fit into the block
     DoesNotFit,
+    /// Bad file magic number
+    BadMagic,
     /// wrapped IO error
     IO(io::Error)
 }
@@ -36,6 +40,8 @@ impl Error for BCSError {
         match *self {
             BCSError::InvalidOffset => "invalid offset",
             BCSError::DoesNotFit => "data does not fit into the block",
+            BCSError::Corrupted => "corrupted",
+            BCSError::BadMagic => "bad magic number at file start",
             BCSError::IO(_) => "IO Error",
         }
     }
@@ -44,6 +50,8 @@ impl Error for BCSError {
         match *self {
             BCSError::InvalidOffset => None,
             BCSError::DoesNotFit => None,
+            BCSError::Corrupted => None,
+            BCSError::BadMagic => None,
             BCSError::IO(ref e) => Some(e)
         }
     }
