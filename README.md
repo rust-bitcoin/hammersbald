@@ -48,6 +48,18 @@ The persistent store uses up to three files:
 
 Numbers stored in big endian.
 
+### Blocks
+
+The block is the unit of read and expansion for the data and key file. A block consists of
+a payload and a used length less or equal to 4094 
+
++----+-------------------------------+
+|    | payload                       |
++----+-------------------------------+
+|u16 | used length                   |
++----+-------------------------------+
+
+
 ### Data file
 
 The data file is strictly append only. Anything written stays there the only allowed operations are:
@@ -58,19 +70,24 @@ The data file starts with a magic number in two bytes spelling BCDA (blockchain 
 Thereafter any number or data elements stored prefixed with a length and type.
 
 <pre>
-+----+-------------------------------+
-|u8  | magic (BC)                    |
-+----+-------------------------------+
-|u8  | magic (DA)                    |
-+----+-------------------------------+
-|u24 | data length                   |
-+----+-------------------------------+
-|u8  | data type                     |
-+----+-------------------------------+
-|[u8]| data                          |
-+----+-------------------------------+
-....
 
++------------- block       -----------------+
+|                                           |
+|	+----+-------------------------------+  |
+|	|u8  | magic (BC)                    |  |
+|	+----+-------------------------------+  |
+|	|u8  | magic (DA)                    |  |  
+|	+----+-------------------------------+  |
+|	+----+-------------------------------+  |
+|	|u24 | data length                   |  |
+|	+----+-------------------------------+  |
+|	|u8  | data type                     |  |
+|	+----+-------------------------------+  |
+|	|[u8]| data                          |  |
+|	+----+-------------------------------+  |
+|   ....                                    |
++--------------------------------------------
+....
 </pre>
 
 #### Spill over
@@ -137,39 +154,50 @@ Thereafter any number of buckets storing 5 byte pointers into data.
 The length of the table file allows calculation of current S and L of linear hashing:
 
 * N = 1
-* L = Floor(log2(len-2))
+* L = Floor(log2(used len-2))
 * S = L/2 mod 2^(L-1)
 
 <pre>
-+--------+-------------------------------+
-|u8      | magic (BC)                    |
-+--------+-------------------------------+
-|u8      | magic (FF)                    |
-+--------+-------------------------------+
-| u48    | data offset                   |
-+--------+-------------------------------+
++------------- block       --------------------+
+|                                              |
+|  +--------+-------------------------------+  |
+|  |u8      | magic (BC)                    |  |
+|  +--------+-------------------------------+  |
+|  |u8      | magic (FF)                    |  |
+|  +--------+-------------------------------+  |
+|  +--------+-------------------------------+  |
+|  | u48    | data offset                   |  |
+|  +--------+-------------------------------+  |
+|  ...                                         |
++----------------------------------------------+
 ....
 </pre>
 
 ### Log file
 
-The log file starts with a megic number and last known correct file sizes.
+The log file starts with a magic number and last known correct file sizes.
 Therafter any number of block offset and content tuples.
 
 <pre>
-+--------+-------------------------------+
-|u8      | magic (BC)                    |
-+--------+-------------------------------+
-|u8      | magic (00)                    |
-+--------+-------------------------------+
-| u48    | last correct data file size   |
-+--------+-------------------------------+
-| u48    | last correct table file size  |
-+--------+-------------------------------+
-| u48    | block offset                  |
-+--------+-------------------------------+
-| [u8]   | block as before batch start   |
-+--------+-------------------------------+
++------------- block       --------------------+
+|                                              |
+|  +--------+-------------------------------+  |
+|  |u8      | magic (BC)                    |  |
+|  +--------+-------------------------------+  |
+|  |u8      | magic (00)                    |  |
+|  +--------+-------------------------------+  |
+|  +--------+-------------------------------+  |
+|  | u48    | last correct data file size   |  |
+|  +--------+-------------------------------+  |
+|  | u48    | last correct table file size  |  |
+|  +--------+-------------------------------+  |
+|  | u48    | block offset                  |  |
+|  +--------+-------------------------------+  |
+|  | [u8]   | block as before batch start   |  |
+|  +--------+-------------------------------+  |
+|  ....                                        |
++----------------------------------------------+
+....
 </pre>
 
 
