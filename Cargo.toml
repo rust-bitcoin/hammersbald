@@ -15,3 +15,6 @@ name = "bitcoin_spv"
 path = "src/lib.rs"
 
 [dependencies]
+
+[dev-dependencies]
+hex = "0.3"
