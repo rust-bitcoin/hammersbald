@@ -26,6 +26,7 @@ use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex, RwLock, Condvar};
 use std::collections::{HashMap, VecDeque};
 use std::thread;
+use std::cell::Cell;
 
 // background writer will loop with this delay
 const WRITE_DELAY_MS: u32 = 1000;
@@ -47,7 +48,8 @@ struct Inner {
     rw: Mutex<Box<RW>>,
     read_cache: RwLock<Cache>,
     write_cache: Mutex<VecDeque<(bool, Arc<Block>)>>,
-    flushed: Condvar
+    flushed: Condvar,
+    run: Mutex<Cell<bool>>
 }
 
 impl Inner {
@@ -56,7 +58,8 @@ impl Inner {
             rw: Mutex::new(rw),
             read_cache: RwLock::new(Cache::default()),
             write_cache: Mutex::new(VecDeque::new()),
-            flushed: Condvar::new()
+            flushed: Condvar::new(),
+            run: Mutex::new(Cell::new(true))
         }
     }
 }
@@ -99,15 +102,15 @@ impl BlockPool {
     }
 
     fn background (inner: Arc<Inner>) {
-        loop {
+        let mut run = true;
+        while run {
+            thread::sleep_ms(WRITE_DELAY_MS);
+
             let mut write_cache = inner.write_cache.lock().unwrap();
             let wrote = !write_cache.is_empty();
             while let Some((append, block)) = write_cache.pop_front() {
                 let mut rw = inner.rw.lock().unwrap();
-                if append {
-                    rw.seek(SeekFrom::End(0)).expect("can not seek to end");
-                }
-                else {
+                if !append {
                     let pos = block.offset.as_usize() as u64;
                     rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
                 }
@@ -118,7 +121,7 @@ impl BlockPool {
                 rw.flush().unwrap();
             }
             inner.flushed.notify_one();
-            thread::sleep_ms(WRITE_DELAY_MS);
+            run = inner.run.lock().unwrap().get();
         }
     }
 
@@ -131,9 +134,13 @@ impl BlockPool {
     }
 
     pub fn sync (&mut self) -> Result<(), BCSError> {
-        self.flush()?;
         let rw = self.inner.rw.lock().unwrap();
         rw.sync()
+    }
+
+    pub fn shutdown (&mut self) {
+        let run = self.inner.run.lock().unwrap();
+        run.set(false);
     }
 
     pub fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
