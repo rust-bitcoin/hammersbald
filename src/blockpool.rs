@@ -161,7 +161,7 @@ impl BlockPool {
         Ok(block)
     }
 
-    pub fn update_block(&self, block: Arc<Block>) {
+    pub fn write_block(&self, block: Arc<Block>) {
         self.inner.write_cache.lock().unwrap().push_back((false, block.clone()));
         self.inner.read_cache.write().unwrap().put(block);
     }

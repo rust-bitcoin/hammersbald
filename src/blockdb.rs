@@ -77,7 +77,7 @@ impl BlockDB {
 
             offset = Offset::new(BLOCK_SIZE)?;
             while let Ok(block) = self.log.read_block(offset) {
-                self.table.update_block(block);
+                self.table.write_block(block);
                 offset = Offset::new(offset.as_usize() + BLOCK_SIZE)?;
             }
         }
@@ -103,21 +103,18 @@ impl BlockDB {
         self.log.sync()
     }
 
-    pub fn update_table_block (&self, block: Block) -> Result<(), BCSError> {
+    pub fn write_table_block(&self, block: Block) -> Result<(), BCSError> {
         let br = Arc::new(block);
         let prev = self.table.read_block(br.offset)?;
         self.log.append_block(prev);
-        self.table.update_block(br);
+        self.table.write_block(br);
         Ok(())
     }
 
-    pub fn append_table_block (&self, block: Block) {
+    pub fn write_data_block(&self, block: Block) -> Result<(), BCSError> {
         let br = Arc::new(block);
-        self.table.update_block(br);
-    }
-
-    pub fn append_data_block (&self, block: Block) {
-        self.table.update_block(Arc::new(block));
+        self.data.write_block(br);
+        Ok(())
     }
 
     pub fn read_table_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
