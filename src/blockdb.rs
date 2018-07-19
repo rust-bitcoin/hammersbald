@@ -77,9 +77,13 @@ impl BlockDB {
 
             offset = Offset::new(BLOCK_SIZE)?;
             while let Ok(block) = self.log.read_block(offset) {
-                self.table.write_block(block);
+                if block.offset.as_usize() < table_len {
+                    self.table.write_block(block);
+                }
                 offset = Offset::new(offset.as_usize() + BLOCK_SIZE)?;
             }
+            self.log.truncate(Offset::new(0)?);
+            self.log.sync();
         }
         Ok(())
     }
