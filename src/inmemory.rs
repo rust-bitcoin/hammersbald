@@ -20,7 +20,9 @@
 
 use types::Offset;
 use error::BCSError;
-use blockpool::{RW, BlockPool};
+use blockdb::RW;
+use asyncfile::AsyncFile;
+use logfile::LogFile;
 use blockdb::{BlockDBFactory, BlockDB};
 
 use std::io::Read;
@@ -33,21 +35,22 @@ use std::cmp::min;
 /// in memory representation of a file
 pub struct InMemory {
     data: Vec<u8>,
-    pos: usize
+    pos: usize,
+    append: bool
 }
 
 impl InMemory {
     /// create a new file
-    pub fn new () -> InMemory {
-        InMemory{data: Vec::new(), pos: 0}
+    pub fn new (append: bool) -> InMemory {
+        InMemory{data: Vec::new(), pos: 0, append}
     }
 }
 
 impl BlockDBFactory for InMemory {
-    fn new_blockdb (name: String) -> Result<BlockDB, BCSError> {
-        let table = BlockPool::new(Box::new(InMemory::new()));
-        let data = BlockPool::new(Box::new(InMemory::new()));
-        let log = BlockPool::new(Box::new(InMemory::new()));
+    fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
+        let table = AsyncFile::new(Box::new(InMemory::new(false)));
+        let data = AsyncFile::new(Box::new(InMemory::new(true)));
+        let log = LogFile::new(Box::new(InMemory::new(true)));
 
         BlockDB::new(table, data, log)
     }
@@ -63,9 +66,7 @@ impl RW for InMemory {
         Ok(())
     }
 
-    fn sync(&self)  -> Result<(), BCSError> {
-        Ok(())
-    }
+    fn sync(&self) -> Result<(), BCSError> { Ok(()) }
 }
 
 impl Read for InMemory {
@@ -83,12 +84,17 @@ impl Read for InMemory {
 impl Write for InMemory {
     fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
         let buflen = buf.len();
-        let len = self.data.len();
-        let pos = self.pos;
-        let have = min(buflen, len - pos);
-        self.data.as_mut_slice()[pos .. pos + have].copy_from_slice(&buf[0 .. have]);
-        if buflen > have {
-            self.data.extend_from_slice(&buf[have .. buflen]);
+        if self.append {
+            self.data.extend_from_slice(buf);
+        }
+        else {
+            let len = self.data.len();
+            let pos = self.pos;
+            let have = min(buflen, len - pos);
+            self.data.as_mut_slice()[pos..pos + have].copy_from_slice(&buf[0..have]);
+            if buflen > have {
+                self.data.extend_from_slice(&buf[have..buflen]);
+            }
         }
         self.pos += buflen;
         Ok(self.pos)
@@ -135,7 +141,7 @@ mod test {
 
     #[test]
     fn in_memory_test() {
-        let mut mem = InMemory::new();
+        let mut mem = InMemory::new(false);
         assert!(mem.seek(SeekFrom::Start(0)).is_ok());
         assert!(mem.write("Hello".as_bytes()).is_ok());
         assert!(mem.seek(SeekFrom::Start(1)).is_ok());

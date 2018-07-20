@@ -20,7 +20,9 @@
 
 use types::Offset;
 use error::BCSError;
-use blockpool::{RW, BlockPool};
+use blockdb::RW;
+use asyncfile::AsyncFile;
+use logfile::LogFile;
 use blockdb::{BlockDBFactory, BlockDB};
 
 
@@ -44,14 +46,14 @@ impl InFile {
 }
 
 impl BlockDBFactory for InFile {
-    fn new_blockdb (name: String) -> Result<BlockDB, BCSError> {
-        let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.clone() + ".tbl")?;
-        let data_file = OpenOptions::new().read(true).write(true).create(true).open(name.clone() + ".dat")?;
-        let log_file = OpenOptions::new().read(true).write(true).create(true).open(name.clone() + ".log")?;
+    fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
+        let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.to_owned() + ".tbl")?;
+        let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".dat")?;
+        let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
 
-        let table = BlockPool::new(Box::new(InFile::new(table_file)));
-        let data = BlockPool::new(Box::new(InFile::new(data_file)));
-        let log = BlockPool::new(Box::new(InFile::new(log_file)));
+        let table = AsyncFile::new(Box::new(InFile::new(table_file)));
+        let data = AsyncFile::new(Box::new(InFile::new(data_file)));
+        let log = LogFile::new(Box::new(InFile::new(log_file)));
 
         BlockDB::new(table, data, log)
     }
@@ -66,9 +68,7 @@ impl RW for InFile {
         Ok(self.data.set_len(len as u64)?)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
-        Ok(self.data.sync_data()?)
-    }
+    fn sync(&self) -> Result<(), BCSError> { Ok(self.data.sync_data()?) }
 }
 
 impl Read for InFile {
