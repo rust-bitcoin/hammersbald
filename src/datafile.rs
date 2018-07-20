@@ -19,8 +19,8 @@
 //!
 
 use asyncfile::AsyncFile;
-use blockdb::{RW,DBFile};
-use block::Block;
+use blockdb::{RW,DBFile,BlockIterator,BlockFile};
+use block::{Block, PAYLOAD_MAX};
 use error::BCSError;
 use types::Offset;
 
@@ -43,6 +43,10 @@ impl DataFile {
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
+
+    fn block_iter (&self) -> BlockIterator {
+        BlockIterator{ blocknumber: 0, file: self }
+    }
 }
 
 impl DBFile for DataFile {
@@ -61,8 +65,40 @@ impl DBFile for DataFile {
     fn len(&mut self) -> Result<Offset, BCSError> {
         self.async_file.len()
     }
+}
 
+impl BlockFile for DataFile {
     fn read_block(&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         self.async_file.read_block(offset)
+    }
+}
+
+/// types of data stored in the data file
+pub enum DataType {
+    /// no data, just padding the storage blocks with zero bytes
+    Padding,
+    /// Transaction of application defined data associated with a block
+    TransactionOrAppData,
+    /// A header or a block of the blockchain
+    HeaderOrBlock,
+    /// Spillover bucket of the hash table
+    TableSpillOver
+}
+
+pub struct DataEntry {
+    pub data_type: DataType,
+    pub content: Vec<u8>
+}
+
+pub struct DataIterator<'file> {
+    offset: Offset,
+    file: &'file DataFile
+}
+
+impl<'file> Iterator for DataIterator<'file> {
+    type Item = DataEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unimplemented!()
     }
 }

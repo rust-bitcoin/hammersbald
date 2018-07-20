@@ -37,13 +37,17 @@ pub trait RW : Read + Write + Seek + Send {
     fn sync (&self) -> Result<(), BCSError>;
 }
 
-pub trait DBFile {
+pub trait DBFile : BlockFile {
     fn flush(&mut self) -> Result<(), BCSError>;
     fn sync (&mut self) -> Result<(), BCSError>;
     fn truncate(&mut self, offset: Offset) -> Result<(), BCSError>;
     fn len(&mut self) -> Result<Offset, BCSError>;
+}
+
+pub trait BlockFile {
     fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError>;
 }
+
 
 /// The database block layer
 pub struct BlockDB {
@@ -154,6 +158,25 @@ impl BlockDB {
 
     pub fn read_data_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         self.data.read_block(offset)
+    }
+}
+
+pub struct BlockIterator<'file> {
+    pub blocknumber: usize,
+    pub file: &'file BlockFile
+}
+
+impl<'file> Iterator for BlockIterator<'file> {
+    type Item = Arc<Block>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.blocknumber < (1 << 47) / BLOCK_SIZE {
+            let offset = Offset::new(self.blocknumber*BLOCK_SIZE).unwrap();
+            if let Ok(block) = self.file.read_block(offset) {
+                return Some(block);
+            }
+        }
+        None
     }
 }
 

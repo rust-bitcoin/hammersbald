@@ -17,7 +17,7 @@
 //! # The log file
 //!
 
-use blockdb::{DBFile,RW};
+use blockdb::{DBFile,RW, BlockIterator,BlockFile};
 use block::{Block, BLOCK_SIZE};
 use error::BCSError;
 use types::Offset;
@@ -54,6 +54,10 @@ impl LogFile {
     pub fn reset (&mut self) {
         self.appended.clear();
     }
+
+    fn block_iter (&self) -> BlockIterator {
+        BlockIterator{ blocknumber: 0, file: self }
+    }
 }
 
 impl DBFile for LogFile {
@@ -61,7 +65,7 @@ impl DBFile for LogFile {
         Ok(self.rw.lock().unwrap().flush()?)
     }
 
-    fn sync (&mut self) -> Result<(), BCSError> {
+    fn sync(&mut self) -> Result<(), BCSError> {
         let rw = self.rw.lock().unwrap();
         rw.sync()
     }
@@ -76,7 +80,9 @@ impl DBFile for LogFile {
         let mut rw = self.rw.lock().unwrap();
         Offset::new(rw.len()?)
     }
+}
 
+impl BlockFile for LogFile {
     fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         let mut buffer = [0u8; BLOCK_SIZE];
         self.rw.lock().unwrap().read(&mut buffer)?;

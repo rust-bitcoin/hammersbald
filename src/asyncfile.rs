@@ -19,7 +19,7 @@
 //! Actual read and write operations are performed in a dedicated background thread.
 
 
-use blockdb::{DBFile,RW};
+use blockdb::{DBFile,RW,BlockIterator,BlockFile};
 use block::{Block, BLOCK_SIZE};
 use error::BCSError;
 use types::Offset;
@@ -108,7 +108,6 @@ impl AsyncFile {
 }
 
 impl DBFile for AsyncFile {
-
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut write_cache = self.inner.write_cache.lock().unwrap();
         while !write_cache.is_empty() {
@@ -117,7 +116,7 @@ impl DBFile for AsyncFile {
         Ok(())
     }
 
-    fn sync (&mut self) -> Result<(), BCSError> {
+    fn sync(&mut self) -> Result<(), BCSError> {
         let rw = self.inner.rw.lock().unwrap();
         rw.sync()
     }
@@ -134,7 +133,9 @@ impl DBFile for AsyncFile {
         let mut rw = self.inner.rw.lock().unwrap();
         Offset::new(rw.len()?)
     }
+}
 
+impl BlockFile for AsyncFile {
     fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         if let Some(block) = self.inner.read_cache.read().unwrap().get(offset) {
             return Ok(block);

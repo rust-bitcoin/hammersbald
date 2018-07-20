@@ -106,9 +106,9 @@ Spill over must not be the last data element in the data file.
 
 #### Data types
 
-* 0 transaction or application defined data
-* 1 header or block
-* 2 spill over of the hash table
+* 1 transaction or application defined data
+* 2 header or block
+* 3 spill over of the hash table
 
 ##### Transaction or application specific data
 <pre>

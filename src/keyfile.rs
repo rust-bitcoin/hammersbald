@@ -19,7 +19,7 @@
 //!
 
 use asyncfile::AsyncFile;
-use blockdb::{RW,DBFile};
+use blockdb::{RW,DBFile, BlockIterator, BlockFile};
 use block::Block;
 use error::BCSError;
 use types::Offset;
@@ -47,6 +47,10 @@ impl KeyFile {
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
+
+    fn block_iter (&self) -> BlockIterator {
+        BlockIterator{ blocknumber: 0, file: self }
+    }
 }
 
 impl DBFile for KeyFile {
@@ -65,7 +69,9 @@ impl DBFile for KeyFile {
     fn len(&mut self) -> Result<Offset, BCSError> {
         self.async_file.len()
     }
+}
 
+impl BlockFile for KeyFile {
     fn read_block(&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         self.async_file.read_block(offset)
     }

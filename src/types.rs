@@ -19,6 +19,7 @@
 //!
 
 use error::BCSError;
+use block::BLOCK_SIZE;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 pub struct Offset(usize);
@@ -53,6 +54,18 @@ impl Offset {
 
         let bytes: [u8; 8] = unsafe { transmute(self.0.to_be()) };
         into.copy_from_slice(&bytes[2 .. 8]);
+    }
+
+    pub fn this_block(&self) -> Offset {
+        Offset::new((self.0/BLOCK_SIZE)*BLOCK_SIZE).unwrap()
+    }
+
+    pub fn next_block(&self) -> Offset {
+        Offset::new((self.0/BLOCK_SIZE + 1)*BLOCK_SIZE).expect("db size limit reached")
+    }
+
+    pub fn block_offset(&self) -> usize {
+        self.0 - (self.0/BLOCK_SIZE)*BLOCK_SIZE
     }
 }
 
