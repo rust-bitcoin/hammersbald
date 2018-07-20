@@ -25,6 +25,7 @@ use asyncfile::AsyncFile;
 use logfile::LogFile;
 use blockdb::{BlockDBFactory, BlockDB};
 use keyfile::KeyFile;
+use datafile::DataFile;
 
 use std::io::Read;
 use std::io::Write;
@@ -50,7 +51,7 @@ impl InMemory {
 impl BlockDBFactory for InMemory {
     fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
         let table = KeyFile::new(Box::new(InMemory::new(false)));
-        let data = AsyncFile::new(Box::new(InMemory::new(true)));
+        let data = DataFile::new(Box::new(InMemory::new(true)));
         let log = LogFile::new(Box::new(InMemory::new(true)));
 
         BlockDB::new(table, data, log)

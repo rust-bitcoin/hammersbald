@@ -24,6 +24,7 @@ use blockdb::RW;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
 use keyfile::KeyFile;
+use datafile::DataFile;
 use blockdb::{BlockDBFactory, BlockDB};
 
 
@@ -53,7 +54,7 @@ impl BlockDBFactory for InFile {
         let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
 
         let table = KeyFile::new(Box::new(InFile::new(table_file)));
-        let data = AsyncFile::new(Box::new(InFile::new(data_file)));
+        let data = DataFile::new(Box::new(InFile::new(data_file)));
         let log = LogFile::new(Box::new(InFile::new(log_file)));
 
         BlockDB::new(table, data, log)

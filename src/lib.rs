@@ -33,6 +33,7 @@ mod infile;
 mod asyncfile;
 mod logfile;
 mod keyfile;
+mod datafile;
 mod blockdb;
 mod cache;
 pub mod error;
