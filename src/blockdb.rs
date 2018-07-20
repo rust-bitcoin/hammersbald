@@ -173,6 +173,7 @@ impl<'file> Iterator for BlockIterator<'file> {
         if self.blocknumber < (1 << 47) / BLOCK_SIZE {
             let offset = Offset::new(self.blocknumber*BLOCK_SIZE).unwrap();
             if let Ok(block) = self.file.read_block(offset) {
+                self.blocknumber += 1;
                 return Some(block);
             }
         }
