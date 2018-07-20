@@ -56,7 +56,7 @@ impl LogFile {
     }
 
     fn block_iter (&self) -> BlockIterator {
-        BlockIterator{ blocknumber: 0, file: self }
+        BlockIterator::new(self)
     }
 }
 

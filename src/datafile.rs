@@ -45,7 +45,11 @@ impl DataFile {
     }
 
     fn block_iter (&self) -> BlockIterator {
-        BlockIterator{ blocknumber: 0, file: self }
+        BlockIterator::new(self)
+    }
+
+    fn data_iter (&self) -> DataIterator {
+        DataIterator::new(self.block_iter())
     }
 }
 
@@ -91,14 +95,29 @@ pub struct DataEntry {
 }
 
 pub struct DataIterator<'file> {
-    offset: Offset,
-    file: &'file DataFile
+    block_iterator: BlockIterator<'file>,
+    current: Option<Arc<Block>>,
+    pos: usize
+}
+
+impl<'file> DataIterator<'file> {
+    pub fn new (block_iterator: BlockIterator<'file>) -> DataIterator {
+        DataIterator{block_iterator, pos: 0, current: None}
+    }
 }
 
 impl<'file> Iterator for DataIterator<'file> {
     type Item = DataEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unimplemented!()
+        if self.current.is_none() {
+            self.current = self.block_iterator.next();
+            self.pos = 2;
+        }
+        if self.current.is_none() {
+            return None;
+        }
+        // TODO
+        None
     }
 }

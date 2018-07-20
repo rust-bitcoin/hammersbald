@@ -162,8 +162,14 @@ impl BlockDB {
 }
 
 pub struct BlockIterator<'file> {
-    pub blocknumber: usize,
-    pub file: &'file BlockFile
+    blocknumber: usize,
+    file: &'file BlockFile
+}
+
+impl<'file> BlockIterator<'file> {
+    pub fn new (file: &'file BlockFile) -> BlockIterator {
+        BlockIterator{blocknumber: 0, file}
+    }
 }
 
 impl<'file> Iterator for BlockIterator<'file> {
