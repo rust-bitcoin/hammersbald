@@ -21,6 +21,7 @@
 use block::{Block, BLOCK_SIZE};
 use error::BCSError;
 use types::Offset;
+use cache::Cache;
 
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex, RwLock, Condvar};
@@ -30,8 +31,6 @@ use std::cell::Cell;
 
 // background writer will loop with this delay
 const WRITE_DELAY_MS: u32 = 1000;
-// read cache size
-const READ_CACHE_BLOCKS: usize = 100;
 
 pub trait RW : Read + Write + Seek + Send {
     fn len (&mut self) -> Result<usize, BCSError>;
@@ -60,35 +59,6 @@ impl Inner {
             write_cache: Mutex::new(VecDeque::new()),
             flushed: Condvar::new(),
             run: Mutex::new(Cell::new(true))
-        }
-    }
-}
-
-#[derive(Default)]
-struct Cache {
-    map: HashMap<Offset, Arc<Block>>,
-    list: VecDeque<Arc<Block>>
-}
-
-impl Cache {
-    fn put (&mut self, block: Arc<Block>) {
-        self.map.insert(block.offset, block.clone());
-        self.list.push_back(block);
-        if self.list.len () > READ_CACHE_BLOCKS {
-            let remove = self.list.pop_front().unwrap();
-            self.map.remove(&remove.offset);
-        }
-    }
-
-    fn clear (&mut self) {
-        self.map.clear();
-        self.list.clear();
-    }
-
-    fn get(&self, offset: Offset) -> Option<Arc<Block>> {
-        match self.map.get(&offset) {
-            Some(b) => Some(b.clone()),
-            None => None
         }
     }
 }

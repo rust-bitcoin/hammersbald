@@ -32,5 +32,6 @@ mod inmemory;
 mod infile;
 mod blockpool;
 mod blockdb;
+mod cache;
 pub mod error;
 pub mod blockchainstore;
