@@ -20,6 +20,7 @@ use block::{Block, BLOCK_SIZE};
 use types::Offset;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
+use keyfile::KeyFile;
 use error::BCSError;
 
 use std::sync::Arc;
@@ -45,13 +46,13 @@ pub trait DBFile {
 
 /// The database block layer
 pub struct BlockDB {
-    table: AsyncFile,
+    table: KeyFile,
     data: AsyncFile,
     log: LogFile
 }
 
 impl BlockDB {
-    pub fn new (mut table: AsyncFile, mut data: AsyncFile, mut log: LogFile) -> Result<BlockDB, BCSError> {
+    pub fn new (mut table: KeyFile, mut data: AsyncFile, mut log: LogFile) -> Result<BlockDB, BCSError> {
         BlockDB::check(&mut table, &[0xBC, 0xDB])?;
         BlockDB::check(&mut data, &[0xBC, 0xDA])?;
         BlockDB::check(&mut log, &[0xBC, 0x00])?;
