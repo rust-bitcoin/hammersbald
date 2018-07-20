@@ -37,8 +37,9 @@ pub struct Cache {
 impl Cache {
     pub fn put (&mut self, block: Arc<Block>) {
         if self.list.len () >= READ_CACHE_BLOCKS {
-            let remove = self.list.pop_front().unwrap();
-            self.map.remove(&remove.offset);
+            if let Some(old) = self.list.pop_front() {
+                self.map.remove(&old.offset);
+            }
         }
         if self.map.insert(block.offset, block.clone()).is_none() {
             self.list.push_back(block);
