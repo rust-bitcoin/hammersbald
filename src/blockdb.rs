@@ -18,24 +18,40 @@
 //!
 use block::{Block, BLOCK_SIZE};
 use types::Offset;
-use blockpool::BlockPool;
+use asyncfile::AsyncFile;
+use logfile::LogFile;
 use error::BCSError;
 
 use std::sync::Arc;
+use std::io::{Read,Write,Seek};
 
 pub trait BlockDBFactory {
     fn new_blockdb (name: &str) -> Result<BlockDB, BCSError>;
 }
 
+pub trait RW : Read + Write + Seek + Send {
+    fn len (&mut self) -> Result<usize, BCSError>;
+    fn truncate(&mut self, new_len: usize) -> Result<(), BCSError>;
+    fn sync (&self) -> Result<(), BCSError>;
+}
+
+pub trait DBFile {
+    fn flush(&mut self) -> Result<(), BCSError>;
+    fn sync (&mut self) -> Result<(), BCSError>;
+    fn truncate(&mut self, offset: Offset) -> Result<(), BCSError>;
+    fn len(&mut self) -> Result<Offset, BCSError>;
+    fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError>;
+}
+
 /// The database block layer
 pub struct BlockDB {
-    table: BlockPool,
-    data: BlockPool,
-    log: BlockPool
+    table: AsyncFile,
+    data: AsyncFile,
+    log: LogFile
 }
 
 impl BlockDB {
-    pub fn new (mut table: BlockPool, mut data: BlockPool, mut log: BlockPool) -> Result<BlockDB, BCSError> {
+    pub fn new (mut table: AsyncFile, mut data: AsyncFile, mut log: LogFile) -> Result<BlockDB, BCSError> {
         BlockDB::check(&mut table, &[0xBC, 0xDB])?;
         BlockDB::check(&mut data, &[0xBC, 0xDA])?;
         BlockDB::check(&mut log, &[0xBC, 0x00])?;
@@ -45,7 +61,7 @@ impl BlockDB {
         Ok(blockdb)
     }
 
-    fn check(file: &mut BlockPool, magic: &[u8]) -> Result<(), BCSError> {
+    fn check(file: &mut DBFile, magic: &[u8]) -> Result<(), BCSError> {
         if file.len()?.as_usize() > 0 {
             let offset = Offset::new(0)?;
             let first = file.read_block(offset)?;
@@ -90,6 +106,7 @@ impl BlockDB {
         self.table.flush()?;
         self.table.sync()?;
         self.log.truncate(Offset::new(0)?)?;
+        self.log.reset();
 
         let data_len = self.data.len()?;
         let table_len = self.table.len()?;
@@ -101,21 +118,22 @@ impl BlockDB {
         table_len.serialize(&mut size);
         first.append(&size)?;
 
-        self.log.append_block(Arc::new(first));
+
+        self.log.append_block(Arc::new(first))?;
         self.log.sync()?;
+
         Ok(())
     }
 
     pub fn shutdown (&mut self) {
         self.data.shutdown();
         self.table.shutdown();
-        self.log.shutdown();
     }
 
     pub fn write_table_block(&mut self, block: Block) -> Result<(), BCSError> {
         let br = Arc::new(block);
         let prev = self.table.read_block(br.offset)?;
-        self.log.append_block(prev);
+        self.log.append_block(prev)?;
         self.log.flush()?;
         self.log.sync()?;
         self.table.write_block(br);

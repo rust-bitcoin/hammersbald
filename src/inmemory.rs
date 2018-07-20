@@ -20,7 +20,9 @@
 
 use types::Offset;
 use error::BCSError;
-use blockpool::{RW, BlockPool};
+use blockdb::RW;
+use asyncfile::AsyncFile;
+use logfile::LogFile;
 use blockdb::{BlockDBFactory, BlockDB};
 
 use std::io::Read;
@@ -46,9 +48,9 @@ impl InMemory {
 
 impl BlockDBFactory for InMemory {
     fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
-        let table = BlockPool::new(Box::new(InMemory::new(false)));
-        let data = BlockPool::new(Box::new(InMemory::new(true)));
-        let log = BlockPool::new(Box::new(InMemory::new(true)));
+        let table = AsyncFile::new(Box::new(InMemory::new(false)));
+        let data = AsyncFile::new(Box::new(InMemory::new(true)));
+        let log = LogFile::new(Box::new(InMemory::new(true)));
 
         BlockDB::new(table, data, log)
     }

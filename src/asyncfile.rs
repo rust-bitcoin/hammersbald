@@ -14,10 +14,12 @@
 // limitations under the License.
 //
 //!
-//! # A pool of blocks of a single file with its own working thread
+//! # A single file with its own working thread
 //! Buffers IO and allows highly concurrent read and write through the API
 //! Actual read and write operations are performed in a dedicated background thread.
 
+
+use blockdb::{DBFile,RW};
 use block::{Block, BLOCK_SIZE};
 use error::BCSError;
 use types::Offset;
@@ -32,14 +34,8 @@ use std::cell::Cell;
 // background writer will loop with this delay
 const WRITE_DELAY_MS: u32 = 1000;
 
-pub trait RW : Read + Write + Seek + Send {
-    fn len (&mut self) -> Result<usize, BCSError>;
-    fn truncate(&mut self, new_len: usize) -> Result<(), BCSError>;
-    fn sync (&self) -> Result<(), BCSError>;
-}
-
 /// The buffer pool
-pub struct BlockPool {
+pub struct AsyncFile {
     inner: Arc<Inner>
 }
 
@@ -63,15 +59,15 @@ impl Inner {
     }
 }
 
-impl BlockPool {
-    pub fn new (rw: Box<RW>) -> BlockPool {
+impl AsyncFile {
+    pub fn new(rw: Box<RW>) -> AsyncFile {
         let inner = Arc::new(Inner::new(rw));
         let inner2 = inner.clone();
-        thread::spawn(move || { BlockPool::background(inner2)});
-        BlockPool {inner: inner}
+        thread::spawn(move || { AsyncFile::background(inner2) });
+        AsyncFile { inner: inner }
     }
 
-    fn background (inner: Arc<Inner>) {
+    fn background(inner: Arc<Inner>) {
         let mut run = true;
         while run {
             thread::sleep_ms(WRITE_DELAY_MS);
@@ -95,7 +91,25 @@ impl BlockPool {
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), BCSError> {
+    pub fn shutdown (&mut self) {
+        let run = self.inner.run.lock().unwrap();
+        run.set(false);
+    }
+
+    pub fn write_block(&self, block: Arc<Block>) {
+        self.inner.write_cache.lock().unwrap().push_back((false, block.clone()));
+        self.inner.read_cache.write().unwrap().put(block);
+    }
+
+    pub fn append_block (&self, block: Arc<Block>) {
+        self.inner.write_cache.lock().unwrap().push_back((true, block.clone()));
+        self.inner.read_cache.write().unwrap().put(block);
+    }
+}
+
+impl DBFile for AsyncFile {
+
+    fn flush(&mut self) -> Result<(), BCSError> {
         let mut write_cache = self.inner.write_cache.lock().unwrap();
         while !write_cache.is_empty() {
             write_cache = self.inner.flushed.wait(write_cache).unwrap();
@@ -103,30 +117,25 @@ impl BlockPool {
         Ok(())
     }
 
-    pub fn sync (&mut self) -> Result<(), BCSError> {
+    fn sync (&mut self) -> Result<(), BCSError> {
         let rw = self.inner.rw.lock().unwrap();
         rw.sync()
     }
 
-    pub fn shutdown (&mut self) {
-        let run = self.inner.run.lock().unwrap();
-        run.set(false);
-    }
-
-    pub fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
+    fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
         self.inner.read_cache.write().unwrap().clear();
         self.flush()?;
         let mut rw = self.inner.rw.lock().unwrap();
         rw.truncate(offset.as_usize())
     }
 
-    pub fn len(&mut self) -> Result<Offset, BCSError> {
+    fn len(&mut self) -> Result<Offset, BCSError> {
         self.flush()?;
         let mut rw = self.inner.rw.lock().unwrap();
         Offset::new(rw.len()?)
     }
 
-    pub fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
+    fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         if let Some(block) = self.inner.read_cache.read().unwrap().get(offset) {
             return Ok(block);
         }
@@ -136,14 +145,5 @@ impl BlockPool {
         let block = Arc::new(Block::from_buf(buffer)?);
         read_cache.put(block.clone());
         Ok(block)
-    }
-
-    pub fn write_block(&self, block: Arc<Block>) {
-        self.inner.write_cache.lock().unwrap().push_back((false, block.clone()));
-        self.inner.read_cache.write().unwrap().put(block);
-    }
-
-    pub fn append_block (&self, block: Arc<Block>) {
-        self.inner.write_cache.lock().unwrap().push_back((true, block));
     }
 }
