@@ -21,7 +21,7 @@
 use asyncfile::AsyncFile;
 use logfile::LogFile;
 use datafile::DataFile;
-use db::{RW, DBFile, PageIterator, PageFile, Key};
+use bcdb::{RW, DBFile, PageIterator, PageFile, Key};
 use page::Page;
 use error::BCSError;
 use types::Offset;

@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 //!
-//! # Three paged files that together implement the db
+//! # The blockchain db
 //!
 use page::{Page, PAGE_SIZE};
 use types::Offset;
@@ -28,8 +28,8 @@ use std::io::{Read,Write,Seek};
 
 pub type Key = [u8; 32];
 
-pub trait PageDBFactory {
-    fn new_pagedb (name: &str) -> Result<PageDB, BCSError>;
+pub trait BCDBFactory {
+    fn new_db (name: &str) -> Result<BCDB, BCSError>;
 }
 
 pub trait RW : Read + Write + Seek + Send {
@@ -50,20 +50,20 @@ pub trait PageFile {
 }
 
 
-/// The database page layer
-pub struct PageDB {
+/// The blockchain db
+pub struct BCDB {
     table: KeyFile,
     data: DataFile,
     log: Arc<Mutex<LogFile>>
 }
 
-impl PageDB {
-    pub fn new (mut table: KeyFile, mut data: DataFile) -> Result<PageDB, BCSError> {
+impl BCDB {
+    pub fn new (mut table: KeyFile, mut data: DataFile) -> Result<BCDB, BCSError> {
         let log = table.log_file();
-        PageDB::check(&mut table, &[0xBC, 0xDB])?;
-        PageDB::check(&mut data, &[0xBC, 0xDA])?;
-        PageDB::check_log(log.clone(), &[0xBC, 0x00])?;
-        let mut pagedb = PageDB {table, data, log};
+        BCDB::check(&mut table, &[0xBC, 0xDB])?;
+        BCDB::check(&mut data, &[0xBC, 0xDA])?;
+        BCDB::check_log(log.clone(), &[0xBC, 0x00])?;
+        let mut pagedb = BCDB {table, data, log};
         pagedb.recover()?;
         pagedb.batch()?;
         Ok(pagedb)
@@ -207,7 +207,7 @@ mod test {
     use super::*;
     #[test]
     fn test () {
-        let mut pagedb = InMemory::new_pagedb("").unwrap();
-        pagedb.shutdown();
+        let mut db = InMemory::new_db("").unwrap();
+        db.shutdown();
     }
 }

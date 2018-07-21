@@ -34,6 +34,6 @@ mod asyncfile;
 mod logfile;
 mod keyfile;
 mod datafile;
-mod db;
+mod bcdb;
 mod cache;
 pub mod error;

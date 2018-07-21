@@ -19,7 +19,7 @@
 //! Write operations are performed in a dedicated background thread.
 
 
-use db::{DBFile, RW, PageFile};
+use bcdb::{DBFile, RW, PageFile};
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;

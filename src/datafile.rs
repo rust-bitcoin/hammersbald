@@ -19,7 +19,7 @@
 //!
 
 use asyncfile::AsyncFile;
-use db::{RW, DBFile, PageIterator, PageFile};
+use bcdb::{RW, DBFile, PageIterator, PageFile};
 use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};

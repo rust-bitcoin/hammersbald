@@ -19,9 +19,9 @@
 //! Implements in-memory Read and Write for tests
 
 use error::BCSError;
-use db::RW;
+use bcdb::RW;
 use logfile::LogFile;
-use db::{PageDBFactory, PageDB};
+use bcdb::{BCDBFactory, BCDB};
 use keyfile::KeyFile;
 use datafile::DataFile;
 
@@ -47,13 +47,13 @@ impl InMemory {
     }
 }
 
-impl PageDBFactory for InMemory {
-    fn new_pagedb (_name: &str) -> Result<PageDB, BCSError> {
+impl BCDBFactory for InMemory {
+    fn new_db (_name: &str) -> Result<BCDB, BCSError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = KeyFile::new(Box::new(InMemory::new(false)), log);
         let data = DataFile::new(Box::new(InMemory::new(true)));
 
-        PageDB::new(table, data)
+        BCDB::new(table, data)
     }
 }
 

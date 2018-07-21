@@ -19,11 +19,11 @@
 //! Implements persistent store
 
 use error::BCSError;
-use db::RW;
+use bcdb::RW;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
-use db::{PageDBFactory, PageDB};
+use bcdb::{BCDBFactory, BCDB};
 
 
 use std::io::Read;
@@ -45,8 +45,8 @@ impl InFile {
     }
 }
 
-impl PageDBFactory for InFile {
-    fn new_pagedb (name: &str) -> Result<PageDB, BCSError> {
+impl BCDBFactory for InFile {
+    fn new_db (name: &str) -> Result<BCDB, BCSError> {
         let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.to_owned() + ".tbl")?;
         let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".dat")?;
         let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
@@ -55,7 +55,7 @@ impl PageDBFactory for InFile {
         let table = KeyFile::new(Box::new(InFile::new(table_file)), log);
         let data = DataFile::new(Box::new(InFile::new(data_file)));
 
-        PageDB::new(table, data)
+        BCDB::new(table, data)
     }
 }
 
