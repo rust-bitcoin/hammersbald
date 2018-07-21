@@ -136,12 +136,12 @@ impl PageDB {
         log.reset();
 
         let mut first = Page::new(Offset::new(0)?);
-        first.append(&[0xBC, 0x00])?;
+        first.write(0, &[0xBC, 0x00])?;
         let mut size = [0u8; 6];
         data_len.serialize(&mut size);
-        first.append(&size)?;
+        first.write(2, &size)?;
         table_len.serialize(&mut size);
-        first.append(&size)?;
+        first.write(8, &size)?;
 
 
         log.append_page(Arc::new(first))?;

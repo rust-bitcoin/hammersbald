@@ -92,7 +92,7 @@ impl PageFile for LogFile {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let mut buffer = [0u8; PAGE_SIZE];
         self.rw.lock().unwrap().read(&mut buffer)?;
-        let page = Arc::new(Page::from_buf(buffer)?);
+        let page = Arc::new(Page::from_buf(buffer));
         Ok(page)
     }
 }

@@ -54,15 +54,13 @@ Numbers stored in big endian.
 ### Page
 
 The page is the unit of read and expansion for the files. A page consists of
-a payload and a used length less or equal to 4088 
+a payload and a used length less or equal to 4090 
 
 <pre>
 +------------------------------------+
 |    | payload                       |
 +----+-------------------------------+
 |u48 | page  offset                  |
-+----+-------------------------------+
-|u16 | used length                   |
 +----+-------------------------------+
 </pre>
 

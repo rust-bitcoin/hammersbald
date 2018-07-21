@@ -216,7 +216,7 @@ mod test {
         assert!(data.page_iter().next().is_none());
         assert!(data.data_iter().next().is_none());
         let mut page = Page::new(Offset::new(0).unwrap());
-        page.append(&[0xBC, 0xDA]).unwrap();
+        page.write(0,&[0xBC, 0xDA]).unwrap();
         data.append_page(Arc::new(page));
 
         data.flush().unwrap();

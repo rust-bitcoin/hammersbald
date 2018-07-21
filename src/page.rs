@@ -25,8 +25,6 @@
 //! +----+-------------------------------+
 //! |u48 | block offset                  |
 //! +----+-------------------------------+
-//! |u16 | used length                   |
-//! +----+-------------------------------+
 //! </pre>
 //!
 
@@ -36,44 +34,35 @@ use std::mem::transmute;
 use std::cmp::min;
 
 pub const PAGE_SIZE: usize = 4096;
-pub const PAYLOAD_MAX: usize = 4088;
+pub const PAYLOAD_MAX: usize = 4090;
 
 /// A page of the persistent files
 #[derive(Clone)]
 pub struct Page {
     pub payload: [u8; PAYLOAD_MAX],
-    pub offset: Offset,
-    pub pos: usize
+    pub offset: Offset
 }
 
 impl Page {
     /// create a new empty page to be appended at given offset
     pub fn new (offset: Offset) -> Page {
-        Page {payload: [0u8; PAYLOAD_MAX], offset, pos: 0}
+        Page {payload: [0u8; PAYLOAD_MAX], offset}
     }
 
     /// create a Page from read buffer
-    pub fn from_buf (buf: [u8; PAGE_SIZE]) -> Result<Page, BCSError> {
+    pub fn from_buf (buf: [u8; PAGE_SIZE]) -> Page {
         let mut payload = [0u8; PAYLOAD_MAX];
         payload.copy_from_slice(&buf[0..PAYLOAD_MAX]);
-        let mut stored_used = [0u8;2];
-        stored_used[..].copy_from_slice (&buf[PAYLOAD_MAX+6 .. PAYLOAD_MAX+8]);
-        let used_be :u16 = unsafe {transmute(stored_used)};
-        let used = u16::from_be(used_be) as usize;
-        if used > PAYLOAD_MAX {
-            return Err(BCSError::DoesNotFit);
-        }
-        Ok(Page {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap(), pos: used })
+        Page {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap() }
     }
 
     /// append some data
     /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn append (&mut self, data: & [u8]) -> Result<(), BCSError> {
-        if self.pos + data.len() > PAYLOAD_MAX {
+    pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCSError> {
+        if pos + data.len() > PAYLOAD_MAX {
             return Err (BCSError::DoesNotFit);
         }
-        self.payload [self.pos .. self.pos + data.len()].copy_from_slice(&data[..]);
-        self.pos += data.len();
+        self.payload [pos .. pos + data.len()].copy_from_slice(&data[..]);
         Ok(())
     }
 
@@ -91,11 +80,8 @@ impl Page {
     /// finish a page after appends to write out
     pub fn finish (&self) -> [u8; PAGE_SIZE] {
         let mut page = [0u8; PAGE_SIZE];
-        page[0 .. self.pos].copy_from_slice (&self.payload[0 .. self.pos]);
-        let used_bytes: [u8; 2] = unsafe { transmute((self.pos as u16).to_be()) };
-        page[PAGE_SIZE - 2 ..PAGE_SIZE].copy_from_slice(&used_bytes[..]);
-        self.offset.serialize(&mut page[PAGE_SIZE - 8 .. PAGE_SIZE - 2]);
-
+        page[0 .. PAYLOAD_MAX].copy_from_slice (&self.payload[..]);
+        self.offset.serialize(&mut page[PAYLOAD_MAX ..]);
         page
     }
 }
@@ -109,29 +95,17 @@ mod test {
     fn form_test () {
         let mut page = Page::new(Offset::new(4711).unwrap());
         let payload: &[u8] = "hello world".as_bytes();
-        page.append(payload).unwrap();
+        page.write(0,payload).unwrap();
         let result = page.finish();
 
         let mut check = [0u8; PAGE_SIZE];
         check[0 .. payload.len()].copy_from_slice(payload);
-        check[PAGE_SIZE -1] = payload.len() as u8;
-        check[PAGE_SIZE -3] = (4711 % 256) as u8;
-        check[PAGE_SIZE -4] = (4711 / 256) as u8;
+        check[PAGE_SIZE -1] = (4711 % 256) as u8;
+        check[PAGE_SIZE -2] = (4711 / 256) as u8;
         assert_eq!(hex::encode(&result[..]), hex::encode(&check[..]));
 
-        let page2 = Page::from_buf(check).unwrap();
-        assert_eq!(page.pos, page2.pos);
+        let page2 = Page::from_buf(check);
         assert_eq!(page.offset, page2.offset);
         assert_eq!(hex::encode(&page.payload[..]), hex::encode(&page2.payload[..]));
-    }
-
-    #[test]
-    fn append_test () {
-        let mut page = Page::new(Offset::new(4711).unwrap());
-        for _ in 0 .. 3 {
-            assert!(page.append(&[0u8; 1024]).is_ok());
-        }
-        let used = page.pos;
-        assert!(used == 3*1024);
     }
 }

@@ -68,7 +68,7 @@ impl Inner {
         let mut buffer = [0u8; PAGE_SIZE];
         let mut read_cache = self.read_cache.write().unwrap();
         self.rw.lock().unwrap().read(&mut buffer)?;
-        let page = Arc::new(Page::from_buf(buffer)?);
+        let page = Arc::new(Page::from_buf(buffer));
         read_cache.put(page.clone());
         Ok(page)
     }
