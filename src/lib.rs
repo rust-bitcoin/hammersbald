@@ -37,4 +37,3 @@ mod datafile;
 mod blockdb;
 mod cache;
 pub mod error;
-pub mod blockchainstore;
