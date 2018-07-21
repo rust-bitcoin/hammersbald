@@ -61,7 +61,7 @@ impl LogFile {
         self.appended.clear();
     }
 
-    fn page_iter (&self) -> PageIterator {
+    pub fn page_iter (&self) -> PageIterator {
         PageIterator::new(self)
     }
 }

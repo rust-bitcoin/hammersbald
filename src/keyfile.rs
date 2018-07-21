@@ -49,7 +49,7 @@ impl KeyFile {
         self.async_file.shutdown()
     }
 
-    fn page_iter (&self) -> PageIterator {
+    pub fn page_iter (&self) -> PageIterator {
         PageIterator::new(self)
     }
 }

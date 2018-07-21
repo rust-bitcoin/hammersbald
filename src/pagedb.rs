@@ -93,25 +93,25 @@ impl PageDB {
     fn recover(&mut self) -> Result<(), BCSError> {
         let mut log = self.log.lock().unwrap();
         if log.len()?.as_usize() > 0 {
-            let mut offset = Offset::new(0)?;
-            let first = log.read_page(offset)?;
+            {
+                let mut log_pages = log.page_iter();
+                if let Some(first) = log_pages.next() {
+                    let mut size = [0u8; 6];
 
-            let mut size = [0u8; 4];
+                    first.read(2, &mut size)?;
+                    let data_len = Offset::from_slice(&size)?;
+                    self.data.truncate(data_len)?;
 
-            first.read(2, &mut size)?;
-            let data_len = Offset::from_slice(&size)?;
-            self.data.truncate(data_len)?;
+                    first.read(8, &mut size)?;
+                    let table_len = Offset::from_slice(&size)?;
+                    self.table.truncate(table_len)?;
 
-            first.read(6, &mut size)?;
-            let table_len = Offset::from_slice(&size)?;
-            self.table.truncate(table_len)?;
-
-            offset = Offset::new(PAGE_SIZE)?;
-            while let Ok(page) = log.read_page(offset) {
-                if page.offset.as_usize() < table_len.as_usize() {
-                    self.table.write_page(page);
+                    for page in log_pages {
+                        if page.offset.as_usize() < table_len.as_usize() {
+                            self.table.write_page(page);
+                        }
+                    }
                 }
-                offset = Offset::new(offset.as_usize() + PAGE_SIZE)?;
             }
             log.truncate(Offset::new(0)?)?;
             log.sync()?;

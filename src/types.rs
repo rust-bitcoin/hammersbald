@@ -56,15 +56,15 @@ impl Offset {
         into.copy_from_slice(&bytes[2 .. 8]);
     }
 
-    pub fn this_block(&self) -> Offset {
+    pub fn this_page(&self) -> Offset {
         Offset::new((self.0/ PAGE_SIZE)* PAGE_SIZE).unwrap()
     }
 
-    pub fn next_block(&self) -> Offset {
+    pub fn next_page(&self) -> Offset {
         Offset::new((self.0/ PAGE_SIZE + 1)* PAGE_SIZE).expect("db size limit reached")
     }
 
-    pub fn block_offset(&self) -> usize {
+    pub fn in_page_pos(&self) -> usize {
         self.0 - (self.0/ PAGE_SIZE)* PAGE_SIZE
     }
 }
