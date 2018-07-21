@@ -56,7 +56,7 @@ impl LogFile {
     }
 
     pub fn page_iter (&self) -> PageIterator {
-        PageIterator::new(self)
+        PageIterator::new(self, 0)
     }
 }
 

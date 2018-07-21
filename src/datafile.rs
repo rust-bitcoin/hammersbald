@@ -46,12 +46,19 @@ impl DataFile {
         self.async_file.shutdown()
     }
 
-    fn page_iter (&self) -> PageIterator {
-        PageIterator::new(self)
+    fn page_iter (&self, pagenumber: usize) -> PageIterator {
+        PageIterator::new(self, pagenumber)
     }
 
     pub fn data_iter (&self) -> DataIterator {
-        DataIterator::new(self.page_iter())
+        DataIterator::new(self.page_iter(0))
+    }
+
+    pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
+        let page = self.read_page(offset.this_page())?;
+        let mut fetch_iterator = DataIterator::new_fetch(
+            PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
+        return Ok(fetch_iterator.next());
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
@@ -177,6 +184,10 @@ impl<'file> DataIterator<'file> {
         DataIterator{page_iterator, pos: 0, current: None}
     }
 
+    pub fn new_fetch (page_iterator: PageIterator<'file>, pos: usize, page: Arc<Page>) -> DataIterator {
+        DataIterator{page_iterator, pos, current: Some(page)}
+    }
+
     fn skip_padding(&mut self) -> Option<DataType> {
         loop {
             if let Some(ref mut current) = self.current {
@@ -256,19 +267,21 @@ mod test {
     fn test() {
         let mem = InMemory::new(true);
         let mut data = DataFile::new(Box::new(mem));
-        assert!(data.page_iter().next().is_none());
+        assert!(data.page_iter(0).next().is_none());
         assert!(data.data_iter().next().is_none());
         let entry = DataEntry::new_data("hello world!".as_bytes());
-        data.append(entry.clone()).unwrap();
-        let big_entry = DataEntry::new_data(vec!(1u8, 5000).as_slice());
-        data.append(big_entry.clone()).unwrap();
+        let hello_offset = data.append(entry.clone()).unwrap();
+        let big_entry = DataEntry::new_data(vec!(1u8; 5000).as_slice());
+        let big_offset = data.append(big_entry.clone()).unwrap();
         data.flush().unwrap();
         {
             let mut iter = data.data_iter();
-            assert_eq!(iter.next().unwrap(), entry);
-            assert_eq!(iter.next().unwrap(), big_entry);
+            assert_eq!(iter.next().unwrap(), entry.clone());
+            assert_eq!(iter.next().unwrap(), big_entry.clone());
             assert!(iter.next().is_none());
         }
+        assert_eq!(data.get(hello_offset).unwrap().unwrap(), entry);
+        assert_eq!(data.get(big_offset).unwrap().unwrap(), big_entry);
         data.sync().unwrap();
     }
 }

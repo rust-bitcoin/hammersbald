@@ -20,7 +20,7 @@ use page::{Page, PAGE_SIZE};
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
-use datafile::DataFile;
+use datafile::{DataFile, DataEntry};
 use error::BCSError;
 
 use std::sync::{Mutex,Arc};
@@ -169,6 +169,10 @@ impl PageDB {
     pub fn read_data_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         self.data.read_page(offset)
     }
+
+    pub fn append_data_entry (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
+        self.data.append(entry)
+    }
 }
 
 pub struct PageIterator<'file> {
@@ -177,8 +181,8 @@ pub struct PageIterator<'file> {
 }
 
 impl<'file> PageIterator<'file> {
-    pub fn new (file: &'file PageFile) -> PageIterator {
-        PageIterator{pagenumber: 0, file}
+    pub fn new (file: &'file PageFile, pagenumber: usize) -> PageIterator {
+        PageIterator{pagenumber, file}
     }
 }
 

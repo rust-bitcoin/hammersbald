@@ -64,6 +64,10 @@ impl Offset {
         Offset::new((self.0/ PAGE_SIZE + 1)* PAGE_SIZE)
     }
 
+    pub fn page_number(&self) -> usize {
+        self.0/PAGE_SIZE
+    }
+
     pub fn in_page_pos(&self) -> usize {
         self.0 - (self.0/ PAGE_SIZE)* PAGE_SIZE
     }

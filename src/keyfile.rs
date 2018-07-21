@@ -52,10 +52,6 @@ impl KeyFile {
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
-
-    pub fn page_iter (&self) -> PageIterator {
-        PageIterator::new(self)
-    }
 }
 
 impl DBFile for KeyFile {
