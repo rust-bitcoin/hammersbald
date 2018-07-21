@@ -130,11 +130,13 @@ impl<'file> DataIterator<'file> {
     fn skip_padding(&mut self) -> Option<DataType> {
         loop {
             if let Some(ref mut current) = self.current {
-                while self.pos < PAYLOAD_MAX &&
-                    DataType::from(current.payload[self.pos]) == DataType::Padding {
+                while self.pos < PAYLOAD_MAX {
+                    let data_type = DataType::from(current.payload[self.pos]);
                     self.pos += 1;
+                    if data_type != DataType::Padding {
+                        return Some(data_type);
+                    }
                 }
-                return Some (DataType::from(current.payload[self.pos]));
             }
             else {
                 return None;
