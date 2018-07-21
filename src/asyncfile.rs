@@ -85,6 +85,13 @@ impl AsyncFile {
         AsyncFile { inner: inner }
     }
 
+    pub fn log_file (&self) -> Option<Arc<Mutex<LogFile>>> {
+        if let Some (ref log_file) = self.inner.log_file {
+            return Some(log_file.clone());
+        }
+        None
+    }
+
     fn background(inner: Arc<Inner>) {
         let mut run = true;
         while run {

@@ -50,10 +50,10 @@ impl InMemory {
 impl PageDBFactory for InMemory {
     fn new_pagedb (_name: &str) -> Result<PageDB, BCSError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
-        let table = KeyFile::new(Box::new(InMemory::new(false)), log.clone());
+        let table = KeyFile::new(Box::new(InMemory::new(false)), log);
         let data = DataFile::new(Box::new(InMemory::new(true)));
 
-        PageDB::new(table, data, log)
+        PageDB::new(table, data)
     }
 }
 

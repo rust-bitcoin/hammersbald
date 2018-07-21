@@ -56,7 +56,8 @@ pub struct PageDB {
 }
 
 impl PageDB {
-    pub fn new (mut table: KeyFile, mut data: DataFile, log: Arc<Mutex<LogFile>>) -> Result<PageDB, BCSError> {
+    pub fn new (mut table: KeyFile, mut data: DataFile) -> Result<PageDB, BCSError> {
+        let log = table.log_file();
         PageDB::check(&mut table, &[0xBC, 0xDB])?;
         PageDB::check(&mut data, &[0xBC, 0xDA])?;
         PageDB::check_log(log.clone(), &[0xBC, 0x00])?;

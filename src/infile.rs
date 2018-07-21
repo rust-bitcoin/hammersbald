@@ -52,10 +52,10 @@ impl PageDBFactory for InFile {
         let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
 
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InFile::new(log_file)))));
-        let table = KeyFile::new(Box::new(InFile::new(table_file)), log.clone());
+        let table = KeyFile::new(Box::new(InFile::new(table_file)), log);
         let data = DataFile::new(Box::new(InFile::new(data_file)));
 
-        PageDB::new(table, data, log)
+        PageDB::new(table, data)
     }
 }
 

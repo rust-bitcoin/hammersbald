@@ -41,6 +41,10 @@ impl KeyFile {
         self.async_file.write_page(page)
     }
 
+    pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
+        self.async_file.log_file().unwrap()
+    }
+
     pub fn append_page (&self, page: Arc<Page>) {
         self.async_file.append_page(page)
     }
