@@ -43,12 +43,13 @@ impl LogFile {
         LogFile { rw: Mutex::new(rw), appended: HashSet::new() }
     }
 
-    pub fn append_block (&mut self, block: Arc<Block>) -> Result<(), BCSError> {
+    pub fn append_block (&mut self, block: Arc<Block>) -> Result<bool, BCSError> {
         if !self.appended.contains(&block.offset) {
             self.appended.insert(block.offset);
             self.rw.lock().unwrap().write(&block.finish())?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     pub fn reset (&mut self) {

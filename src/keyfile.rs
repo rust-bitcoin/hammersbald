@@ -19,12 +19,13 @@
 //!
 
 use asyncfile::AsyncFile;
+use logfile::LogFile;
 use blockdb::{RW,DBFile, BlockIterator, BlockFile};
 use block::Block;
 use error::BCSError;
 use types::Offset;
 
-use std::sync::Arc;
+use std::sync::{Mutex, Arc};
 
 /// The key file
 pub struct KeyFile {
@@ -32,8 +33,8 @@ pub struct KeyFile {
 }
 
 impl KeyFile {
-    pub fn new(rw: Box<RW>) -> KeyFile {
-        KeyFile{async_file: AsyncFile::new(rw)}
+    pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
+        KeyFile{async_file: AsyncFile::new(rw, Some(log_file))}
     }
 
     pub fn write_block(&self, block: Arc<Block>) {

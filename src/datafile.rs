@@ -33,7 +33,7 @@ pub struct DataFile {
 
 impl DataFile {
     pub fn new(rw: Box<RW>) -> DataFile {
-        DataFile{async_file: AsyncFile::new(rw)}
+        DataFile{async_file: AsyncFile::new(rw, None)}
     }
 
     pub fn append_block (&self, block: Arc<Block>) {
