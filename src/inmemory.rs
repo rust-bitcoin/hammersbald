@@ -24,6 +24,8 @@ use blockdb::RW;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
 use blockdb::{BlockDBFactory, BlockDB};
+use keyfile::KeyFile;
+use datafile::DataFile;
 
 use std::io::Read;
 use std::io::Write;
@@ -31,6 +33,7 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io;
 use std::cmp::min;
+use std::sync::{Mutex,Arc};
 
 /// in memory representation of a file
 pub struct InMemory {
@@ -48,9 +51,9 @@ impl InMemory {
 
 impl BlockDBFactory for InMemory {
     fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
-        let table = AsyncFile::new(Box::new(InMemory::new(false)));
-        let data = AsyncFile::new(Box::new(InMemory::new(true)));
-        let log = LogFile::new(Box::new(InMemory::new(true)));
+        let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
+        let table = KeyFile::new(Box::new(InMemory::new(false)), log.clone());
+        let data = DataFile::new(Box::new(InMemory::new(true)));
 
         BlockDB::new(table, data, log)
     }

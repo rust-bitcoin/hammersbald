@@ -19,11 +19,12 @@
 //! Actual read and write operations are performed in a dedicated background thread.
 
 
-use blockdb::{DBFile,RW};
+use blockdb::{DBFile,RW,BlockIterator,BlockFile};
 use block::{Block, BLOCK_SIZE};
 use error::BCSError;
 use types::Offset;
 use cache::Cache;
+use logfile::LogFile;
 
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex, RwLock, Condvar};
@@ -44,24 +45,38 @@ struct Inner {
     read_cache: RwLock<Cache>,
     write_cache: Mutex<VecDeque<(bool, Arc<Block>)>>,
     flushed: Condvar,
-    run: Mutex<Cell<bool>>
+    run: Mutex<Cell<bool>>,
+    log_file: Option<Arc<Mutex<LogFile>>>
 }
 
 impl Inner {
-    pub fn new (rw: Box<RW>) -> Inner {
+    pub fn new (rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> Inner {
         Inner{
             rw: Mutex::new(rw),
             read_cache: RwLock::new(Cache::default()),
             write_cache: Mutex::new(VecDeque::new()),
             flushed: Condvar::new(),
-            run: Mutex::new(Cell::new(true))
+            run: Mutex::new(Cell::new(true)),
+            log_file
         }
+    }
+
+    fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
+        if let Some(block) = self.read_cache.read().unwrap().get(offset) {
+            return Ok(block);
+        }
+        let mut buffer = [0u8; BLOCK_SIZE];
+        let mut read_cache = self.read_cache.write().unwrap();
+        self.rw.lock().unwrap().read(&mut buffer)?;
+        let block = Arc::new(Block::from_buf(buffer)?);
+        read_cache.put(block.clone());
+        Ok(block)
     }
 }
 
 impl AsyncFile {
-    pub fn new(rw: Box<RW>) -> AsyncFile {
-        let inner = Arc::new(Inner::new(rw));
+    pub fn new(rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> AsyncFile {
+        let inner = Arc::new(Inner::new(rw, log_file));
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
         AsyncFile { inner: inner }
@@ -73,17 +88,31 @@ impl AsyncFile {
             thread::sleep_ms(WRITE_DELAY_MS);
 
             let mut write_cache = inner.write_cache.lock().unwrap();
-            let wrote = !write_cache.is_empty();
-            while let Some((append, block)) = write_cache.pop_front() {
-                let mut rw = inner.rw.lock().unwrap();
-                if !append {
-                    let pos = block.offset.as_usize() as u64;
-                    rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
+            if !write_cache.is_empty() {
+
+                if let Some (ref log_file) = inner.log_file {
+                    let mut log = log_file.lock().unwrap();
+                    let mut log_write = false;
+                    for (append, block) in write_cache.iter() {
+                        if !append {
+                            let prev = inner.read_block(block.offset).unwrap();
+                            log_write |= log.append_block(prev).unwrap();
+                        }
+                    }
+                    if log_write {
+                        log.flush().unwrap();
+                        log.sync().unwrap();
+                    }
                 }
-                rw.write(&block.finish()).unwrap();
-            }
-            if wrote {
+
                 let mut rw = inner.rw.lock().unwrap();
+                while let Some((append, block)) = write_cache.pop_front() {
+                    if !append {
+                        let pos = block.offset.as_usize() as u64;
+                        rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
+                    }
+                    rw.write(&block.finish()).unwrap();
+                }
                 rw.flush().unwrap();
             }
             inner.flushed.notify_one();
@@ -108,7 +137,6 @@ impl AsyncFile {
 }
 
 impl DBFile for AsyncFile {
-
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut write_cache = self.inner.write_cache.lock().unwrap();
         while !write_cache.is_empty() {
@@ -117,7 +145,7 @@ impl DBFile for AsyncFile {
         Ok(())
     }
 
-    fn sync (&mut self) -> Result<(), BCSError> {
+    fn sync(&mut self) -> Result<(), BCSError> {
         let rw = self.inner.rw.lock().unwrap();
         rw.sync()
     }
@@ -134,16 +162,10 @@ impl DBFile for AsyncFile {
         let mut rw = self.inner.rw.lock().unwrap();
         Offset::new(rw.len()?)
     }
+}
 
+impl BlockFile for AsyncFile {
     fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
-        if let Some(block) = self.inner.read_cache.read().unwrap().get(offset) {
-            return Ok(block);
-        }
-        let mut buffer = [0u8; BLOCK_SIZE];
-        let mut read_cache = self.inner.read_cache.write().unwrap();
-        self.inner.rw.lock().unwrap().read(&mut buffer)?;
-        let block = Arc::new(Block::from_buf(buffer)?);
-        read_cache.put(block.clone());
-        Ok(block)
+        self.inner.read_block(offset)
     }
 }

@@ -23,6 +23,8 @@ use error::BCSError;
 use blockdb::RW;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
+use keyfile::KeyFile;
+use datafile::DataFile;
 use blockdb::{BlockDBFactory, BlockDB};
 
 
@@ -33,6 +35,7 @@ use std::io::SeekFrom;
 use std::io;
 use std::cmp::min;
 use std::fs::{File, OpenOptions};
+use std::sync::{Mutex,Arc};
 
 /// in file store
 pub struct InFile {
@@ -51,9 +54,9 @@ impl BlockDBFactory for InFile {
         let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".dat")?;
         let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
 
-        let table = AsyncFile::new(Box::new(InFile::new(table_file)));
-        let data = AsyncFile::new(Box::new(InFile::new(data_file)));
-        let log = LogFile::new(Box::new(InFile::new(log_file)));
+        let log = Arc::new(Mutex::new(LogFile::new(Box::new(InFile::new(log_file)))));
+        let table = KeyFile::new(Box::new(InFile::new(table_file)), log.clone());
+        let data = DataFile::new(Box::new(InFile::new(data_file)));
 
         BlockDB::new(table, data, log)
     }

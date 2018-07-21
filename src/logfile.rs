@@ -17,7 +17,7 @@
 //! # The log file
 //!
 
-use blockdb::{DBFile,RW};
+use blockdb::{DBFile,RW, BlockIterator,BlockFile};
 use block::{Block, BLOCK_SIZE};
 use error::BCSError;
 use types::Offset;
@@ -43,16 +43,21 @@ impl LogFile {
         LogFile { rw: Mutex::new(rw), appended: HashSet::new() }
     }
 
-    pub fn append_block (&mut self, block: Arc<Block>) -> Result<(), BCSError> {
+    pub fn append_block (&mut self, block: Arc<Block>) -> Result<bool, BCSError> {
         if !self.appended.contains(&block.offset) {
             self.appended.insert(block.offset);
             self.rw.lock().unwrap().write(&block.finish())?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     pub fn reset (&mut self) {
         self.appended.clear();
+    }
+
+    fn block_iter (&self) -> BlockIterator {
+        BlockIterator::new(self)
     }
 }
 
@@ -61,7 +66,7 @@ impl DBFile for LogFile {
         Ok(self.rw.lock().unwrap().flush()?)
     }
 
-    fn sync (&mut self) -> Result<(), BCSError> {
+    fn sync(&mut self) -> Result<(), BCSError> {
         let rw = self.rw.lock().unwrap();
         rw.sync()
     }
@@ -76,7 +81,9 @@ impl DBFile for LogFile {
         let mut rw = self.rw.lock().unwrap();
         Offset::new(rw.len()?)
     }
+}
 
+impl BlockFile for LogFile {
     fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
         let mut buffer = [0u8; BLOCK_SIZE];
         self.rw.lock().unwrap().read(&mut buffer)?;
