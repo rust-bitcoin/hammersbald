@@ -156,18 +156,12 @@ impl PageDB {
         self.table.shutdown();
     }
 
-    pub fn write_table_page(&mut self, page: Page) -> Result<(), BCSError> {
-        let br = Arc::new(page);
-        self.table.write_page(br);
-        Ok(())
+    pub fn write_table_page(&mut self, page: Arc<Page>) {
+        self.table.write_page(page)
     }
 
     pub fn read_table_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         self.table.read_page(offset)
-    }
-
-    pub fn read_data_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        self.data.read_page(offset)
     }
 
     pub fn append_data_entry (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
