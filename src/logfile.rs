@@ -29,9 +29,6 @@ use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 
-// background writer will loop with this delay
-const WRITE_DELAY_MS: u32 = 1000;
-
 /// The buffer pool
 pub struct LogFile {
     rw: Mutex<Box<RW>>,
