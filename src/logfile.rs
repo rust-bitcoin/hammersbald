@@ -15,6 +15,9 @@
 //
 //!
 //! # The log file
+//! A synchronous append writer of a log file. It maintains its own set of block offsets
+//! loged, so only the first pre-image will be stored within a batch. The batch should reset
+//! this set.
 //!
 
 use blockdb::{DBFile,RW, BlockIterator,BlockFile};
@@ -43,6 +46,7 @@ impl LogFile {
         LogFile { rw: Mutex::new(rw), appended: HashSet::new() }
     }
 
+    /// append a block if not yet logged in this batch. Returns false if the block was logged before.
     pub fn append_block (&mut self, block: Arc<Block>) -> Result<bool, BCSError> {
         if !self.appended.contains(&block.offset) {
             self.appended.insert(block.offset);
@@ -52,6 +56,7 @@ impl LogFile {
         Ok(false)
     }
 
+    /// empties the set of logged blocks
     pub fn reset (&mut self) {
         self.appended.clear();
     }

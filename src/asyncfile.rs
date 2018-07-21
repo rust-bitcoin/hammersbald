@@ -16,7 +16,7 @@
 //!
 //! # A single file with its own working thread
 //! Buffers IO and allows highly concurrent read and write through the API
-//! Actual read and write operations are performed in a dedicated background thread.
+//! Write operations are performed in a dedicated background thread.
 
 
 use blockdb::{DBFile,RW,BlockIterator,BlockFile};

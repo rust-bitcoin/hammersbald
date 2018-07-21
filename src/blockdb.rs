@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 //!
-//! # Three block pools that together implement the db
+//! # Three files that together implement the db
 //!
 use block::{Block, BLOCK_SIZE};
 use types::Offset;

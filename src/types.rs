@@ -14,9 +14,9 @@
 // limitations under the License.
 //
 //!
-//! # Offset type
-//! an unsigned 48 bit integer used as file offset
-//!
+//! # Types used in db files
+//! Offset an unsigned 48 bit integer used as file offset
+//! U24 an unsigned 24 bit integer for data element sizes
 
 use error::BCSError;
 use block::BLOCK_SIZE;
