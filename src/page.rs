@@ -66,24 +66,26 @@ impl Page {
         Ok(Page {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap(), pos: used })
     }
 
-    /// append some data and return used length
-    /// will return Error::DoesNotFit if data does not fit in
-    pub fn append<'a> (&mut self, data: &'a [u8]) -> Result<(Offset, &'a [u8]), BCSError> {
-        let have = min(PAYLOAD_MAX - self.pos, data.len());
-        self.payload [self.pos .. self.pos + have].copy_from_slice(&data[0 .. have]);
-        self.pos += have;
-        Ok((Offset::new(self.offset.as_usize() + self.pos)?, &data[have..]))
+    /// append some data
+    /// will return Error::DoesNotFit if data does not fit into the page
+    pub fn append (&mut self, data: & [u8]) -> Result<(), BCSError> {
+        if self.pos + data.len() > PAYLOAD_MAX {
+            return Err (BCSError::DoesNotFit);
+        }
+        self.payload [self.pos .. self.pos + data.len()].copy_from_slice(&data[..]);
+        self.pos += data.len();
+        Ok(())
     }
 
-    /// read from a page starting from given pos
-    /// return the number of bytes successfully read into data
-    pub fn read(&self, pos: usize, data: &mut [u8]) -> Result<usize, BCSError> {
-        if pos > PAYLOAD_MAX {
-            return Ok(0)
+    /// read some data
+    /// will return Error::DoesNotFit if data does not fit into the page
+    pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCSError> {
+        if pos + data.len() > PAYLOAD_MAX {
+            return Err (BCSError::DoesNotFit);
         }
-        let have = min(PAYLOAD_MAX - pos, data.len());
-        data[0 .. have].copy_from_slice(&self.payload[pos.. pos + have]);
-        Ok(have)
+        let len = data.len();
+        data[..].copy_from_slice(&self.payload [pos .. pos + len]);
+        Ok(())
     }
 
     /// finish a page after appends to write out
@@ -131,12 +133,5 @@ mod test {
         }
         let used = page.pos;
         assert!(used == 3*1024);
-    }
-
-    #[test]
-    fn fit_test () {
-        let mut page = Page::new(Offset::new(4711).unwrap());
-        assert!(page.append(&[0u8;4000]).is_ok());
-        assert_eq!(page.append(&[0u8;100]).unwrap().1.len(), 4100 - PAYLOAD_MAX);
     }
 }

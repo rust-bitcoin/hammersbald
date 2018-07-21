@@ -72,7 +72,9 @@ impl PageDB {
         if file.len()?.as_usize() > 0 {
             let offset = Offset::new(0)?;
             let first = file.read_page(offset)?;
-            if &first.payload [0..2] != magic {
+            let mut m = [0u8;2];
+            first.read(0, &mut m)?;
+            if m != magic {
                 return Err(BCSError::BadMagic);
             }
         }
@@ -82,8 +84,10 @@ impl PageDB {
     fn check(file: &mut DBFile, magic: &[u8]) -> Result<(), BCSError> {
         if file.len()?.as_usize() > 0 {
             let offset = Offset::new(0)?;
+            let mut m = [0u8;2];
             let first = file.read_page(offset)?;
-            if &first.payload [0..2] != magic {
+            first.read(0, &mut m)?;
+            if m != magic {
                 return Err(BCSError::BadMagic);
             }
         }
