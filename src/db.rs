@@ -165,7 +165,7 @@ impl PageDB {
     }
 
     pub fn get(&self, key: Key) -> Result<Option<DataEntry>, BCSError> {
-        if let Some(offset) = self.table.get(key)? {
+        if let Some(offset) = self.table.get(key, &self.data)? {
             return self.data.get(offset);
         }
         Ok(None)

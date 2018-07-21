@@ -42,7 +42,7 @@ impl KeyFile {
         unimplemented!()
     }
 
-    pub fn get (&self, key: Key) -> Result<Option<Offset>, BCSError> {
+    pub fn get (&self, key: Key, spill: &DataFile) -> Result<Option<Offset>, BCSError> {
         unimplemented!()
     }
 
