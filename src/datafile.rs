@@ -42,15 +42,11 @@ impl DataFile {
             page: Page::new(offset) }
     }
 
-    pub fn append_page (&self, page: Arc<Page>) {
-        self.async_file.append_page(page)
-    }
-
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
 
-    pub fn page_iter (&self) -> PageIterator {
+    fn page_iter (&self) -> PageIterator {
         PageIterator::new(self)
     }
 
@@ -83,7 +79,7 @@ impl DataFile {
         let mut pos = self.append_pos.in_page_pos();
         while wrote < slice.len() {
             if pos == PAYLOAD_MAX {
-                self.append_page(Arc::new(self.page.clone()));
+                self.async_file.append_page(Arc::new(self.page.clone()));
                 self.append_pos = self.append_pos.next_page()?;
                 self.page = Page::new (self.append_pos);
                 pos = 0;
@@ -101,7 +97,7 @@ impl DataFile {
 impl DBFile for DataFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         if self.append_pos.in_page_pos() > 0 {
-            self.append_page(Arc::new(self.page.clone()));
+            self.async_file.append_page(Arc::new(self.page.clone()));
         }
         self.async_file.flush()
     }

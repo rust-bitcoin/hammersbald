@@ -19,7 +19,7 @@
 //! Write operations are performed in a dedicated background thread.
 
 
-use pagedb::{DBFile, RW, PageIterator, PageFile};
+use pagedb::{DBFile, RW, PageFile};
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
@@ -28,12 +28,13 @@ use logfile::LogFile;
 
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex, RwLock, Condvar};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::thread;
 use std::cell::Cell;
+use std::time::Duration;
 
 // background writer will loop with this delay
-const WRITE_DELAY_MS: u32 = 1000;
+const WRITE_DELAY_MS: u64 = 1000;
 
 /// The buffer pool
 pub struct AsyncFile {
@@ -67,7 +68,9 @@ impl Inner {
         }
         let mut buffer = [0u8; PAGE_SIZE];
         let mut read_cache = self.read_cache.write().unwrap();
-        self.rw.lock().unwrap().read(&mut buffer)?;
+        let mut rw = self.rw.lock().unwrap();
+        rw.seek(SeekFrom::Start(offset.as_usize() as u64))?;
+        rw.read(&mut buffer)?;
         let page = Arc::new(Page::from_buf(buffer));
         read_cache.put(page.clone());
         Ok(page)
@@ -85,7 +88,7 @@ impl AsyncFile {
     fn background(inner: Arc<Inner>) {
         let mut run = true;
         while run {
-            thread::sleep_ms(WRITE_DELAY_MS);
+            thread::sleep(Duration::from_millis(WRITE_DELAY_MS));
 
             let mut write_cache = inner.write_cache.lock().unwrap();
             if !write_cache.is_empty() {

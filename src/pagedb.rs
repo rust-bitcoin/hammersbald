@@ -18,7 +18,6 @@
 //!
 use page::{Page, PAGE_SIZE};
 use types::Offset;
-use asyncfile::AsyncFile;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
@@ -158,12 +157,6 @@ impl PageDB {
     pub fn write_table_page(&mut self, page: Page) -> Result<(), BCSError> {
         let br = Arc::new(page);
         self.table.write_page(br);
-        Ok(())
-    }
-
-    pub fn append_data_page(&self, page: Page) -> Result<(), BCSError> {
-        let br = Arc::new(page);
-        self.data.append_page(br);
         Ok(())
     }
 

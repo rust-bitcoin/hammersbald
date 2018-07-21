@@ -30,8 +30,6 @@
 
 use error::BCSError;
 use types::Offset;
-use std::mem::transmute;
-use std::cmp::min;
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAYLOAD_MAX: usize = 4090;

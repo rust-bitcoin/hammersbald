@@ -18,10 +18,8 @@
 //!
 //! Implements in-memory Read and Write for tests
 
-use types::Offset;
 use error::BCSError;
 use pagedb::RW;
-use asyncfile::AsyncFile;
 use logfile::LogFile;
 use pagedb::{PageDBFactory, PageDB};
 use keyfile::KeyFile;
@@ -50,7 +48,7 @@ impl InMemory {
 }
 
 impl PageDBFactory for InMemory {
-    fn new_pagedb (name: &str) -> Result<PageDB, BCSError> {
+    fn new_pagedb (_name: &str) -> Result<PageDB, BCSError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = KeyFile::new(Box::new(InMemory::new(false)), log.clone());
         let data = DataFile::new(Box::new(InMemory::new(true)));

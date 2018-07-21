@@ -18,10 +18,8 @@
 //!
 //! Implements persistent store
 
-use types::Offset;
 use error::BCSError;
 use pagedb::RW;
-use asyncfile::AsyncFile;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
@@ -33,7 +31,6 @@ use std::io::Write;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io;
-use std::cmp::min;
 use std::fs::{File, OpenOptions};
 use std::sync::{Mutex,Arc};
 

@@ -24,13 +24,10 @@ use pagedb::{DBFile, RW, PageIterator, PageFile};
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
-use cache::Cache;
 
 use std::io::{Read,Write,Seek,SeekFrom};
-use std::sync::{Arc, Mutex, RwLock, Condvar};
+use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use std::thread;
-use std::cell::Cell;
 
 // background writer will loop with this delay
 const WRITE_DELAY_MS: u32 = 1000;
@@ -91,7 +88,9 @@ impl DBFile for LogFile {
 impl PageFile for LogFile {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let mut buffer = [0u8; PAGE_SIZE];
-        self.rw.lock().unwrap().read(&mut buffer)?;
+        let mut rw = self.rw.lock().unwrap();
+        rw.seek(SeekFrom::Start(offset.as_usize() as u64))?;
+        rw.read(&mut buffer)?;
         let page = Arc::new(Page::from_buf(buffer));
         Ok(page)
     }
