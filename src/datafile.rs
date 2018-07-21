@@ -59,7 +59,7 @@ impl DataFile {
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
-        if self.page.offset.as_usize() == 0 {
+        if self.page.offset.as_usize() == 0 && self.append_pos.as_usize() == 0 {
             self.append_pos = self.len()?;
             self.page = Page::new(self.append_pos);
             if self.append_pos.as_usize() == 0 {
@@ -264,8 +264,15 @@ mod test {
         assert!(data.data_iter().next().is_none());
         let entry = DataEntry::new_data("hello world!".as_bytes());
         data.append(entry.clone()).unwrap();
+        let big_entry = DataEntry::new_data(vec!(1u8, 5000).as_slice());
+        data.append(big_entry.clone()).unwrap();
         data.flush().unwrap();
-        assert_eq!(data.data_iter().next().unwrap(), entry);
+        {
+            let mut iter = data.data_iter();
+            assert_eq!(iter.next().unwrap(), entry);
+            assert_eq!(iter.next().unwrap(), big_entry);
+            assert!(iter.next().is_none());
+        }
         data.sync().unwrap();
     }
 }
