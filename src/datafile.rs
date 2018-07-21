@@ -29,12 +29,17 @@ use std::cmp::min;
 
 /// The key file
 pub struct DataFile {
-    async_file: AsyncFile
+    async_file: AsyncFile,
+    append_pos: Offset,
+    page: Page
 }
 
 impl DataFile {
     pub fn new(rw: Box<RW>) -> DataFile {
-        DataFile{async_file: AsyncFile::new(rw, None)}
+        let offset = Offset::new(0).unwrap();
+        DataFile{async_file: AsyncFile::new(rw, None),
+            append_pos: offset,
+            page: Page::new(offset) }
     }
 
     pub fn append_page (&self, page: Arc<Page>) {
@@ -52,10 +57,52 @@ impl DataFile {
     pub fn data_iter (&self) -> DataIterator {
         DataIterator::new(self.page_iter())
     }
+
+    pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
+        if self.page.offset.as_usize() == 0 {
+            self.append_pos = self.len()?;
+            self.page = Page::new(self.append_pos);
+            if self.append_pos.as_usize() == 0 {
+                self.append_slice(&[0xBC,0xDA])?;
+            }
+        }
+        let start = self.append_pos;
+        let mut data_type = [0u8;1];
+        data_type[0] = entry.data_type.to_u8();
+        self.append_slice(&data_type)?;
+
+        let mut len = [0u8; 3];
+        U24::new(entry.content.len())?.serialize(&mut len);
+        self.append_slice(&len)?;
+        self.append_slice(entry.content.as_slice())?;
+        return Ok(start);
+    }
+
+    fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCSError> {
+        let mut wrote = 0;
+        let mut pos = self.append_pos.in_page_pos();
+        while wrote < slice.len() {
+            if pos == PAYLOAD_MAX {
+                self.append_page(Arc::new(self.page.clone()));
+                self.append_pos = self.append_pos.next_page()?;
+                self.page = Page::new (self.append_pos);
+                pos = 0;
+            }
+            let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
+            self.page.payload [pos .. pos + have].copy_from_slice (&slice[wrote .. wrote + have]);
+            pos += have;
+            wrote += have;
+        }
+        self.append_pos = Offset::new(self.append_pos.as_usize() + wrote)?;
+        Ok(())
+    }
 }
 
 impl DBFile for DataFile {
     fn flush(&mut self) -> Result<(), BCSError> {
+        if self.append_pos.in_page_pos() > 0 {
+            self.append_page(Arc::new(self.page.clone()));
+        }
         self.async_file.flush()
     }
 
@@ -79,7 +126,7 @@ impl PageFile for DataFile {
 }
 
 /// types of data stored in the data file
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq,Debug,Copy, Clone)]
 pub enum DataType {
     /// no data, just padding the storage pages with zero bytes
     Padding,
@@ -111,9 +158,16 @@ impl DataType {
     }
 }
 
+#[derive(Eq, PartialEq,Debug,Clone)]
 pub struct DataEntry {
     pub data_type: DataType,
     pub content: Vec<u8>
+}
+
+impl DataEntry {
+    pub fn new_data (data: &[u8]) -> DataEntry {
+        DataEntry{data_type: DataType::TransactionOrAppData, content: data.to_vec()}
+    }
 }
 
 pub struct DataIterator<'file> {
@@ -181,7 +235,7 @@ impl<'file> Iterator for DataIterator<'file> {
         }
         if self.current.is_some() {
             if let Some(data_type) = self.skip_padding() {
-                let mut size = [0u8; 6];
+                let mut size = [0u8; 3];
                 if self.read_slice(&mut size) {
                     let len = U24::from_slice(&size).unwrap();
                     let mut buf = vec!(0u8; len.as_usize());
@@ -208,11 +262,10 @@ mod test {
         let mut data = DataFile::new(Box::new(mem));
         assert!(data.page_iter().next().is_none());
         assert!(data.data_iter().next().is_none());
-        let mut page = Page::new(Offset::new(0).unwrap());
-        page.write(0,&[0xBC, 0xDA]).unwrap();
-        data.append_page(Arc::new(page));
-
+        let entry = DataEntry::new_data("hello world!".as_bytes());
+        data.append(entry.clone()).unwrap();
         data.flush().unwrap();
+        assert_eq!(data.data_iter().next().unwrap(), entry);
         data.sync().unwrap();
     }
 }

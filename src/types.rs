@@ -60,8 +60,8 @@ impl Offset {
         Offset::new((self.0/ PAGE_SIZE)* PAGE_SIZE).unwrap()
     }
 
-    pub fn next_page(&self) -> Offset {
-        Offset::new((self.0/ PAGE_SIZE + 1)* PAGE_SIZE).expect("db size limit reached")
+    pub fn next_page(&self) -> Result<Offset, BCSError> {
+        Offset::new((self.0/ PAGE_SIZE + 1)* PAGE_SIZE)
     }
 
     pub fn in_page_pos(&self) -> usize {
