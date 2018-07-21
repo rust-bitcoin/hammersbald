@@ -19,8 +19,8 @@
 //!
 
 use asyncfile::AsyncFile;
-use blockdb::{RW,DBFile,BlockIterator,BlockFile};
-use block::{Block, PAYLOAD_MAX};
+use pagedb::{RW, DBFile, PageIterator, PageFile};
+use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};
 
@@ -37,20 +37,20 @@ impl DataFile {
         DataFile{async_file: AsyncFile::new(rw, None)}
     }
 
-    pub fn append_block (&self, block: Arc<Block>) {
-        self.async_file.append_block(block)
+    pub fn append_page (&self, page: Arc<Page>) {
+        self.async_file.append_page(page)
     }
 
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
 
-    pub fn block_iter (&self) -> BlockIterator {
-        BlockIterator::new(self)
+    pub fn page_iter (&self) -> PageIterator {
+        PageIterator::new(self)
     }
 
     pub fn data_iter (&self) -> DataIterator {
-        DataIterator::new(self.block_iter())
+        DataIterator::new(self.page_iter())
     }
 }
 
@@ -72,18 +72,18 @@ impl DBFile for DataFile {
     }
 }
 
-impl BlockFile for DataFile {
-    fn read_block(&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
-        self.async_file.read_block(offset)
+impl PageFile for DataFile {
+    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        self.async_file.read_page(offset)
     }
 }
 
 /// types of data stored in the data file
 #[derive(Eq, PartialEq)]
 pub enum DataType {
-    /// no data, just padding the storage blocks with zero bytes
+    /// no data, just padding the storage pages with zero bytes
     Padding,
-    /// Transaction of application defined data associated with a block
+    /// Transaction of application defined data associated with a page
     TransactionOrAppData,
     /// A header or a block of the blockchain
     HeaderOrBlock,
@@ -117,14 +117,14 @@ pub struct DataEntry {
 }
 
 pub struct DataIterator<'file> {
-    block_iterator: BlockIterator<'file>,
-    current: Option<Arc<Block>>,
+    page_iterator: PageIterator<'file>,
+    current: Option<Arc<Page>>,
     pos: usize
 }
 
 impl<'file> DataIterator<'file> {
-    pub fn new (block_iterator: BlockIterator<'file>) -> DataIterator {
-        DataIterator{block_iterator, pos: 0, current: None}
+    pub fn new (page_iterator: PageIterator<'file>) -> DataIterator {
+        DataIterator{page_iterator, pos: 0, current: None}
     }
 
     fn skip_padding(&mut self) {
@@ -139,7 +139,7 @@ impl<'file> DataIterator<'file> {
                 break;
             }
             if self.pos == PAYLOAD_MAX {
-                self.current = self.block_iterator.next();
+                self.current = self.page_iterator.next();
                 self.pos = 0;
             }
             else {
@@ -165,7 +165,7 @@ impl<'file> DataIterator<'file> {
                 return false;
             }
             if have == 0 {
-                self.current = self.block_iterator.next();
+                self.current = self.page_iterator.next();
                 self.pos = 0;
                 have = min(PAYLOAD_MAX, slice.len() - read);
             }
@@ -178,8 +178,8 @@ impl<'file> Iterator for DataIterator<'file> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current.is_none() {
-            self.current = self.block_iterator.next();
-            // skip magic on first block
+            self.current = self.page_iterator.next();
+            // skip magic on first page
             self.pos = 2;
         }
         if self.current.is_some() {
@@ -213,11 +213,11 @@ mod test {
     fn test() {
         let mem = InMemory::new(true);
         let mut data = DataFile::new(Box::new(mem));
-        assert!(data.block_iter().next().is_none());
+        assert!(data.page_iter().next().is_none());
         assert!(data.data_iter().next().is_none());
-        let mut block = Block::new(Offset::new(0).unwrap());
-        block.append(&[0xBC, 0xDA]).unwrap();
-        data.append_block(Arc::new(block));
+        let mut page = Page::new(Offset::new(0).unwrap());
+        page.append(&[0xBC, 0xDA]).unwrap();
+        data.append_page(Arc::new(page));
 
         data.flush().unwrap();
         data.sync().unwrap();

@@ -20,10 +20,10 @@
 
 use types::Offset;
 use error::BCSError;
-use blockdb::RW;
+use pagedb::RW;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
-use blockdb::{BlockDBFactory, BlockDB};
+use pagedb::{PageDBFactory, PageDB};
 use keyfile::KeyFile;
 use datafile::DataFile;
 
@@ -49,13 +49,13 @@ impl InMemory {
     }
 }
 
-impl BlockDBFactory for InMemory {
-    fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
+impl PageDBFactory for InMemory {
+    fn new_pagedb (name: &str) -> Result<PageDB, BCSError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = KeyFile::new(Box::new(InMemory::new(false)), log.clone());
         let data = DataFile::new(Box::new(InMemory::new(true)));
 
-        BlockDB::new(table, data, log)
+        PageDB::new(table, data, log)
     }
 }
 

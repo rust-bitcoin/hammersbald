@@ -14,9 +14,9 @@
 // limitations under the License.
 //
 //!
-//! # a block in the blockchain store
+//! # a page in the blockchain store
 //!
-//! The block is the unit of read and expansion for the data and key file. A block consists of
+//! The page is the unit of read and expansion. A page consists of
 //! a payload and a used length less or equal to 4088 it also stores its offset
 //!
 //! <pre>
@@ -35,25 +35,25 @@ use types::Offset;
 use std::mem::transmute;
 use std::cmp::min;
 
-pub const BLOCK_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
 pub const PAYLOAD_MAX: usize = 4088;
 
-/// A block of the persistent files
+/// A page of the persistent files
 #[derive(Clone)]
-pub struct Block {
+pub struct Page {
     pub payload: [u8; PAYLOAD_MAX],
     pub offset: Offset,
     pub pos: usize
 }
 
-impl Block {
-    /// create a new empty block to be appended at given offset
-    pub fn new (offset: Offset) -> Block {
-        Block {payload: [0u8; PAYLOAD_MAX], offset, pos: 0}
+impl Page {
+    /// create a new empty page to be appended at given offset
+    pub fn new (offset: Offset) -> Page {
+        Page {payload: [0u8; PAYLOAD_MAX], offset, pos: 0}
     }
 
-    /// create a Block from read buffer
-    pub fn from_buf (buf: [u8; BLOCK_SIZE]) -> Result<Block, BCSError> {
+    /// create a Page from read buffer
+    pub fn from_buf (buf: [u8; PAGE_SIZE]) -> Result<Page, BCSError> {
         let mut payload = [0u8; PAYLOAD_MAX];
         payload.copy_from_slice(&buf[0..PAYLOAD_MAX]);
         let mut stored_used = [0u8;2];
@@ -63,7 +63,7 @@ impl Block {
         if used > PAYLOAD_MAX {
             return Err(BCSError::DoesNotFit);
         }
-        Ok(Block {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap(), pos: used })
+        Ok(Page {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap(), pos: used })
     }
 
     /// append some data and return used length
@@ -75,7 +75,7 @@ impl Block {
         Ok((Offset::new(self.offset.as_usize() + self.pos)?, &data[have..]))
     }
 
-    /// read from a block starting from given pos
+    /// read from a page starting from given pos
     /// return the number of bytes successfully read into data
     pub fn read(&self, pos: usize, data: &mut [u8]) -> Result<usize, BCSError> {
         if pos > PAYLOAD_MAX {
@@ -86,15 +86,15 @@ impl Block {
         Ok(have)
     }
 
-    /// finish a block after appends to write out
-    pub fn finish (&self) -> [u8; BLOCK_SIZE] {
-        let mut block = [0u8; BLOCK_SIZE];
-        block[0 .. self.pos].copy_from_slice (&self.payload[0 .. self.pos]);
+    /// finish a page after appends to write out
+    pub fn finish (&self) -> [u8; PAGE_SIZE] {
+        let mut page = [0u8; PAGE_SIZE];
+        page[0 .. self.pos].copy_from_slice (&self.payload[0 .. self.pos]);
         let used_bytes: [u8; 2] = unsafe { transmute((self.pos as u16).to_be()) };
-        block[BLOCK_SIZE - 2 .. BLOCK_SIZE].copy_from_slice(&used_bytes[..]);
-        self.offset.serialize(&mut block[BLOCK_SIZE - 8 .. BLOCK_SIZE - 2]);
+        page[PAGE_SIZE - 2 ..PAGE_SIZE].copy_from_slice(&used_bytes[..]);
+        self.offset.serialize(&mut page[PAGE_SIZE - 8 .. PAGE_SIZE - 2]);
 
-        block
+        page
     }
 }
 
@@ -105,38 +105,38 @@ mod test {
     use super::*;
     #[test]
     fn form_test () {
-        let mut block = Block::new(Offset::new(4711).unwrap());
+        let mut page = Page::new(Offset::new(4711).unwrap());
         let payload: &[u8] = "hello world".as_bytes();
-        block.append(payload).unwrap();
-        let result = block.finish();
+        page.append(payload).unwrap();
+        let result = page.finish();
 
-        let mut check = [0u8; BLOCK_SIZE];
+        let mut check = [0u8; PAGE_SIZE];
         check[0 .. payload.len()].copy_from_slice(payload);
-        check[BLOCK_SIZE-1] = payload.len() as u8;
-        check[BLOCK_SIZE-3] = (4711 % 256) as u8;
-        check[BLOCK_SIZE-4] = (4711 / 256) as u8;
+        check[PAGE_SIZE -1] = payload.len() as u8;
+        check[PAGE_SIZE -3] = (4711 % 256) as u8;
+        check[PAGE_SIZE -4] = (4711 / 256) as u8;
         assert_eq!(hex::encode(&result[..]), hex::encode(&check[..]));
 
-        let block2 = Block::from_buf(check).unwrap();
-        assert_eq!(block.pos, block2.pos);
-        assert_eq!(block.offset, block2.offset);
-        assert_eq!(hex::encode(&block.payload[..]), hex::encode(&block2.payload[..]));
+        let page2 = Page::from_buf(check).unwrap();
+        assert_eq!(page.pos, page2.pos);
+        assert_eq!(page.offset, page2.offset);
+        assert_eq!(hex::encode(&page.payload[..]), hex::encode(&page2.payload[..]));
     }
 
     #[test]
     fn append_test () {
-        let mut block = Block::new(Offset::new(4711).unwrap());
+        let mut page = Page::new(Offset::new(4711).unwrap());
         for _ in 0 .. 3 {
-            assert!(block.append(&[0u8; 1024]).is_ok());
+            assert!(page.append(&[0u8; 1024]).is_ok());
         }
-        let used = block.pos;
+        let used = page.pos;
         assert!(used == 3*1024);
     }
 
     #[test]
     fn fit_test () {
-        let mut block = Block::new(Offset::new(4711).unwrap());
-        assert!(block.append(&[0u8;4000]).is_ok());
-        assert_eq!(block.append(&[0u8;100]).unwrap().1.len(), 4100 - PAYLOAD_MAX);
+        let mut page = Page::new(Offset::new(4711).unwrap());
+        assert!(page.append(&[0u8;4000]).is_ok());
+        assert_eq!(page.append(&[0u8;100]).unwrap().1.len(), 4100 - PAYLOAD_MAX);
     }
 }

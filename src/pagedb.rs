@@ -14,9 +14,9 @@
 // limitations under the License.
 //
 //!
-//! # Three files that together implement the db
+//! # Three paged files that together implement the db
 //!
-use block::{Block, BLOCK_SIZE};
+use page::{Page, PAGE_SIZE};
 use types::Offset;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
@@ -27,8 +27,8 @@ use error::BCSError;
 use std::sync::{Mutex,Arc};
 use std::io::{Read,Write,Seek};
 
-pub trait BlockDBFactory {
-    fn new_blockdb (name: &str) -> Result<BlockDB, BCSError>;
+pub trait PageDBFactory {
+    fn new_pagedb (name: &str) -> Result<PageDB, BCSError>;
 }
 
 pub trait RW : Read + Write + Seek + Send {
@@ -37,41 +37,41 @@ pub trait RW : Read + Write + Seek + Send {
     fn sync (&self) -> Result<(), BCSError>;
 }
 
-pub trait DBFile : BlockFile {
+pub trait DBFile : PageFile {
     fn flush(&mut self) -> Result<(), BCSError>;
     fn sync (&mut self) -> Result<(), BCSError>;
     fn truncate(&mut self, offset: Offset) -> Result<(), BCSError>;
     fn len(&mut self) -> Result<Offset, BCSError>;
 }
 
-pub trait BlockFile {
-    fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError>;
+pub trait PageFile {
+    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError>;
 }
 
 
-/// The database block layer
-pub struct BlockDB {
+/// The database page layer
+pub struct PageDB {
     table: KeyFile,
     data: DataFile,
     log: Arc<Mutex<LogFile>>
 }
 
-impl BlockDB {
-    pub fn new (mut table: KeyFile, mut data: DataFile, log: Arc<Mutex<LogFile>>) -> Result<BlockDB, BCSError> {
-        BlockDB::check(&mut table, &[0xBC, 0xDB])?;
-        BlockDB::check(&mut data, &[0xBC, 0xDA])?;
-        BlockDB::check_log(log.clone(), &[0xBC, 0x00])?;
-        let mut blockdb = BlockDB{table, data, log};
-        blockdb.recover()?;
-        blockdb.batch()?;
-        Ok(blockdb)
+impl PageDB {
+    pub fn new (mut table: KeyFile, mut data: DataFile, log: Arc<Mutex<LogFile>>) -> Result<PageDB, BCSError> {
+        PageDB::check(&mut table, &[0xBC, 0xDB])?;
+        PageDB::check(&mut data, &[0xBC, 0xDA])?;
+        PageDB::check_log(log.clone(), &[0xBC, 0x00])?;
+        let mut pagedb = PageDB {table, data, log};
+        pagedb.recover()?;
+        pagedb.batch()?;
+        Ok(pagedb)
     }
 
     fn check_log(log: Arc<Mutex<LogFile>>, magic: &[u8]) -> Result<(), BCSError> {
         let mut file = log.lock().unwrap();
         if file.len()?.as_usize() > 0 {
             let offset = Offset::new(0)?;
-            let first = file.read_block(offset)?;
+            let first = file.read_page(offset)?;
             if &first.payload [0..2] != magic {
                 return Err(BCSError::BadMagic);
             }
@@ -82,7 +82,7 @@ impl BlockDB {
     fn check(file: &mut DBFile, magic: &[u8]) -> Result<(), BCSError> {
         if file.len()?.as_usize() > 0 {
             let offset = Offset::new(0)?;
-            let first = file.read_block(offset)?;
+            let first = file.read_page(offset)?;
             if &first.payload [0..2] != magic {
                 return Err(BCSError::BadMagic);
             }
@@ -94,7 +94,7 @@ impl BlockDB {
         let mut log = self.log.lock().unwrap();
         if log.len()?.as_usize() > 0 {
             let mut offset = Offset::new(0)?;
-            let first = log.read_block(offset)?;
+            let first = log.read_page(offset)?;
 
             let mut size = [0u8; 4];
 
@@ -106,12 +106,12 @@ impl BlockDB {
             let table_len = Offset::from_slice(&size)?;
             self.table.truncate(table_len)?;
 
-            offset = Offset::new(BLOCK_SIZE)?;
-            while let Ok(block) = log.read_block(offset) {
-                if block.offset.as_usize() < table_len.as_usize() {
-                    self.table.write_block(block);
+            offset = Offset::new(PAGE_SIZE)?;
+            while let Ok(page) = log.read_page(offset) {
+                if page.offset.as_usize() < table_len.as_usize() {
+                    self.table.write_page(page);
                 }
-                offset = Offset::new(offset.as_usize() + BLOCK_SIZE)?;
+                offset = Offset::new(offset.as_usize() + PAGE_SIZE)?;
             }
             log.truncate(Offset::new(0)?)?;
             log.sync()?;
@@ -131,7 +131,7 @@ impl BlockDB {
         log.truncate(Offset::new(0)?)?;
         log.reset();
 
-        let mut first = Block::new(Offset::new(0)?);
+        let mut first = Page::new(Offset::new(0)?);
         first.append(&[0xBC, 0x00])?;
         let mut size = [0u8; 6];
         data_len.serialize(&mut size);
@@ -140,7 +140,7 @@ impl BlockDB {
         first.append(&size)?;
 
 
-        log.append_block(Arc::new(first))?;
+        log.append_page(Arc::new(first))?;
         log.sync()?;
 
         Ok(())
@@ -151,47 +151,47 @@ impl BlockDB {
         self.table.shutdown();
     }
 
-    pub fn write_table_block(&mut self, block: Block) -> Result<(), BCSError> {
-        let br = Arc::new(block);
-        self.table.write_block(br);
+    pub fn write_table_page(&mut self, page: Page) -> Result<(), BCSError> {
+        let br = Arc::new(page);
+        self.table.write_page(br);
         Ok(())
     }
 
-    pub fn append_data_block(&self, block: Block) -> Result<(), BCSError> {
-        let br = Arc::new(block);
-        self.data.append_block(br);
+    pub fn append_data_page(&self, page: Page) -> Result<(), BCSError> {
+        let br = Arc::new(page);
+        self.data.append_page(br);
         Ok(())
     }
 
-    pub fn read_table_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
-        self.table.read_block(offset)
+    pub fn read_table_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        self.table.read_page(offset)
     }
 
-    pub fn read_data_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
-        self.data.read_block(offset)
-    }
-}
-
-pub struct BlockIterator<'file> {
-    blocknumber: usize,
-    file: &'file BlockFile
-}
-
-impl<'file> BlockIterator<'file> {
-    pub fn new (file: &'file BlockFile) -> BlockIterator {
-        BlockIterator{blocknumber: 0, file}
+    pub fn read_data_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        self.data.read_page(offset)
     }
 }
 
-impl<'file> Iterator for BlockIterator<'file> {
-    type Item = Arc<Block>;
+pub struct PageIterator<'file> {
+    pagenumber: usize,
+    file: &'file PageFile
+}
+
+impl<'file> PageIterator<'file> {
+    pub fn new (file: &'file PageFile) -> PageIterator {
+        PageIterator{pagenumber: 0, file}
+    }
+}
+
+impl<'file> Iterator for PageIterator<'file> {
+    type Item = Arc<Page>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.blocknumber < (1 << 47) / BLOCK_SIZE {
-            let offset = Offset::new(self.blocknumber*BLOCK_SIZE).unwrap();
-            if let Ok(block) = self.file.read_block(offset) {
-                self.blocknumber += 1;
-                return Some(block);
+        if self.pagenumber < (1 << 47) / PAGE_SIZE {
+            let offset = Offset::new(self.pagenumber* PAGE_SIZE).unwrap();
+            if let Ok(page) = self.file.read_page(offset) {
+                self.pagenumber += 1;
+                return Some(page);
             }
         }
         None
@@ -207,7 +207,7 @@ mod test {
     use super::*;
     #[test]
     fn test () {
-        let mut blockdb = InMemory::new_blockdb("").unwrap();
-        blockdb.shutdown();
+        let mut pagedb = InMemory::new_pagedb("").unwrap();
+        pagedb.shutdown();
     }
 }

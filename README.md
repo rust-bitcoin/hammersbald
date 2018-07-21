@@ -51,16 +51,16 @@ The persistent store uses up to three files:
 
 Numbers stored in big endian.
 
-### Blocks
+### Page
 
-The block is the unit of read and expansion for the data and key file. A block consists of
+The page is the unit of read and expansion for the files. A page consists of
 a payload and a used length less or equal to 4088 
 
 <pre>
 +------------------------------------+
 |    | payload                       |
 +----+-------------------------------+
-|u48 | block offset                  |
+|u48 | page  offset                  |
 +----+-------------------------------+
 |u16 | used length                   |
 +----+-------------------------------+
@@ -77,7 +77,7 @@ Thereafter any number or data elements stored prefixed with a length and type.
 
 <pre>
 
-+------------- block       -----------------+
++------------- page        -----------------+
 |                                           |
 |   +----+-------------------------------+  |
 |   |u8  | magic (BC)                    |  |
@@ -107,7 +107,7 @@ Spill over must not be the last data element in the data file.
 #### Data types
 
 * 1 transaction or application defined data
-* 2 header or block
+* 2 blockchain header or block
 * 3 spill over of the hash table
 
 ##### Transaction or application specific data
@@ -164,7 +164,7 @@ The length of the table file allows calculation of current S and L of linear has
 * S = L/2 mod 2^(L-1)
 
 <pre>
-+------------- block       --------------------+
++------------- page        --------------------+
 |                                              |
 |  +--------+-------------------------------+  |
 |  |u8      | magic (BC)                    |  |
@@ -182,10 +182,10 @@ The length of the table file allows calculation of current S and L of linear has
 ### Log file
 
 The log file starts with a magic number and last known correct file sizes.
-Therafter any number of block offset and content tuples.
+Therafter any number of pages that are pre-images of the updated table file.
 
 <pre>
-+------------- block       --------------------+
++------------- page        --------------------+
 |                                              |
 |  +--------+-------------------------------+  |
 |  |u8      | magic (BC)                    |  |
@@ -199,8 +199,8 @@ Therafter any number of block offset and content tuples.
 |  |        | padding zeros                 |  |
 |  +--------+-------------------------------+  |
 +----------------------------------------------+
-+------------- block       --------------------+
-|  a key file block as before batch start      |
++------------- page        --------------------+
+|  a key file page  as before batch start      |
 +----------------------------------------------+
 ....
 </pre>
@@ -209,5 +209,5 @@ Therafter any number of block offset and content tuples.
 Should the process crash while in an insert batch, then at open the log file will
 trigger the following processing:
 * truncate key and data files to last known correct size
-* patch key file by applying the pre-image of its blocks
+* patch key file by applying the pre-image of its pages
 * delete the log file

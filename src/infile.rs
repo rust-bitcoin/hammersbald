@@ -20,12 +20,12 @@
 
 use types::Offset;
 use error::BCSError;
-use blockdb::RW;
+use pagedb::RW;
 use asyncfile::AsyncFile;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
-use blockdb::{BlockDBFactory, BlockDB};
+use pagedb::{PageDBFactory, PageDB};
 
 
 use std::io::Read;
@@ -48,8 +48,8 @@ impl InFile {
     }
 }
 
-impl BlockDBFactory for InFile {
-    fn new_blockdb (name: &str) -> Result<BlockDB, BCSError> {
+impl PageDBFactory for InFile {
+    fn new_pagedb (name: &str) -> Result<PageDB, BCSError> {
         let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.to_owned() + ".tbl")?;
         let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".dat")?;
         let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
@@ -58,7 +58,7 @@ impl BlockDBFactory for InFile {
         let table = KeyFile::new(Box::new(InFile::new(table_file)), log.clone());
         let data = DataFile::new(Box::new(InFile::new(data_file)));
 
-        BlockDB::new(table, data, log)
+        PageDB::new(table, data, log)
     }
 }
 

@@ -20,8 +20,8 @@
 
 use asyncfile::AsyncFile;
 use logfile::LogFile;
-use blockdb::{RW,DBFile, BlockIterator, BlockFile};
-use block::Block;
+use pagedb::{RW, DBFile, PageIterator, PageFile};
+use page::Page;
 use error::BCSError;
 use types::Offset;
 
@@ -37,20 +37,20 @@ impl KeyFile {
         KeyFile{async_file: AsyncFile::new(rw, Some(log_file))}
     }
 
-    pub fn write_block(&self, block: Arc<Block>) {
-        self.async_file.write_block(block)
+    pub fn write_page(&self, page: Arc<Page>) {
+        self.async_file.write_page(page)
     }
 
-    pub fn append_block (&self, block: Arc<Block>) {
-        self.async_file.append_block(block)
+    pub fn append_page (&self, page: Arc<Page>) {
+        self.async_file.append_page(page)
     }
 
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
 
-    fn block_iter (&self) -> BlockIterator {
-        BlockIterator::new(self)
+    fn page_iter (&self) -> PageIterator {
+        PageIterator::new(self)
     }
 }
 
@@ -72,8 +72,8 @@ impl DBFile for KeyFile {
     }
 }
 
-impl BlockFile for KeyFile {
-    fn read_block(&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
-        self.async_file.read_block(offset)
+impl PageFile for KeyFile {
+    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        self.async_file.read_page(offset)
     }
 }

@@ -15,13 +15,13 @@
 //
 //!
 //! # The log file
-//! A synchronous append writer of a log file. It maintains its own set of block offsets
+//! A synchronous append writer of a log file. It maintains its own set of page offsets
 //! loged, so only the first pre-image will be stored within a batch. The batch should reset
 //! this set.
 //!
 
-use blockdb::{DBFile,RW, BlockIterator,BlockFile};
-use block::{Block, BLOCK_SIZE};
+use pagedb::{DBFile, RW, PageIterator, PageFile};
+use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
 use cache::Cache;
@@ -46,23 +46,23 @@ impl LogFile {
         LogFile { rw: Mutex::new(rw), appended: HashSet::new() }
     }
 
-    /// append a block if not yet logged in this batch. Returns false if the block was logged before.
-    pub fn append_block (&mut self, block: Arc<Block>) -> Result<bool, BCSError> {
-        if !self.appended.contains(&block.offset) {
-            self.appended.insert(block.offset);
-            self.rw.lock().unwrap().write(&block.finish())?;
+    /// append a page if not yet logged in this batch. Returns false if the page was logged before.
+    pub fn append_page (&mut self, page: Arc<Page>) -> Result<bool, BCSError> {
+        if !self.appended.contains(&page.offset) {
+            self.appended.insert(page.offset);
+            self.rw.lock().unwrap().write(&page.finish())?;
             return Ok(true);
         }
         Ok(false)
     }
 
-    /// empties the set of logged blocks
+    /// empties the set of logged pages
     pub fn reset (&mut self) {
         self.appended.clear();
     }
 
-    fn block_iter (&self) -> BlockIterator {
-        BlockIterator::new(self)
+    fn page_iter (&self) -> PageIterator {
+        PageIterator::new(self)
     }
 }
 
@@ -88,11 +88,11 @@ impl DBFile for LogFile {
     }
 }
 
-impl BlockFile for LogFile {
-    fn read_block (&self, offset: Offset) -> Result<Arc<Block>, BCSError> {
-        let mut buffer = [0u8; BLOCK_SIZE];
+impl PageFile for LogFile {
+    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        let mut buffer = [0u8; PAGE_SIZE];
         self.rw.lock().unwrap().read(&mut buffer)?;
-        let block = Arc::new(Block::from_buf(buffer)?);
-        Ok(block)
+        let page = Arc::new(Page::from_buf(buffer)?);
+        Ok(page)
     }
 }

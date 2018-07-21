@@ -19,7 +19,7 @@
 //! U24 an unsigned 24 bit integer for data element sizes
 
 use error::BCSError;
-use block::BLOCK_SIZE;
+use page::PAGE_SIZE;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 pub struct Offset(usize);
@@ -57,15 +57,15 @@ impl Offset {
     }
 
     pub fn this_block(&self) -> Offset {
-        Offset::new((self.0/BLOCK_SIZE)*BLOCK_SIZE).unwrap()
+        Offset::new((self.0/ PAGE_SIZE)* PAGE_SIZE).unwrap()
     }
 
     pub fn next_block(&self) -> Offset {
-        Offset::new((self.0/BLOCK_SIZE + 1)*BLOCK_SIZE).expect("db size limit reached")
+        Offset::new((self.0/ PAGE_SIZE + 1)* PAGE_SIZE).expect("db size limit reached")
     }
 
     pub fn block_offset(&self) -> usize {
-        self.0 - (self.0/BLOCK_SIZE)*BLOCK_SIZE
+        self.0 - (self.0/ PAGE_SIZE)* PAGE_SIZE
     }
 }
 

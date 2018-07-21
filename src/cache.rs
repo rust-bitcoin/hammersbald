@@ -14,29 +14,29 @@
 // limitations under the License.
 //
 //!
-//! # a disk block cache
+//! # a disk page cache
 //!
 //! A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
 //!
 
-use block::Block;
+use page::Page;
 use types::Offset;
 
 use std::collections::{HashMap,VecDeque};
 use std::sync::Arc;
 
 // read cache size
-pub const READ_CACHE_BLOCKS: usize = 100;
+pub const READ_CACHE_PAGES: usize = 100;
 
 #[derive(Default)]
 pub struct Cache {
-    map: HashMap<Offset, Arc<Block>>,
-    list: VecDeque<Arc<Block>>
+    map: HashMap<Offset, Arc<Page>>,
+    list: VecDeque<Arc<Page>>
 }
 
 impl Cache {
-    pub fn put (&mut self, block: Arc<Block>) {
-        if self.list.len () >= READ_CACHE_BLOCKS {
+    pub fn put (&mut self, block: Arc<Page>) {
+        if self.list.len () >= READ_CACHE_PAGES {
             if let Some(old) = self.list.pop_front() {
                 self.map.remove(&old.offset);
             }
@@ -51,7 +51,7 @@ impl Cache {
         self.list.clear();
     }
 
-    pub fn get(&self, offset: Offset) -> Option<Arc<Block>> {
+    pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
         match self.map.get(&offset) {
             Some(b) => Some(b.clone()),
             None => None

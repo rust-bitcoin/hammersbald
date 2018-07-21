@@ -26,7 +26,7 @@
 #![deny(missing_docs)]
 #![deny(unused_must_use)]
 
-mod block;
+mod page;
 mod types;
 mod inmemory;
 mod infile;
@@ -34,6 +34,6 @@ mod asyncfile;
 mod logfile;
 mod keyfile;
 mod datafile;
-mod blockdb;
+mod pagedb;
 mod cache;
 pub mod error;
