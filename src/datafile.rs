@@ -127,31 +127,27 @@ impl<'file> DataIterator<'file> {
         DataIterator{page_iterator, pos: 0, current: None}
     }
 
-    fn skip_padding(&mut self) {
+    fn skip_padding(&mut self) -> Option<DataType> {
         loop {
             if let Some(ref mut current) = self.current {
                 while self.pos < PAYLOAD_MAX &&
                     DataType::from(current.payload[self.pos]) == DataType::Padding {
                     self.pos += 1;
                 }
+                return Some (DataType::from(current.payload[self.pos]));
             }
             else {
-                break;
+                return None;
             }
-            if self.pos == PAYLOAD_MAX {
-                self.current = self.page_iterator.next();
-                self.pos = 0;
-            }
-            else {
-                break;
-            }
+            self.current = self.page_iterator.next();
+            self.pos = 0;
         }
     }
 
     fn read_slice (&mut self, slice: &mut [u8]) -> bool {
         let mut read = 0;
         loop {
-            let mut have = min(PAYLOAD_MAX - self.pos, slice.len() - read);
+            let have = min(PAYLOAD_MAX - self.pos, slice.len() - read);
             if let Some(ref mut current) = self.current {
                 slice[read .. read + have].copy_from_slice(&current.payload[self.pos .. self.pos + have]);
                 self.pos += have;
@@ -164,10 +160,9 @@ impl<'file> DataIterator<'file> {
             else {
                 return false;
             }
-            if have == 0 {
+            if read < slice.len() {
                 self.current = self.page_iterator.next();
                 self.pos = 0;
-                have = min(PAYLOAD_MAX, slice.len() - read);
             }
         }
     }
@@ -183,11 +178,7 @@ impl<'file> Iterator for DataIterator<'file> {
             self.pos = 2;
         }
         if self.current.is_some() {
-            self.skip_padding();
-
-            let mut dt = [0u8; 1];
-            if self.read_slice(&mut dt) {
-                let data_type = DataType::from(dt[0]);
+            if let Some(data_type) = self.skip_padding() {
                 let mut size = [0u8; 6];
                 if self.read_slice(&mut size) {
                     let len = U24::from_slice(&size).unwrap();
