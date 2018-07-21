@@ -131,19 +131,20 @@ impl PageDB {
         let table_len = self.table.len()?;
 
         let mut log = self.log.lock().unwrap();
-        log.truncate(Offset::new(0)?)?;
+        log.truncate(Offset::new(0).unwrap())?;
         log.reset();
 
-        let mut first = Page::new(Offset::new(0)?);
-        first.write(0, &[0xBC, 0x00])?;
+        let mut first = Page::new(Offset::new(0).unwrap());
+        first.write(0, &[0xBC, 0x00]).unwrap();
         let mut size = [0u8; 6];
         data_len.serialize(&mut size);
-        first.write(2, &size)?;
+        first.write(2, &size).unwrap();
         table_len.serialize(&mut size);
-        first.write(8, &size)?;
+        first.write(8, &size).unwrap();
 
 
         log.append_page(Arc::new(first))?;
+        log.flush()?;
         log.sync()?;
 
         Ok(())
