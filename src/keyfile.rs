@@ -20,7 +20,8 @@
 
 use asyncfile::AsyncFile;
 use logfile::LogFile;
-use pagedb::{RW, DBFile, PageIterator, PageFile};
+use datafile::DataFile;
+use db::{RW, DBFile, PageIterator, PageFile, Key};
 use page::Page;
 use error::BCSError;
 use types::Offset;
@@ -37,16 +38,20 @@ impl KeyFile {
         KeyFile{async_file: AsyncFile::new(rw, Some(log_file))}
     }
 
+    pub fn put (&self, key: Key, offset: Offset, spill: &mut DataFile) {
+        unimplemented!()
+    }
+
+    pub fn get (&self, key: Key) -> Result<Option<Offset>, BCSError> {
+        unimplemented!()
+    }
+
     pub fn write_page(&self, page: Arc<Page>) {
         self.async_file.write_page(page)
     }
 
     pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
         self.async_file.log_file().unwrap()
-    }
-
-    pub fn append_page (&self, page: Arc<Page>) {
-        self.async_file.append_page(page)
     }
 
     pub fn shutdown (&mut self) {

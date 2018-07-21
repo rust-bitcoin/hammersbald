@@ -19,11 +19,11 @@
 //! Implements persistent store
 
 use error::BCSError;
-use pagedb::RW;
+use db::RW;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
-use pagedb::{PageDBFactory, PageDB};
+use db::{PageDBFactory, PageDB};
 
 
 use std::io::Read;

@@ -19,9 +19,9 @@
 //! Implements in-memory Read and Write for tests
 
 use error::BCSError;
-use pagedb::RW;
+use db::RW;
 use logfile::LogFile;
-use pagedb::{PageDBFactory, PageDB};
+use db::{PageDBFactory, PageDB};
 use keyfile::KeyFile;
 use datafile::DataFile;
 

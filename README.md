@@ -132,17 +132,17 @@ Spill over must not be the last data element in the data file.
 
 ##### Block
 <pre>
-+-----+-------------------------------------+
-|[u8] | id of previous header or block      |
-+-----+-------------------------------------+
-|[u8] | header as serialized in blocks      |
-+-----+-------------------------------------+
-|u16  | number of data for the block        |
-+-----+-------------------------------------+
-|[256]| ids of data for the block           |
-+-----+-------------------------------------+
-|u256 | tip                                 |
-+-----+-------------------------------------+
++------+-------------------------------------+
+|[u8]  | id of previous header or block      |
++------+-------------------------------------+
+|[u8]  | header as serialized in blocks      |
++------+-------------------------------------+
+|u16   | number of data for the block        |
++------+-------------------------------------+
+|[u256]| ids of data for the block           |
++------+-------------------------------------+
+|u256  | tip                                 |
++------+-------------------------------------+
 </pre>
 
 Transactions and application defined data are inserted through insert of a block
@@ -153,13 +153,8 @@ is the id of the tip with known u256 representation.
 ### Table file
 
 The data file starts with a magic number in two bytes spelling BCDB (for blockchain data base) 
-in hex. Thereafter any number of buckets storing 5 byte pointers into data.
+in hex. Thereafter any number of buckets storing 6 byte pointers into data.
 
-The length of the table file allows calculation of current S and L of linear hashing:
-
-* N = 1
-* L = Floor(log2(used len-2))
-* S = L/2 mod 2^(L-1)
 
 <pre>
 +------------- page        --------------------+
@@ -169,11 +164,20 @@ The length of the table file allows calculation of current S and L of linear has
 |  +--------+-------------------------------+  |
 |  |u8      | magic (DB)                    |  |
 |  +--------+-------------------------------+  |
+|  | u16    | L (starts at 9)               |  |
 |  +--------+-------------------------------+  |
-|  | u48    | data offset                   |  |
+|  | u48    | S (starts at 0)               |  |
 |  +--------+-------------------------------+  |
-|  ...                                         |
+|  |        | padding zeros                 |  |
+|  +--------+-------------------------------+  |
 +----------------------------------------------+
++-------------- page        --------------------+
+|                                               |
+|  +---------+-------------------------------+  |
+|  |[u48;512]| data offset                   |  |
+|  +---------+-------------------------------+  |
+|  ...                                          |
++-----------------------------------------------+
 ....
 </pre>
 

@@ -20,11 +20,13 @@ use page::{Page, PAGE_SIZE};
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
-use datafile::{DataFile, DataEntry};
+use datafile::{DataFile, DataEntry, DataType};
 use error::BCSError;
 
 use std::sync::{Mutex,Arc};
 use std::io::{Read,Write,Seek};
+
+pub type Key = [u8; 32];
 
 pub trait PageDBFactory {
     fn new_pagedb (name: &str) -> Result<PageDB, BCSError>;
@@ -156,16 +158,17 @@ impl PageDB {
         self.table.shutdown();
     }
 
-    pub fn write_table_page(&mut self, page: Arc<Page>) {
-        self.table.write_page(page)
+    pub fn put_data (&mut self, key: Key, data: &[u8]) -> Result<Offset, BCSError> {
+        let offset = self.data.append(DataEntry::new_data(data))?;
+        self.table.put(key, offset, &mut self.data);
+        Ok(offset)
     }
 
-    pub fn read_table_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        self.table.read_page(offset)
-    }
-
-    pub fn append_data_entry (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
-        self.data.append(entry)
+    pub fn get(&self, key: Key) -> Result<Option<DataEntry>, BCSError> {
+        if let Some(offset) = self.table.get(key)? {
+            return self.data.get(offset);
+        }
+        Ok(None)
     }
 }
 
