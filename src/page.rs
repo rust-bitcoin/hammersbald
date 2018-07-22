@@ -64,6 +64,15 @@ impl Page {
         Ok(())
     }
 
+    /// write an offset
+    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCSError> {
+        if pos + 6 > PAYLOAD_MAX {
+            return Err (BCSError::DoesNotFit);
+        }
+        offset.serialize(&mut self.payload[pos .. pos + 6]);
+        Ok(())
+    }
+
     /// read some data
     /// will return Error::DoesNotFit if data does not fit into the page
     pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCSError> {
@@ -73,6 +82,13 @@ impl Page {
         let len = data.len();
         data[..].copy_from_slice(&self.payload [pos .. pos + len]);
         Ok(())
+    }
+
+    /// read a stored offset
+    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCSError> {
+        let mut buf = [0u8;6];
+        self.read(pos, &mut buf)?;
+        Offset::from_slice(&buf)
     }
 
     /// finish a page after appends to write out

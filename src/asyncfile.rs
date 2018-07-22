@@ -23,7 +23,7 @@ use bcdb::{DBFile, RW, PageFile};
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
-use cache::Cache;
+use cache::{ReadCache, WriteCache};
 use logfile::LogFile;
 
 use std::io::{Read,Write,Seek,SeekFrom};
@@ -33,9 +33,6 @@ use std::thread;
 use std::cell::Cell;
 use std::time::Duration;
 
-// background writer will loop with this delay
-const WRITE_DELAY_MS: u64 = 1000;
-
 /// The buffer pool
 pub struct AsyncFile {
     inner: Arc<Inner>
@@ -43,8 +40,9 @@ pub struct AsyncFile {
 
 struct Inner {
     rw: Mutex<Box<RW>>,
-    read_cache: RwLock<Cache>,
-    write_cache: Mutex<VecDeque<(bool, Arc<Page>)>>,
+    read_cache: RwLock<ReadCache>,
+    write_cache: Mutex<WriteCache>,
+    haswork: Condvar,
     flushed: Condvar,
     run: Mutex<Cell<bool>>,
     log_file: Option<Arc<Mutex<LogFile>>>
@@ -54,8 +52,9 @@ impl Inner {
     pub fn new (rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> Inner {
         Inner{
             rw: Mutex::new(rw),
-            read_cache: RwLock::new(Cache::default()),
-            write_cache: Mutex::new(VecDeque::new()),
+            read_cache: RwLock::new(ReadCache::default()),
+            write_cache: Mutex::new(WriteCache::default()),
+            haswork: Condvar::new(),
             flushed: Condvar::new(),
             run: Mutex::new(Cell::new(true)),
             log_file
@@ -95,37 +94,35 @@ impl AsyncFile {
     fn background(inner: Arc<Inner>) {
         let mut run = true;
         while run {
-            thread::sleep(Duration::from_millis(WRITE_DELAY_MS));
-
             let mut write_cache = inner.write_cache.lock().unwrap();
-            if !write_cache.is_empty() {
-
-                if let Some (ref log_file) = inner.log_file {
-                    let mut log = log_file.lock().unwrap();
-                    let mut log_write = false;
-                    for (append, page) in write_cache.iter() {
-                        if !append {
-                            let prev = inner.read_page(page.offset).unwrap();
-                            log_write |= log.append_page(prev).unwrap();
-                        }
-                    }
-                    if log_write {
-                        log.flush().unwrap();
-                        log.sync().unwrap();
-                    }
-                }
-
-                let mut rw = inner.rw.lock().unwrap();
-                while let Some((append, page)) = write_cache.pop_front() {
-                    if !append {
-                        let pos = page.offset.as_usize() as u64;
-                        rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
-                    }
-                    rw.write(&page.finish()).unwrap();
-                }
-                rw.flush().unwrap();
+            while write_cache.is_empty() {
+                write_cache = inner.haswork.wait(write_cache).unwrap();
             }
-            inner.flushed.notify_one();
+            if let Some(ref log_file) = inner.log_file {
+                let mut log = log_file.lock().unwrap();
+                let mut log_write = false;
+                for (append, page) in write_cache.iter() {
+                    if !append {
+                        let prev = inner.read_page(page.offset).unwrap();
+                        log_write |= log.append_page(prev).unwrap();
+                    }
+                }
+                if log_write {
+                    log.flush().unwrap();
+                    log.sync().unwrap();
+                }
+            }
+
+            let mut rw = inner.rw.lock().unwrap();
+            while let Some((append, page)) = write_cache.pop_front() {
+                if !append {
+                    let pos = page.offset.as_usize() as u64;
+                    rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
+                }
+                rw.write(&page.finish()).unwrap();
+            }
+            rw.flush().unwrap();
+            inner.flushed.notify_all();
             run = inner.run.lock().unwrap().get();
         }
     }
@@ -136,12 +133,14 @@ impl AsyncFile {
     }
 
     pub fn write_page(&self, page: Arc<Page>) {
-        self.inner.write_cache.lock().unwrap().push_back((false, page.clone()));
+        self.inner.write_cache.lock().unwrap().push_back(false, page.clone());
+        self.inner.haswork.notify_one();
         self.inner.read_cache.write().unwrap().put(page);
     }
 
     pub fn append_page (&self, page: Arc<Page>) {
-        self.inner.write_cache.lock().unwrap().push_back((true, page.clone()));
+        self.inner.write_cache.lock().unwrap().push_back(true, page.clone());
+        self.inner.haswork.notify_one();
         self.inner.read_cache.write().unwrap().put(page);
     }
 }

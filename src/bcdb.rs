@@ -20,13 +20,13 @@ use page::{Page, PAGE_SIZE};
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
-use datafile::{DataFile, DataEntry, DataType};
+use datafile::{DataFile, DataEntry};
 use error::BCSError;
 
 use std::sync::{Mutex,Arc};
 use std::io::{Read,Write,Seek};
 
-pub type Key = [u8; 32];
+pub const KEY_LEN : usize = 32;
 
 pub trait BCDBFactory {
     fn new_db (name: &str) -> Result<BCDB, BCSError>;
@@ -58,41 +58,15 @@ pub struct BCDB {
 }
 
 impl BCDB {
-    pub fn new (mut table: KeyFile, mut data: DataFile) -> Result<BCDB, BCSError> {
+    pub fn new (table: KeyFile, data: DataFile) -> Result<BCDB, BCSError> {
         let log = table.log_file();
-        BCDB::check(&mut table, &[0xBC, 0xDB])?;
-        BCDB::check(&mut data, &[0xBC, 0xDA])?;
-        BCDB::check_log(log.clone(), &[0xBC, 0x00])?;
-        let mut pagedb = BCDB {table, data, log};
-        pagedb.recover()?;
-        pagedb.batch()?;
-        Ok(pagedb)
+        Ok(BCDB {table, data, log})
     }
 
-    fn check_log(log: Arc<Mutex<LogFile>>, magic: &[u8]) -> Result<(), BCSError> {
-        let mut file = log.lock().unwrap();
-        if file.len()?.as_usize() > 0 {
-            let offset = Offset::new(0)?;
-            let first = file.read_page(offset)?;
-            let mut m = [0u8;2];
-            first.read(0, &mut m)?;
-            if m != magic {
-                return Err(BCSError::BadMagic);
-            }
-        }
-        Ok(())
-    }
-
-    fn check(file: &mut DBFile, magic: &[u8]) -> Result<(), BCSError> {
-        if file.len()?.as_usize() > 0 {
-            let offset = Offset::new(0)?;
-            let mut m = [0u8;2];
-            let first = file.read_page(offset)?;
-            first.read(0, &mut m)?;
-            if m != magic {
-                return Err(BCSError::BadMagic);
-            }
-        }
+    pub fn init (&mut self) -> Result<(), BCSError> {
+        self.data.init()?;
+        self.data.init()?;
+        self.log.lock().unwrap().init()?;
         Ok(())
     }
 
@@ -104,11 +78,11 @@ impl BCDB {
                 if let Some(first) = log_pages.next() {
                     let mut size = [0u8; 6];
 
-                    first.read(2, &mut size)?;
+                    first.read(0, &mut size)?;
                     let data_len = Offset::from_slice(&size)?;
                     self.data.truncate(data_len)?;
 
-                    first.read(8, &mut size)?;
+                    first.read(6, &mut size)?;
                     let table_len = Offset::from_slice(&size)?;
                     self.table.truncate(table_len)?;
 
@@ -158,17 +132,20 @@ impl BCDB {
         self.table.shutdown();
     }
 
-    pub fn put_data (&mut self, key: Key, data: &[u8]) -> Result<Offset, BCSError> {
-        let offset = self.data.append(DataEntry::new_data(data))?;
-        self.table.put(key, offset, &mut self.data);
+    pub fn put_data (&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
+        if key.len() != KEY_LEN {
+            return Err(BCSError::DoesNotFit);
+        }
+        let offset = self.data.append(DataEntry::new_data(key, data))?;
+        self.table.put(key, offset, &mut self.data)?;
         Ok(offset)
     }
 
-    pub fn get(&self, key: Key) -> Result<Option<DataEntry>, BCSError> {
-        if let Some(offset) = self.table.get(key, &self.data)? {
-            return self.data.get(offset);
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
+        if key.len() != KEY_LEN {
+            return Err(BCSError::DoesNotFit);
         }
-        Ok(None)
+        self.table.get(key, &self.data)
     }
 }
 

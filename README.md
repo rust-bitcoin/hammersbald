@@ -70,18 +70,10 @@ The data file is strictly append only. Anything written stays there the only all
 * append
 * truncate to last known correct size
 
-The data file starts with a magic number in two bytes spelling BCDA (blockchain data) in hex.
-Thereafter any number or data elements stored prefixed with a length and type.
-
 <pre>
 
 +------------- page        -----------------+
 |                                           |
-|   +----+-------------------------------+  |
-|   |u8  | magic (BC)                    |  |
-|   +----+-------------------------------+  |
-|   |u8  | magic (DA)                    |  |  
-|   +----+-------------------------------+  |
 |   +----+-------------------------------+  |
 |   |u8  | data type                     |  |
 |   +----+-------------------------------+  |
@@ -104,21 +96,41 @@ Spill over must not be the last data element in the data file.
 
 #### Data types
 
-* 1 transaction or application defined data
-* 2 blockchain header or block
-* 3 spill over of the hash table
+* 0 padding (ignore)
+* 1 application defined data
+* 2 spill over of the hash table
 
-##### Transaction or application specific data
+##### Application specific data
 <pre>
 +----+-------------------------------------+
 |u256| id                                  |
 +----+-------------------------------------+
-|[u8]| serialized transaction or app data  |
+|    | app data                            |
++----+-------------------------------------+
+</pre>
+
+##### Spill over
+<pre>
++----+-------------------------------------+
+|u48 | data offset                         |
++----+-------------------------------------+
+|u48 | next spill over or 0                |
++----+-------------------------------------+
+</pre>
+
+##### Transaction
+<pre>
++----+-------------------------------------+
+| u8 | app data type                       |
++----+-------------------------------------+
+|[u8]| serialized transactio               |
 +----+-------------------------------------+
 </pre>
 
 ##### Header
 <pre>
++----+-------------------------------------+
+| u8 | app data type                       |
 +----+-------------------------------------+
 |[u8]| id of previous header               |
 +----+-------------------------------------+
@@ -132,6 +144,8 @@ Spill over must not be the last data element in the data file.
 
 ##### Block
 <pre>
++------+-------------------------------------+
+| u8   | app data type                       |
 +------+-------------------------------------+
 |[u8]  | id of previous header or block      |
 +------+-------------------------------------+
@@ -152,17 +166,9 @@ is the id of the tip with known u256 representation.
 
 ### Table file
 
-The data file starts with a magic number in two bytes spelling BCDB (for blockchain data base) 
-in hex. Thereafter any number of buckets storing 6 byte pointers into data.
-
-
 <pre>
 +------------- page        --------------------+
 |                                              |
-|  +--------+-------------------------------+  |
-|  |u8      | magic (BC)                    |  |
-|  +--------+-------------------------------+  |
-|  |u8      | magic (DB)                    |  |
 |  +--------+-------------------------------+  |
 |  | u16    | L (starts at 9)               |  |
 |  +--------+-------------------------------+  |
@@ -171,28 +177,24 @@ in hex. Thereafter any number of buckets storing 6 byte pointers into data.
 |  |        | padding zeros                 |  |
 |  +--------+-------------------------------+  |
 +----------------------------------------------+
-+-------------- page        --------------------+
-|                                               |
-|  +---------+-------------------------------+  |
-|  |[u48;512]| data offset                   |  |
-|  +---------+-------------------------------+  |
-|  ...                                          |
-+-----------------------------------------------+
++-------------- page        ---------------------+
+|                                                |
+|  +----------------+-------------------------+  |
+|  |[(u48, u48);340]|(offset, spill over or 0)|  |
+|  +----------------+-------------------------+  |
+|  ...                                           |
++------------------------------------------------+
 ....
 </pre>
 
 ### Log file
 
-The log file starts with a magic number and last known correct file sizes.
+The log file starts with last known correct file sizes.
 Therafter any number of pages that are pre-images of the updated table file.
 
 <pre>
 +------------- page        --------------------+
 |                                              |
-|  +--------+-------------------------------+  |
-|  |u8      | magic (BC)                    |  |
-|  +--------+-------------------------------+  |
-|  |u8      | magic (00)                    |  |
 |  +--------+-------------------------------+  |
 |  | u48    | last correct data file size   |  |
 |  +--------+-------------------------------+  |

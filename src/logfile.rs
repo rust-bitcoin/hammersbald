@@ -40,6 +40,10 @@ impl LogFile {
         LogFile { rw: Mutex::new(rw), appended: HashSet::new() }
     }
 
+    pub fn init (&mut self) -> Result<(), BCSError> {
+        Ok(())
+    }
+
     /// append a page if not yet logged in this batch. Returns false if the page was logged before.
     pub fn append_page (&mut self, page: Arc<Page>) -> Result<bool, BCSError> {
         if !self.appended.contains(&page.offset) {

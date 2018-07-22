@@ -19,7 +19,7 @@
 //!
 
 use asyncfile::AsyncFile;
-use bcdb::{RW, DBFile, PageIterator, PageFile};
+use bcdb::{RW, DBFile, PageIterator, PageFile, KEY_LEN};
 use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};
@@ -42,6 +42,17 @@ impl DataFile {
             page: Page::new(offset) }
     }
 
+    pub fn init(&mut self) -> Result<(), BCSError> {
+        if self.page.offset.as_usize() == 0 && self.append_pos.as_usize() == 0 {
+            self.append_pos = self.len()?;
+            self.page = Page::new(self.append_pos);
+            if self.append_pos.as_usize() == 0 {
+                self.append_slice(&[0xBC,0xDA])?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
@@ -61,23 +72,29 @@ impl DataFile {
         return Ok(fetch_iterator.next());
     }
 
+    pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
+        let page = self.read_page(offset.this_page())?;
+        let mut buf = [0u8; 12];
+        page.read(offset.in_page_pos(), &mut buf)?;
+        Ok((Offset::from_slice(&buf[..6])?, Offset::from_slice(&buf[6..])?))
+    }
+
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
-        if self.page.offset.as_usize() == 0 && self.append_pos.as_usize() == 0 {
-            self.append_pos = self.len()?;
-            self.page = Page::new(self.append_pos);
-            if self.append_pos.as_usize() == 0 {
-                self.append_slice(&[0xBC,0xDA])?;
-            }
+        if entry.data_type == DataType::AppData && entry.data_key.len() != KEY_LEN {
+            return Err(BCSError::DoesNotFit);
         }
+
         let start = self.append_pos;
         let mut data_type = [0u8;1];
         data_type[0] = entry.data_type.to_u8();
         self.append_slice(&data_type)?;
 
+
         let mut len = [0u8; 3];
-        U24::new(entry.content.len())?.serialize(&mut len);
+        U24::new(KEY_LEN + entry.data.len())?.serialize(&mut len);
         self.append_slice(&len)?;
-        self.append_slice(entry.content.as_slice())?;
+        self.append_slice(entry.data_key.as_slice())?;
+        self.append_slice(entry.data.as_slice())?;
         return Ok(start);
     }
 
@@ -133,10 +150,8 @@ impl PageFile for DataFile {
 pub enum DataType {
     /// no data, just padding the storage pages with zero bytes
     Padding,
-    /// Transaction of application defined data associated with a page
-    TransactionOrAppData,
-    /// A header or a block of the blockchain
-    HeaderOrBlock,
+    /// application defined data
+    AppData,
     /// Spillover bucket of the hash table
     TableSpillOver
 }
@@ -144,9 +159,8 @@ pub enum DataType {
 impl DataType {
     pub fn from (data_type: u8) -> DataType {
         match data_type {
-            1 => DataType::TransactionOrAppData,
-            2 => DataType::HeaderOrBlock,
-            3 => DataType::TableSpillOver,
+            1 => DataType::AppData,
+            2 => DataType::TableSpillOver,
             _ => DataType::Padding
         }
     }
@@ -154,9 +168,8 @@ impl DataType {
     pub fn to_u8 (&self) -> u8 {
         match self {
             DataType::Padding => 0,
-            DataType::TransactionOrAppData => 1,
-            DataType::HeaderOrBlock => 2,
-            DataType::TableSpillOver => 3
+            DataType::AppData => 1,
+            DataType::TableSpillOver => 2
         }
     }
 }
@@ -164,12 +177,19 @@ impl DataType {
 #[derive(Eq, PartialEq,Debug,Clone)]
 pub struct DataEntry {
     pub data_type: DataType,
-    pub content: Vec<u8>
+    pub data_key: Vec<u8>,
+    pub data: Vec<u8>
 }
 
 impl DataEntry {
-    pub fn new_data (data: &[u8]) -> DataEntry {
-        DataEntry{data_type: DataType::TransactionOrAppData, content: data.to_vec()}
+    pub fn new_data (data_key: &[u8], data: &[u8]) -> DataEntry {
+        DataEntry{data_type: DataType::AppData, data_key: data_key.to_vec(), data: data.to_vec()}
+    }
+    pub fn new_spillover (offset: Offset, next: Offset) -> DataEntry {
+        let mut sp = [0u8; 12];
+        offset.serialize(&mut sp[..6]);
+        offset.serialize(&mut sp[6..]);
+        DataEntry{data_type: DataType::TableSpillOver, data_key: Vec::new(), data: sp.to_vec()}
     }
 }
 
@@ -188,14 +208,17 @@ impl<'file> DataIterator<'file> {
         DataIterator{page_iterator, pos, current: Some(page)}
     }
 
-    fn skip_padding(&mut self) -> Option<DataType> {
+    fn skip_non_data(&mut self) -> Option<DataType> {
         loop {
             if let Some(ref mut current) = self.current {
                 while self.pos < PAYLOAD_MAX {
                     let data_type = DataType::from(current.payload[self.pos]);
                     self.pos += 1;
-                    if data_type != DataType::Padding {
+                    if data_type == DataType::AppData {
                         return Some(data_type);
+                    }
+                    if data_type == DataType::TableSpillOver {
+                        self.pos += 12;
                     }
                 }
             }
@@ -237,18 +260,22 @@ impl<'file> Iterator for DataIterator<'file> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.current.is_none() {
             self.current = self.page_iterator.next();
-            // skip magic on first page
-            self.pos = 2;
         }
         if self.current.is_some() {
-            if let Some(data_type) = self.skip_padding() {
-                let mut size = [0u8; 3];
-                if self.read_slice(&mut size) {
-                    let len = U24::from_slice(&size).unwrap();
-                    let mut buf = vec!(0u8; len.as_usize());
-                    if self.read_slice(buf.as_mut_slice()) {
-                        return Some(DataEntry { data_type, content: buf });
+            if let Some(data_type) = self.skip_non_data() {
+                if data_type == DataType::AppData {
+                    let mut size = [0u8; 3];
+                    if self.read_slice(&mut size) {
+                        let len = U24::from_slice(&size).unwrap();
+                        let mut buf = vec!(0u8; len.as_usize());
+                        if self.read_slice(buf.as_mut_slice()) {
+                            return Some(
+                                DataEntry::new_data(&buf[0..KEY_LEN], &buf[KEY_LEN..]));
+                        }
                     }
+                }
+                else if data_type == DataType::TableSpillOver {
+                    self.pos += 12;
                 }
             }
         }
@@ -269,9 +296,9 @@ mod test {
         let mut data = DataFile::new(Box::new(mem));
         assert!(data.page_iter(0).next().is_none());
         assert!(data.data_iter().next().is_none());
-        let entry = DataEntry::new_data("hello world!".as_bytes());
+        let entry = DataEntry::new_data(&[0u8;KEY_LEN], "hello world!".as_bytes());
         let hello_offset = data.append(entry.clone()).unwrap();
-        let big_entry = DataEntry::new_data(vec!(1u8; 5000).as_slice());
+        let big_entry = DataEntry::new_data(&[1u8;KEY_LEN], vec!(1u8; 5000).as_slice());
         let big_offset = data.append(big_entry.clone()).unwrap();
         data.flush().unwrap();
         {

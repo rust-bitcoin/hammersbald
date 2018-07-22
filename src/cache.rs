@@ -29,12 +29,12 @@ use std::sync::Arc;
 pub const READ_CACHE_PAGES: usize = 100;
 
 #[derive(Default)]
-pub struct Cache {
+pub struct ReadCache {
     map: HashMap<Offset, Arc<Page>>,
     list: VecDeque<Arc<Page>>
 }
 
-impl Cache {
+impl ReadCache {
     pub fn put (&mut self, block: Arc<Page>) {
         if self.list.len () >= READ_CACHE_PAGES {
             if let Some(old) = self.list.pop_front() {
@@ -56,5 +56,32 @@ impl Cache {
             Some(b) => Some(b.clone()),
             None => None
         }
+    }
+}
+
+#[derive(Default)]
+pub struct WriteCache {
+    list: VecDeque<(bool, Arc<Page>)>
+}
+
+impl WriteCache {
+    pub fn push_back (&mut self, append: bool, page: Arc<Page>) {
+        let offset = page.offset;
+        self.list.push_back ((append, page));
+        if let Some (prev) = self.list.iter().position(move |(_, p)| p.offset == offset) {
+            self.list.swap_remove_back(prev);
+        }
+    }
+
+    pub fn pop_front (&mut self) -> Option<(bool, Arc<Page>)> {
+        self.list.pop_front()
+    }
+
+    pub fn is_empty (&self) -> bool {
+        self.list.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=&(bool, Arc<Page>)> {
+        self.list.iter()
     }
 }
