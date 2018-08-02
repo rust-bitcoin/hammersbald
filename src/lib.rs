@@ -26,6 +26,10 @@
 #![deny(missing_docs)]
 #![deny(unused_must_use)]
 
+#[macro_use]
+extern crate log;
+extern crate hex;
+
 mod page;
 mod types;
 mod inmemory;
@@ -34,6 +38,6 @@ mod asyncfile;
 mod logfile;
 mod keyfile;
 mod datafile;
-mod bcdb;
 mod cache;
+pub mod bcdb;
 pub mod error;

@@ -29,6 +29,9 @@ use types::Offset;
 use std::sync::{Mutex, Arc};
 use std::ops::Deref;
 
+const PAGE_HEAD :u64 = 10;
+const INIT_BUCKETS :u64 = 256;
+const INIT_LOGMOD :u64 = 7;
 const BUCKETS_PER_PAGE :u64 = 340;
 const BUCKET_SIZE: u64 = 12;
 
@@ -45,7 +48,12 @@ impl KeyFile {
         KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), buckets: 256, log_mod: 7, step: 0 }
     }
 
-    pub fn init () -> Result<(), BCSError> {
+    pub fn init (&mut self) -> Result<(), BCSError> {
+        let mut page = Page::new(Offset::new(0)?);
+        let l =[self.log_mod as u8;1];
+        page.write(0, &l)?;
+        page.write_offset(1, Offset::new(self.buckets as usize)?)?;
+        self.write_page(Arc::new(page));
         Ok(())
     }
 
@@ -135,6 +143,7 @@ impl KeyFile {
     }
 
     fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
+        trace!("store {} to bucket {}", offset.as_usize(), bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -210,6 +219,7 @@ impl KeyFile {
     }
 
     pub fn write_page(&self, page: Arc<Page>) {
+        trace!("write page {}", page.offset.as_usize());
         self.async_file.write_page(page)
     }
 
@@ -222,8 +232,8 @@ impl KeyFile {
     }
 
     fn bucket_offset (bucket: u64) -> Result<Offset, BCSError> {
-        Offset::new (((bucket * BUCKET_SIZE / BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64
-                         + (bucket % BUCKETS_PER_PAGE) * BUCKET_SIZE) as usize)
+        Offset::new (((bucket * BUCKET_SIZE / BUCKETS_PER_PAGE) * PAGE_SIZE as u64
+                         + (bucket % BUCKETS_PER_PAGE) * BUCKET_SIZE + PAGE_HEAD) as usize)
     }
 
     // assuming that key is already a good hash
@@ -256,6 +266,7 @@ impl DBFile for KeyFile {
 
 impl PageFile for KeyFile {
     fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        trace!("read page {}", offset.as_usize());
         self.async_file.read_page(offset)
     }
 }

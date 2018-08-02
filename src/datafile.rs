@@ -24,8 +24,11 @@ use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};
 
+use hex;
+
 use std::sync::Arc;
 use std::cmp::min;
+
 
 /// The key file
 pub struct DataFile {
@@ -48,6 +51,7 @@ impl DataFile {
             self.page = Page::new(self.append_pos);
             if self.append_pos.as_usize() == 0 {
                 self.append_slice(&[0xBC,0xDA])?;
+                self.async_file.cache(Arc::new(self.page.clone()));
             }
         }
         Ok(())
@@ -66,6 +70,7 @@ impl DataFile {
     }
 
     pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
+        trace!("get data at {}", offset.as_usize());
         let page = self.read_page(offset.this_page())?;
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
@@ -95,6 +100,8 @@ impl DataFile {
         self.append_slice(&len)?;
         self.append_slice(entry.data_key.as_slice())?;
         self.append_slice(entry.data.as_slice())?;
+        self.async_file.cache(Arc::new(self.page.clone()));
+        trace!("appended data {} at {}", hex::encode(entry.data), start.as_usize());
         return Ok(start);
     }
 

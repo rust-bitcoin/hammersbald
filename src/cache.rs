@@ -35,23 +35,26 @@ pub struct ReadCache {
 }
 
 impl ReadCache {
-    pub fn put (&mut self, block: Arc<Page>) {
+    pub fn put (&mut self, page: Arc<Page>) {
         if self.list.len () >= READ_CACHE_PAGES {
             if let Some(old) = self.list.pop_front() {
                 self.map.remove(&old.offset);
             }
         }
-        if self.map.insert(block.offset, block.clone()).is_none() {
-            self.list.push_back(block);
+        trace!("add page {} to read cache", page.offset.as_usize());
+        if self.map.insert(page.offset, page.clone()).is_none() {
+            self.list.push_back(page);
         }
     }
 
     pub fn clear (&mut self) {
+        trace!("clear cache");
         self.map.clear();
         self.list.clear();
     }
 
     pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
+        trace!("get page {} from read cache", offset.as_usize());
         match self.map.get(&offset) {
             Some(b) => Some(b.clone()),
             None => None

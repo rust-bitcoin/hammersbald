@@ -63,8 +63,10 @@ impl Inner {
 
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         if let Some(page) = self.read_cache.read().unwrap().get(offset) {
+            trace!("return page {} from cache", offset.as_usize());
             return Ok(page);
         }
+        trace!("read page {} from store", offset.as_usize());
         let mut buffer = [0u8; PAGE_SIZE];
         let mut read_cache = self.read_cache.write().unwrap();
         let mut rw = self.rw.lock().unwrap();
@@ -98,6 +100,7 @@ impl AsyncFile {
             while write_cache.is_empty() {
                 write_cache = inner.haswork.wait(write_cache).unwrap();
             }
+            trace!("bg write awake");
             if let Some(ref log_file) = inner.log_file {
                 let mut log = log_file.lock().unwrap();
                 let mut log_write = false;
@@ -119,6 +122,7 @@ impl AsyncFile {
                     let pos = page.offset.as_usize() as u64;
                     rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
                 }
+                trace!("bg write page {}", page.offset.as_usize());
                 rw.write(&page.finish()).unwrap();
             }
             rw.flush().unwrap();
@@ -135,6 +139,10 @@ impl AsyncFile {
     pub fn write_page(&self, page: Arc<Page>) {
         self.inner.write_cache.lock().unwrap().push_back(false, page.clone());
         self.inner.haswork.notify_one();
+        self.inner.read_cache.write().unwrap().put(page);
+    }
+
+    pub fn cache (&self, page: Arc<Page>) {
         self.inner.read_cache.write().unwrap().put(page);
     }
 

@@ -23,29 +23,45 @@ use keyfile::KeyFile;
 use datafile::{DataFile, DataEntry};
 use error::BCSError;
 
+use hex;
+
 use std::sync::{Mutex,Arc};
 use std::io::{Read,Write,Seek};
 
+/// fixed key length of 256 bits
 pub const KEY_LEN : usize = 32;
 
+/// a trait to create a new db
 pub trait BCDBFactory {
+    /// create a new db
     fn new_db (name: &str) -> Result<BCDB, BCSError>;
 }
 
+/// a read-write-seak-able storage with added methods
 pub trait RW : Read + Write + Seek + Send {
+    /// length of the storage
     fn len (&mut self) -> Result<usize, BCSError>;
+    /// truncate storage
     fn truncate(&mut self, new_len: usize) -> Result<(), BCSError>;
+    /// tell OS to flush buffers to disk
     fn sync (&self) -> Result<(), BCSError>;
 }
 
+/// a paged file with added features
 pub trait DBFile : PageFile {
+    /// flush buffered writes
     fn flush(&mut self) -> Result<(), BCSError>;
+    /// tel OS to flush buffers to disk
     fn sync (&mut self) -> Result<(), BCSError>;
+    /// truncate to a given length
     fn truncate(&mut self, offset: Offset) -> Result<(), BCSError>;
+    /// return storage length
     fn len(&mut self) -> Result<Offset, BCSError>;
 }
 
+/// a paged storage
 pub trait PageFile {
+    /// read a page at given offset
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError>;
 }
 
@@ -58,13 +74,15 @@ pub struct BCDB {
 }
 
 impl BCDB {
+    /// create a new db with key and data file
     pub fn new (table: KeyFile, data: DataFile) -> Result<BCDB, BCSError> {
         let log = table.log_file();
         Ok(BCDB {table, data, log})
     }
 
+    /// initialize an empty db
     pub fn init (&mut self) -> Result<(), BCSError> {
-        self.data.init()?;
+        self.table.init()?;
         self.data.init()?;
         self.log.lock().unwrap().init()?;
         Ok(())
@@ -99,6 +117,7 @@ impl BCDB {
         Ok(())
     }
 
+    /// end current batch and start a new batch
     pub fn batch (&mut self)  -> Result<(), BCSError> {
         self.data.flush()?;
         self.data.sync()?;
@@ -127,12 +146,16 @@ impl BCDB {
         Ok(())
     }
 
+    /// stop background writer
     pub fn shutdown (&mut self) {
         self.data.shutdown();
         self.table.shutdown();
     }
 
-    pub fn put_data (&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
+    /// stora data with a key
+    /// storing with the same key makes previous data unaccessible
+    pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
+        trace!("put {} {}", hex::encode(key), hex::encode(data));
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
@@ -141,20 +164,25 @@ impl BCDB {
         Ok(offset)
     }
 
+    /// retrieve data by key
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
+        trace!("get {}", hex::encode(key));
         self.table.get(key, &self.data)
     }
 }
 
+/// iterate through pages of a paged file
 pub struct PageIterator<'file> {
     pagenumber: usize,
     file: &'file PageFile
 }
 
+/// page iterator
 impl<'file> PageIterator<'file> {
+    /// create a new iterator starting at given page
     pub fn new (file: &'file PageFile, pagenumber: usize) -> PageIterator {
         PageIterator{pagenumber, file}
     }
@@ -178,13 +206,25 @@ impl<'file> Iterator for PageIterator<'file> {
 #[cfg(test)]
 mod test {
     extern crate hex;
+    extern crate simple_logger;
 
     use inmemory::InMemory;
+    use log;
 
     use super::*;
     #[test]
     fn test () {
+        simple_logger::init_with_level(log::Level::Trace).unwrap();
+
         let mut db = InMemory::new_db("").unwrap();
+        db.init().unwrap();
+
+        let key = [0u8;32];
+        let data = [0xffu8;32];
+        db.put(&key, &data).unwrap();
+
+        assert_eq!(db.get(&key).unwrap(), Some(data[..].to_owned()));
+
         db.shutdown();
     }
 }
