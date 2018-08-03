@@ -46,12 +46,11 @@ impl DataFile {
     }
 
     pub fn init(&mut self) -> Result<(), BCSError> {
-        if self.page.offset.as_usize() == 0 && self.append_pos.as_usize() == 0 {
+        if self.page.offset.as_u64() == 0 && self.append_pos.as_u64() == 0 {
             self.append_pos = self.len()?;
             self.page = Page::new(self.append_pos);
-            if self.append_pos.as_usize() == 0 {
+            if self.append_pos.as_u64() == 0 {
                 self.append_slice(&[0xBC,0xDA])?;
-                self.async_file.cache(Arc::new(self.page.clone()));
             }
         }
         Ok(())
@@ -61,7 +60,7 @@ impl DataFile {
         self.async_file.shutdown()
     }
 
-    fn page_iter (&self, pagenumber: usize) -> PageIterator {
+    fn page_iter (&self, pagenumber: u64) -> PageIterator {
         PageIterator::new(self, pagenumber)
     }
 
@@ -70,7 +69,7 @@ impl DataFile {
     }
 
     pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
-        trace!("get data at {}", offset.as_usize());
+        trace!("get data at {}", offset.as_u64());
         let page = self.read_page(offset.this_page())?;
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
@@ -100,13 +99,13 @@ impl DataFile {
         self.append_slice(&len)?;
         self.append_slice(entry.data_key.as_slice())?;
         self.append_slice(entry.data.as_slice())?;
-        self.async_file.cache(Arc::new(self.page.clone()));
-        trace!("appended data {} at {}", hex::encode(entry.data), start.as_usize());
+        trace!("appended data {} at {}", hex::encode(entry.data), start.as_u64());
         return Ok(start);
     }
 
     fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCSError> {
         let mut wrote = 0;
+        let mut wrote_on_this_page = 0;
         let mut pos = self.append_pos.in_page_pos();
         while wrote < slice.len() {
             if pos == PAYLOAD_MAX {
@@ -114,13 +113,15 @@ impl DataFile {
                 self.append_pos = self.append_pos.next_page()?;
                 self.page = Page::new (self.append_pos);
                 pos = 0;
+                wrote_on_this_page = 0;
             }
             let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
             self.page.payload [pos .. pos + have].copy_from_slice (&slice[wrote .. wrote + have]);
             pos += have;
             wrote += have;
+            wrote_on_this_page += have;
         }
-        self.append_pos = Offset::new(self.append_pos.as_usize() + wrote)?;
+        self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
         Ok(())
     }
 }
@@ -148,6 +149,9 @@ impl DBFile for DataFile {
 
 impl PageFile for DataFile {
     fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        if offset == self.page.offset {
+            return Ok(Arc::new(self.page.clone()))
+        }
         self.async_file.read_page(offset)
     }
 }

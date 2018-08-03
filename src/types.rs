@@ -22,11 +22,11 @@ use error::BCSError;
 use page::PAGE_SIZE;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
-pub struct Offset(usize);
+pub struct Offset(u64);
 
 impl Offset {
 
-    pub fn new (value: usize) ->Result<Offset, BCSError> {
+    pub fn new (value: u64) ->Result<Offset, BCSError> {
         if value > 1 << 47 {
             return Err(BCSError::InvalidOffset);
         }
@@ -37,15 +37,15 @@ impl Offset {
         if slice.len() != 6 {
             return Err(BCSError::InvalidOffset);
         }
-        let mut size = 0usize;
+        let mut size = 0u64;
         for i in 0 .. 6 {
             size <<= 8;
-            size += slice[i] as usize;
+            size += slice[i] as u64;
         }
         Ok(Offset(size))
     }
 
-    pub fn as_usize (&self) -> usize {
+    pub fn as_u64 (&self) -> u64 {
         return self.0;
     }
 
@@ -57,19 +57,19 @@ impl Offset {
     }
 
     pub fn this_page(&self) -> Offset {
-        Offset::new((self.0/ PAGE_SIZE)* PAGE_SIZE).unwrap()
+        Offset::new((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64).unwrap()
     }
 
     pub fn next_page(&self) -> Result<Offset, BCSError> {
-        Offset::new((self.0/ PAGE_SIZE + 1)* PAGE_SIZE)
+        Offset::new((self.0/ PAGE_SIZE as u64 + 1)* PAGE_SIZE as u64)
     }
 
-    pub fn page_number(&self) -> usize {
-        self.0/PAGE_SIZE
+    pub fn page_number(&self) -> u64 {
+        self.0/PAGE_SIZE as u64
     }
 
     pub fn in_page_pos(&self) -> usize {
-        self.0 - (self.0/ PAGE_SIZE)* PAGE_SIZE
+        (self.0 - (self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64) as usize
     }
 }
 

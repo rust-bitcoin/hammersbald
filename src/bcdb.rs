@@ -90,7 +90,7 @@ impl BCDB {
 
     fn recover(&mut self) -> Result<(), BCSError> {
         let mut log = self.log.lock().unwrap();
-        if log.len()?.as_usize() > 0 {
+        if log.len()?.as_u64() > 0 {
             {
                 let mut log_pages = log.page_iter();
                 if let Some(first) = log_pages.next() {
@@ -105,7 +105,7 @@ impl BCDB {
                     self.table.truncate(table_len)?;
 
                     for page in log_pages {
-                        if page.offset.as_usize() < table_len.as_usize() {
+                        if page.offset.as_u64() < table_len.as_u64() {
                             self.table.write_page(page);
                         }
                     }
@@ -176,14 +176,14 @@ impl BCDB {
 
 /// iterate through pages of a paged file
 pub struct PageIterator<'file> {
-    pagenumber: usize,
+    pagenumber: u64,
     file: &'file PageFile
 }
 
 /// page iterator
 impl<'file> PageIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file PageFile, pagenumber: usize) -> PageIterator {
+    pub fn new (file: &'file PageFile, pagenumber: u64) -> PageIterator {
         PageIterator{pagenumber, file}
     }
 }
@@ -192,8 +192,8 @@ impl<'file> Iterator for PageIterator<'file> {
     type Item = Arc<Page>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pagenumber < (1 << 47) / PAGE_SIZE {
-            let offset = Offset::new(self.pagenumber* PAGE_SIZE).unwrap();
+        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
+            let offset = Offset::new(self.pagenumber* PAGE_SIZE as u64).unwrap();
             if let Ok(page) = self.file.read_page(offset) {
                 self.pagenumber += 1;
                 return Some(page);
@@ -219,12 +219,18 @@ mod test {
         let mut db = InMemory::new_db("").unwrap();
         db.init().unwrap();
 
-        let key = [0u8;32];
+        let key = [0x11u8;32];
         let data = [0xffu8;32];
         db.put(&key, &data).unwrap();
 
         assert_eq!(db.get(&key).unwrap(), Some(data[..].to_owned()));
 
+        for _ in 1 .. 1000 {
+            let data = [0xccu8; 32];
+            db.put(&key, &data).unwrap();
+
+            assert_eq!(db.get(&key).unwrap(), Some(data[..].to_owned()));
+        }
         db.shutdown();
     }
 }

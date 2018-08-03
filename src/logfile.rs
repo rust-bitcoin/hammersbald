@@ -76,13 +76,13 @@ impl DBFile for LogFile {
 
     fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
         let mut rw = self.rw.lock().unwrap();
-        rw.truncate(offset.as_usize())
+        rw.truncate(offset.as_u64() as usize)
     }
 
     fn len(&mut self) -> Result<Offset, BCSError> {
         self.flush()?;
         let mut rw = self.rw.lock().unwrap();
-        Offset::new(rw.len()?)
+        Offset::new(rw.len()? as u64)
     }
 }
 
@@ -90,7 +90,7 @@ impl PageFile for LogFile {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let mut buffer = [0u8; PAGE_SIZE];
         let mut rw = self.rw.lock().unwrap();
-        rw.seek(SeekFrom::Start(offset.as_usize() as u64))?;
+        rw.seek(SeekFrom::Start(offset.as_u64()))?;
         rw.read(&mut buffer)?;
         let page = Arc::new(Page::from_buf(buffer));
         Ok(page)

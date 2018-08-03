@@ -48,7 +48,7 @@ impl Page {
     }
 
     /// create a Page from read buffer
-    pub fn from_buf (buf: [u8; PAGE_SIZE]) -> Page {
+    pub fn from_buf (buf: [u8; PAGE_SIZE as usize]) -> Page {
         let mut payload = [0u8; PAYLOAD_MAX];
         payload.copy_from_slice(&buf[0..PAYLOAD_MAX]);
         Page {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap() }
