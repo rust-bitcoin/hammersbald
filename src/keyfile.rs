@@ -112,6 +112,9 @@ impl KeyFile {
                             return Err(BCSError::Corrupted);
                         }
                     }
+                    else {
+                        break;
+                    }
                 }
                 else {
                     break;
@@ -180,10 +183,12 @@ impl KeyFile {
     pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
         let hash = Self::hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
-        if bucket <= self.step {
+        if bucket < self.step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
+        trace!("bucket {}", bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
+        trace!("bucket offset {}", bucket_offset.as_u64());
         let bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {
