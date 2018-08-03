@@ -44,6 +44,10 @@ impl LogFile {
         Ok(())
     }
 
+    pub fn has_page(&self, offset: Offset) -> bool {
+        self.appended.contains(&offset)
+    }
+
     /// append a page if not yet logged in this batch. Returns false if the page was logged before.
     pub fn append_page (&mut self, page: Arc<Page>) -> Result<bool, BCSError> {
         if !self.appended.contains(&page.offset) {

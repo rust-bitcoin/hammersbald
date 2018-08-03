@@ -70,14 +70,23 @@ impl DataFile {
 
     pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
         trace!("get data at {}", offset.as_u64());
-        let page = self.read_page(offset.this_page())?;
+
+        let page = if offset.this_page() == self.page.offset {
+            Arc::new(self.page.clone())
+        } else {
+            self.read_page(offset.this_page())?
+        };
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         return Ok(fetch_iterator.next());
     }
 
     pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
-        let page = self.read_page(offset.this_page())?;
+        let page = if offset.this_page() == self.page.offset {
+            Arc::new(self.page.clone())
+        } else {
+            self.read_page(offset.this_page())?
+        };
         let mut buf = [0u8; 12];
         page.read(offset.in_page_pos(), &mut buf)?;
         Ok((Offset::from_slice(&buf[..6])?, Offset::from_slice(&buf[6..])?))
@@ -108,18 +117,19 @@ impl DataFile {
         let mut wrote_on_this_page = 0;
         let mut pos = self.append_pos.in_page_pos();
         while wrote < slice.len() {
+            let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
+            self.page.payload [pos .. pos + have].copy_from_slice (&slice[wrote .. wrote + have]);
+            pos += have;
+            wrote += have;
+            wrote_on_this_page += have;
             if pos == PAYLOAD_MAX {
+                trace!("append data page {}", self.page.offset.as_u64());
                 self.async_file.append_page(Arc::new(self.page.clone()));
                 self.append_pos = self.append_pos.next_page()?;
                 self.page = Page::new (self.append_pos);
                 pos = 0;
                 wrote_on_this_page = 0;
             }
-            let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
-            self.page.payload [pos .. pos + have].copy_from_slice (&slice[wrote .. wrote + have]);
-            pos += have;
-            wrote += have;
-            wrote_on_this_page += have;
         }
         self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
         Ok(())

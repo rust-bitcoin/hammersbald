@@ -62,8 +62,17 @@ impl Inner {
     }
 
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+        let write_cache = self.write_cache.lock().unwrap();
+        if let Some(page) = write_cache.get(offset) {
+            trace!("return page {} from write cache", offset.as_u64());
+            return Ok(page);
+        }
+        self.read_page_from_store(offset)
+    }
+
+    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         if let Some(page) = self.read_cache.read().unwrap().get(offset) {
-            trace!("return page {} from cache", offset.as_u64());
+            trace!("return page {} from read cache", offset.as_u64());
             return Ok(page);
         }
         trace!("read page {} from store", offset.as_u64());
@@ -76,6 +85,7 @@ impl Inner {
         read_cache.put(page.clone());
         Ok(page)
     }
+
 }
 
 impl AsyncFile {
@@ -98,24 +108,35 @@ impl AsyncFile {
         while run {
             let mut write_cache = inner.write_cache.lock().unwrap();
             while write_cache.is_empty() {
+                trace!("bg write sleep");
                 write_cache = inner.haswork.wait(write_cache).unwrap();
             }
             trace!("bg write awake");
-            if let Some(ref log_file) = inner.log_file {
-                let mut log = log_file.lock().unwrap();
-                let mut log_write = false;
-                for (append, page) in write_cache.iter() {
-                    if !append {
-                        let prev = inner.read_page(page.offset).unwrap();
-                        log_write |= log.append_page(prev).unwrap();
-                    }
-                }
-                if log_write {
-                    log.flush().unwrap();
-                    log.sync().unwrap();
+            let mut logged = false;
+            for (append, page) in write_cache.iter() {
+                if !append {
+                    logged = true;
+                    break;
                 }
             }
-
+            if logged {
+                if let Some(ref log_file) = inner.log_file {
+                    let mut log = log_file.lock().unwrap();
+                    let mut log_write = false;
+                    for (append, page) in write_cache.iter() {
+                        if !append && !log.has_page(page.offset) {
+                            if let Ok(prev) = inner.read_page_from_store(page.offset) {
+                                log_write |= log.append_page(prev).unwrap();
+                            }
+                        }
+                    }
+                    if log_write {
+                        log.flush().unwrap();
+                        log.sync().unwrap();
+                    }
+                }
+                trace!("bg wrote log");
+            }
             let mut rw = inner.rw.lock().unwrap();
             while let Some((append, page)) = write_cache.pop_front() {
                 if !append {
@@ -127,6 +148,8 @@ impl AsyncFile {
             }
             rw.flush().unwrap();
             inner.flushed.notify_all();
+            trace!("bg flushed");
+
             run = inner.run.lock().unwrap().get();
         }
     }

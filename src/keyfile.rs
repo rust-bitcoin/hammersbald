@@ -113,6 +113,7 @@ impl KeyFile {
                         }
                     }
                     else {
+                        bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
                         break;
                     }
                 }
@@ -168,6 +169,7 @@ impl KeyFile {
                     // this logically overwrites previous key association in the spillover chain
                     // since search stops at first key match
                     let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                    trace!("add spillover {} in bucket {}", spillover.as_u64(), bucket);
                     let so = data_file.append(DataEntry::new_spillover(offset, spillover))?;
                     bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so)?;
                 }
