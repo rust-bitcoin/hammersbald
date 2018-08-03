@@ -225,7 +225,7 @@ mod test {
 
         assert_eq!(db.get(&key).unwrap(), Some(data[..].to_owned()));
 
-        for _ in 1 .. 20000 {
+        for _ in 1 .. 200000 {
             let data = [0xccu8; 32];
             db.put(&key, &data).unwrap();
 

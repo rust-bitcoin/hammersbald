@@ -150,6 +150,7 @@ impl KeyFile {
     }
 
     fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
+        trace!("store {} to bucket {}", offset.as_u64(), bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -188,9 +189,9 @@ impl KeyFile {
         if bucket < self.step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
-        trace!("bucket {}", bucket);
+        trace!("get bucket {}", bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
-        trace!("bucket offset {}", bucket_offset.as_u64());
+        trace!("get bucket offset {}", bucket_offset.as_u64());
         let bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {

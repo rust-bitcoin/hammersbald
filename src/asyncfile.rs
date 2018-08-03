@@ -67,14 +67,14 @@ impl Inner {
             trace!("return page {} from write cache", offset.as_u64());
             return Ok(page);
         }
-        self.read_page_from_store(offset)
-    }
-
-    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         if let Some(page) = self.read_cache.read().unwrap().get(offset) {
             trace!("return page {} from read cache", offset.as_u64());
             return Ok(page);
         }
+        self.read_page_from_store(offset)
+    }
+
+    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         trace!("read page {} from store", offset.as_u64());
         let mut buffer = [0u8; PAGE_SIZE];
         let mut read_cache = self.read_cache.write().unwrap();
@@ -137,6 +137,7 @@ impl AsyncFile {
                 }
                 trace!("bg wrote log");
             }
+            let mut read_cache = inner.read_cache.write().unwrap();
             let mut rw = inner.rw.lock().unwrap();
             while let Some((append, page)) = write_cache.pop_front() {
                 if !append {
@@ -145,6 +146,7 @@ impl AsyncFile {
                 }
                 trace!("bg write page {}", page.offset.as_u64());
                 rw.write(&page.finish()).unwrap();
+                read_cache.put (page);
             }
             rw.flush().unwrap();
             inner.flushed.notify_all();
@@ -162,13 +164,11 @@ impl AsyncFile {
     pub fn write_page(&self, page: Arc<Page>) {
         self.inner.write_cache.lock().unwrap().push_back(false, page.clone());
         self.inner.haswork.notify_one();
-        self.inner.read_cache.write().unwrap().put(page);
     }
 
     pub fn append_page (&self, page: Arc<Page>) {
         self.inner.write_cache.lock().unwrap().push_back(true, page.clone());
         self.inner.haswork.notify_one();
-        self.inner.read_cache.write().unwrap().put(page);
     }
 }
 
