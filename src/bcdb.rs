@@ -219,7 +219,7 @@ mod test {
         let mut db = InMemory::new_db("").unwrap();
         db.init().unwrap();
 
-        let key = [0x11u8;32];
+        let key = [0xffu8;32];
         let data = [0xffu8;32];
         db.put(&key, &data).unwrap();
 

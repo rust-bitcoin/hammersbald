@@ -30,7 +30,7 @@ use std::sync::{Mutex, Arc};
 use std::ops::Deref;
 
 const PAGE_HEAD :u64 = 10;
-const INIT_BUCKETS :u64 = 256;
+const INIT_BUCKETS: u64 = 256;
 const INIT_LOGMOD :u64 = 7;
 const BUCKETS_PER_PAGE :u64 = 340;
 const BUCKET_SIZE: u64 = 12;
@@ -38,14 +38,15 @@ const BUCKET_SIZE: u64 = 12;
 /// The key file
 pub struct KeyFile {
     async_file: AsyncFile,
+    stored: u64,
+    step: u64,
     buckets: u64,
-    log_mod: u64,
-    step: u64
+    log_mod: u64
 }
 
 impl KeyFile {
     pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), buckets: 256, log_mod: 7, step: 0 }
+        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, stored: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -58,29 +59,28 @@ impl KeyFile {
     }
 
     pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError>{
-
-        if self.buckets > INIT_BUCKETS && (self.buckets+1) % BUCKETS_PER_PAGE == 0 {
-            let page = Page::new(Offset::new(((self.buckets+1)/BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
-            self.write_page(Arc::new(page));
-        }
-
         let hash = Self::hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
-        if bucket < self.step {
+        let step = self.step;
+        if bucket < step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
         self.store_to_bucket(bucket, key, offset, data_file)?;
-        bucket = self.step;
-        self.rehash_bucket(bucket, data_file)?;
+        self.rehash_bucket(step, data_file)?;
 
-        if self.step == 1 << self.log_mod {
-            self.step = 0;
+        self.step +=1;
+        if self.step == (1 << self.log_mod)  {
             self.log_mod += 1;
+            self.step = 0;
         }
-        else {
-            self.step += 1;
-        }
+
         self.buckets += 1;
+        self.stored += 1;
+        if self.buckets % BUCKETS_PER_PAGE == 0 {
+            let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
+            self.write_page(Arc::new(page));
+        }
+        trace!("stored {}", self.buckets);
         Ok(())
     }
 
@@ -101,19 +101,24 @@ impl KeyFile {
                 if new_bucket != bucket {
                     // store to new bucket
                     self.store_to_bucket(new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
+                    bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
                     // source in first spill-over
                     let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
                     if spillover.as_u64() != 0 {
                         if let Ok(so) = data_file.get_spillover(spillover) {
                             bucket_page.write_offset(bucket_offset.in_page_pos(), so.0)?;
                             bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so.1)?;
+                            self.write_page(Arc::new(bucket_page.clone()));
+
                         } else {
                             // can not find previously stored spillover
                             return Err(BCSError::Corrupted);
                         }
                     }
                     else {
+                        trace!("empty bucket {}", bucket);
                         bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
+                        self.write_page(Arc::new(bucket_page.clone()));
                         break;
                     }
                 }
@@ -186,7 +191,8 @@ impl KeyFile {
     pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
         let hash = Self::hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
-        if bucket < self.step {
+        let step = self.stored % (1 << self.log_mod);
+        if bucket < step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
         trace!("get bucket {}", bucket);
