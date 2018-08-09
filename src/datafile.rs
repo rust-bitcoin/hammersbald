@@ -87,9 +87,15 @@ impl DataFile {
         } else {
             self.read_page(offset.this_page())?
         };
-        let mut buf = [0u8; 12];
-        page.read(offset.in_page_pos(), &mut buf)?;
-        Ok((Offset::from_slice(&buf[..6])?, Offset::from_slice(&buf[6..])?))
+        let mut fetch_iterator = DataIterator::new_fetch(
+            PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
+        if let Some(entry) = fetch_iterator.next() {
+            if entry.data_type != DataType::TableSpillOver {
+                return Err(BCSError::Corrupted)
+            }
+            return Ok((Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?));
+        }
+        return Err(BCSError::Corrupted)
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
@@ -104,7 +110,12 @@ impl DataFile {
 
 
         let mut len = [0u8; 3];
-        U24::new(KEY_LEN + entry.data.len())?.serialize(&mut len);
+        if entry.data_type == DataType::AppData {
+            U24::new(KEY_LEN + entry.data.len())?.serialize(&mut len);
+        }
+        else {
+            U24::new(entry.data.len())?.serialize(&mut len);
+        }
         self.append_slice(&len)?;
         self.append_slice(entry.data_key.as_slice())?;
         self.append_slice(entry.data.as_slice())?;
@@ -209,7 +220,7 @@ impl DataEntry {
     pub fn new_spillover (offset: Offset, next: Offset) -> DataEntry {
         let mut sp = [0u8; 12];
         offset.serialize(&mut sp[..6]);
-        offset.serialize(&mut sp[6..]);
+        next.serialize(&mut sp[6..]);
         DataEntry{data_type: DataType::TableSpillOver, data_key: Vec::new(), data: sp.to_vec()}
     }
 }
@@ -239,7 +250,7 @@ impl<'file> DataIterator<'file> {
                         return Some(data_type);
                     }
                     if data_type == DataType::TableSpillOver {
-                        self.pos += 12;
+                        return Some(data_type);
                     }
                 }
             }
@@ -296,7 +307,17 @@ impl<'file> Iterator for DataIterator<'file> {
                     }
                 }
                 else if data_type == DataType::TableSpillOver {
-                    self.pos += 12;
+                    let mut size = [0u8; 3];
+                    if self.read_slice(&mut size) {
+                        let len = U24::from_slice(&size).unwrap();
+                        let mut data = [0u8; 6];
+                        let mut next = [0u8; 6];
+                        if self.read_slice(&mut data) && self.read_slice(&mut next) {
+                            return Some(
+                                DataEntry::new_spillover(Offset::from_slice(&data[..]).unwrap(),
+                                                         Offset::from_slice(&next[..]).unwrap()));
+                        }
+                    }
                 }
             }
         }

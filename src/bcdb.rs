@@ -207,11 +207,16 @@ impl<'file> Iterator for PageIterator<'file> {
 mod test {
     extern crate hex;
     extern crate simple_logger;
+    extern crate rand;
 
     use inmemory::InMemory;
     use log;
 
     use super::*;
+    use self::rand::thread_rng;
+    use std::collections::HashMap;
+    use bcdb::test::rand::RngCore;
+
     #[test]
     fn test () {
         simple_logger::init_with_level(log::Level::Trace).unwrap();
@@ -219,18 +224,25 @@ mod test {
         let mut db = InMemory::new_db("").unwrap();
         db.init().unwrap();
 
-        let key = [0xffu8;32];
-        let data = [0xffu8;32];
-        db.put(&key, &data).unwrap();
+        let mut rng = thread_rng();
 
-        assert_eq!(db.get(&key).unwrap(), Some(data[..].to_owned()));
+        let mut check = HashMap::new();
+        let mut key = [0x0u8;32];
+        let mut data = [0x0u8;32];
 
-        for _ in 1 .. 200000 {
-            let data = [0xccu8; 32];
+        for i in 1 .. 3000 {
+            rng.fill_bytes(&mut key);
+            rng.fill_bytes(&mut data);
+            check.insert(key, data);
             db.put(&key, &data).unwrap();
-
-            assert_eq!(db.get(&key).unwrap(), Some(data[..].to_owned()));
         }
+        db.batch().unwrap();
+
+
+        for (k, v) in check.iter() {
+            assert_eq!(db.get(k).unwrap().unwrap(), v.to_owned());
+        }
+
         db.shutdown();
     }
 }

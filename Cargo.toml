@@ -20,3 +20,4 @@ hex = "0.3"
 
 [dev-dependencies]
 simple_logger = "0.5.0"
+rand="0.5"
