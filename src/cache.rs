@@ -41,20 +41,17 @@ impl ReadCache {
                 self.map.remove(&old.offset);
             }
         }
-        trace!("add page {} to read cache", page.offset.as_u64());
         if self.map.insert(page.offset, page.clone()).is_none() {
             self.list.push_back(page);
         }
     }
 
     pub fn clear (&mut self) {
-        trace!("clear cache");
         self.map.clear();
         self.list.clear();
     }
 
     pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
-        trace!("get page {} from read cache", offset.as_u64());
         match self.map.get(&offset) {
             Some(b) => Some(b.clone()),
             None => None

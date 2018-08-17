@@ -64,18 +64,15 @@ impl Inner {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let write_cache = self.write_cache.lock().unwrap();
         if let Some(page) = write_cache.get(offset) {
-            trace!("return page {} from write cache", offset.as_u64());
             return Ok(page);
         }
         if let Some(page) = self.read_cache.read().unwrap().get(offset) {
-            trace!("return page {} from read cache", offset.as_u64());
             return Ok(page);
         }
         self.read_page_from_store(offset)
     }
 
     fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        trace!("read page {} from store", offset.as_u64());
         let mut buffer = [0u8; PAGE_SIZE];
         let mut read_cache = self.read_cache.write().unwrap();
         let mut rw = self.rw.lock().unwrap();
@@ -108,10 +105,8 @@ impl AsyncFile {
         while run {
             let mut write_cache = inner.write_cache.lock().unwrap();
             while write_cache.is_empty() {
-                trace!("bg write sleep");
                 write_cache = inner.haswork.wait(write_cache).unwrap();
             }
-            trace!("bg write awake");
             let mut logged = false;
             for (append, page) in write_cache.iter() {
                 if !append {
@@ -135,7 +130,6 @@ impl AsyncFile {
                         log.sync().unwrap();
                     }
                 }
-                trace!("bg wrote log");
             }
             let mut read_cache = inner.read_cache.write().unwrap();
             let mut rw = inner.rw.lock().unwrap();
@@ -144,13 +138,11 @@ impl AsyncFile {
                     let pos = page.offset.as_u64();
                     rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
                 }
-                trace!("bg write page {}", page.offset.as_u64());
                 rw.write(&page.finish()).unwrap();
                 read_cache.put (page);
             }
             rw.flush().unwrap();
             inner.flushed.notify_all();
-            trace!("bg flushed");
 
             run = inner.run.lock().unwrap().get();
         }

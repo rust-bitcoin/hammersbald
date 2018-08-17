@@ -69,8 +69,6 @@ impl DataFile {
     }
 
     pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
-        trace!("get data at {}", offset.as_u64());
-
         let page = if offset.this_page() == self.page.offset {
             Arc::new(self.page.clone())
         } else {
@@ -119,7 +117,6 @@ impl DataFile {
         self.append_slice(&len)?;
         self.append_slice(entry.data_key.as_slice())?;
         self.append_slice(entry.data.as_slice())?;
-        trace!("appended data {} at {}", hex::encode(entry.data), start.as_u64());
         return Ok(start);
     }
 
@@ -134,7 +131,6 @@ impl DataFile {
             wrote += have;
             wrote_on_this_page += have;
             if pos == PAYLOAD_MAX {
-                trace!("append data page {}", self.page.offset.as_u64());
                 self.async_file.append_page(Arc::new(self.page.clone()));
                 self.append_pos = self.append_pos.next_page()?;
                 self.page = Page::new (self.append_pos);

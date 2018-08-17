@@ -155,7 +155,6 @@ impl BCDB {
     /// stora data with a key
     /// storing with the same key makes previous data unaccessible
     pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
-        trace!("put {} {}", hex::encode(key), hex::encode(data));
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
@@ -169,7 +168,6 @@ impl BCDB {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
-        trace!("get {}", hex::encode(key));
         self.table.get(key, &self.data)
     }
 }
@@ -230,7 +228,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for i in 1 .. 3000 {
+        for i in 1 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
@@ -243,7 +241,7 @@ mod test {
             assert_eq!(db.get(k).unwrap().unwrap(), v.to_owned());
         }
 
-        for i in 1 .. 3000 {
+        for i in 1 .. 10000 {
             rng.fill_bytes(&mut key);
             assert!(db.get(&key).unwrap().is_none());
         }

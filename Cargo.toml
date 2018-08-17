@@ -11,7 +11,7 @@ keywords = [ "crypto", "bitcoin" ]
 readme = "README.md"
 
 [lib]
-name = "bitcoin_spv"
+name = "blockchain_store"
 path = "src/lib.rs"
 
 [dependencies]

@@ -38,7 +38,6 @@ const BUCKET_SIZE: u64 = 12;
 /// The key file
 pub struct KeyFile {
     async_file: AsyncFile,
-    stored: u64,
     step: u64,
     buckets: u64,
     log_mod: u64
@@ -46,7 +45,7 @@ pub struct KeyFile {
 
 impl KeyFile {
     pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, stored: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
+        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -75,17 +74,14 @@ impl KeyFile {
         }
 
         self.buckets += 1;
-        self.stored += 1;
         if self.buckets % BUCKETS_PER_PAGE == 0 {
             let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
             self.write_page(Arc::new(page));
         }
-        trace!("stored {}", self.buckets);
         Ok(())
     }
 
     fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCSError> {
-        trace!("rehash bucket {}", bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         loop {
@@ -116,7 +112,6 @@ impl KeyFile {
                         }
                     }
                     else {
-                        trace!("empty bucket {}", bucket);
                         bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
                         self.write_page(Arc::new(bucket_page.clone()));
                         break;
@@ -172,20 +167,17 @@ impl KeyFile {
     }
 
     fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
-        trace!("store {} to bucket {}", offset.as_u64(), bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {
             // empty bucket, just store data
-            trace!("store {} to empty bucket {}", offset.as_u64(), bucket);
             bucket_page.write_offset(bucket_offset.in_page_pos(), offset)?;
         } else {
             // check if this is overwrite of same key
             if let Some(prev) = data_file.get(data_offset)? {
                 if prev.data_key == key {
                     // point to new data
-                    trace!("overwrite {} in bucket {}", offset.as_u64(), bucket);
                     bucket_page.write_offset(bucket_offset.in_page_pos(), offset)?;
                 } else {
                     // prepend spillover chain
@@ -193,7 +185,6 @@ impl KeyFile {
                     // since search stops at first key match
                     let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
                     let so = data_file.append(DataEntry::new_spillover(offset, spillover))?;
-                    trace!("add spillover {} in bucket {}", so.as_u64(), bucket);
                     bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so)?;
                 }
             } else {
@@ -211,7 +202,6 @@ impl KeyFile {
         if bucket < self.step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
-        trace!("get bucket {}", bucket);
         let bucket_offset = Self::bucket_offset(bucket)?;
         let bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -224,7 +214,6 @@ impl KeyFile {
             }
             else {
                 let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
-                trace!("follow spillover {}", spillover.as_u64());
                 while spillover.as_u64() != 0 {
                     if let Ok(so) = data_file.get_spillover(spillover) {
                         if let Some(prev) = data_file.get(so.0)? {
@@ -253,7 +242,6 @@ impl KeyFile {
     }
 
     pub fn write_page(&self, page: Arc<Page>) {
-        trace!("write page {}", page.offset.as_u64());
         self.async_file.write_page(page)
     }
 
@@ -300,7 +288,6 @@ impl DBFile for KeyFile {
 
 impl PageFile for KeyFile {
     fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        trace!("read page {}", offset.as_u64());
         self.async_file.read_page(offset)
     }
 }
