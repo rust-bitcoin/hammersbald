@@ -208,6 +208,7 @@ mod test {
     extern crate rand;
 
     use inmemory::InMemory;
+    use infile::InFile;
     use log;
 
     use super::*;
@@ -219,7 +220,7 @@ mod test {
     fn test () {
         simple_logger::init_with_level(log::Level::Trace).unwrap();
 
-        let mut db = InMemory::new_db("").unwrap();
+        let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();
@@ -228,7 +229,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for i in 1 .. 10000 {
+        for i in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
@@ -241,7 +242,7 @@ mod test {
             assert_eq!(db.get(k).unwrap().unwrap(), v.to_owned());
         }
 
-        for i in 1 .. 10000 {
+        for i in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             assert!(db.get(&key).unwrap().is_none());
         }

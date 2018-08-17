@@ -29,10 +29,10 @@ use types::Offset;
 use std::sync::{Mutex, Arc};
 use std::ops::Deref;
 
-const PAGE_HEAD :u64 = 10;
+const PAGE_HEAD :u64 = 12;
 const INIT_BUCKETS: u64 = 256;
 const INIT_LOGMOD :u64 = 7;
-const BUCKETS_PER_PAGE :u64 = 340;
+const BUCKETS_PER_PAGE :u64 = 339;
 const BUCKET_SIZE: u64 = 12;
 
 /// The key file
@@ -45,15 +45,29 @@ pub struct KeyFile {
 
 impl KeyFile {
     pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
+        let mut kf = KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD };
+        if let Ok(first_page) = kf.read_page(Offset::new(0).unwrap()) {
+            let buckets = first_page.read_offset(0).unwrap().as_u64();
+            if buckets > 0 {
+                kf.buckets = buckets;
+                kf.step = first_page.read_offset(6).unwrap().as_u64();
+                kf.log_mod = (63 - buckets.leading_zeros()) as u64 - 1;
+                info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, kf.step, kf.log_mod);
+            }
+        }
+        kf
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
-        let mut page = Page::new(Offset::new(0)?);
-        let l =[self.log_mod as u8;1];
-        page.write(0, &l)?;
-        page.write_offset(1, Offset::new(self.buckets)?)?;
-        self.write_page(Arc::new(page));
+        let mut fp = if let Ok(first_page) = self.read_page(Offset::new(0).unwrap()) {
+            first_page.deref().clone()
+        }
+        else {
+            Page::new(Offset::new(0)?)
+        };
+        fp.write_offset(0, Offset::new(self.buckets)?)?;
+        fp.write_offset(6, Offset::new(self.step)?)?;
+        self.write_page(Arc::new(fp));
         Ok(())
     }
 
@@ -77,6 +91,12 @@ impl KeyFile {
         if self.buckets % BUCKETS_PER_PAGE == 0 {
             let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
             self.write_page(Arc::new(page));
+        }
+        if let Ok(first_page) = self.async_file.read_page(Offset::new(0).unwrap()) {
+            let mut fp = first_page.deref().clone();
+            fp.write_offset(0, Offset::new(self.buckets)?)?;
+            fp.write_offset(6, Offset::new(self.step)?)?;
+            self.async_file.write_page(Arc::new(fp));
         }
         Ok(())
     }
