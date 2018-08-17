@@ -198,7 +198,7 @@ impl DataType {
     }
 
     pub fn to_u8 (&self) -> u8 {
-        match self {
+        match *self {
             DataType::Padding => 0,
             DataType::AppData => 1,
             DataType::TableSpillOver => 2
@@ -336,7 +336,7 @@ mod test {
     fn test() {
         let mem = InMemory::new(true);
         let mut data = DataFile::new(Box::new(mem));
-        assert!(data.page_iter(0).next().is_none());
+        assert!(data.page_iter(0).next().is_some());
         assert!(data.data_iter().next().is_none());
         let entry = DataEntry::new_data(&[0u8;KEY_LEN], "hello world!".as_bytes());
         let hello_offset = data.append(entry.clone()).unwrap();

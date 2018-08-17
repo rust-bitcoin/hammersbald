@@ -243,6 +243,11 @@ mod test {
             assert_eq!(db.get(k).unwrap().unwrap(), v.to_owned());
         }
 
+        for i in 1 .. 3000 {
+            rng.fill_bytes(&mut key);
+            assert!(db.get(&key).unwrap().is_none());
+        }
+
         db.shutdown();
     }
 }

@@ -69,7 +69,7 @@ impl KeyFile {
         self.rehash_bucket(step, data_file)?;
 
         self.step +=1;
-        if self.step == (1 << self.log_mod)  {
+        if self.step == (1 << (self.log_mod + 1))  {
             self.log_mod += 1;
             self.step = 0;
         }
