@@ -155,11 +155,13 @@ impl AsyncFile {
 
     pub fn write_page(&self, page: Arc<Page>) {
         self.inner.write_cache.lock().unwrap().push_back(false, page.clone());
+        self.inner.read_cache.write().unwrap().put(page);
         self.inner.haswork.notify_one();
     }
 
     pub fn append_page (&self, page: Arc<Page>) {
         self.inner.write_cache.lock().unwrap().push_back(true, page.clone());
+        self.inner.read_cache.write().unwrap().put(page);
         self.inner.haswork.notify_one();
     }
 }
