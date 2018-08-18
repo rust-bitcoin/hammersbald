@@ -61,42 +61,31 @@ impl ReadCache {
 
 #[derive(Default)]
 pub struct WriteCache {
-    map: HashMap<Offset, Arc<Page>>,
-    list: VecDeque<(bool, Arc<Page>)>
+    map: HashMap<Offset, (bool, Arc<Page>)>
 }
 
 impl WriteCache {
-    pub fn push_back (&mut self, append: bool, page: Arc<Page>) {
+    pub fn put (&mut self, append: bool, page: Arc<Page>) {
         let offset = page.offset;
-        self.list.push_back ((append, page.clone()));
-        if self.map.insert(offset, page).is_some() {
-            if let Some(prev) = self.list.iter().position(move |(_, p)| p.offset == offset) {
-                self.list.swap_remove_back(prev);
-            }
-        }
-    }
-
-    pub fn pop_front (&mut self) -> Option<(bool, Arc<Page>)> {
-        if let Some((append, page)) = self.list.pop_front()  {
-            self.map.remove(&page.offset);
-            return Some((append, page));
-        }
-        None
+        self.map.insert(offset, (append, page));
     }
 
     pub fn is_empty (&self) -> bool {
-        self.list.is_empty()
+        self.map.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item=&(bool, Arc<Page>)> {
-        self.list.iter()
+        self.map.values().into_iter()
     }
 
     pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
-        use std::ops::Deref;
-        if let Some(ref page) = self.map.get(&offset) {
-            return Some(page.deref().clone())
+        if let Some(ref content) = self.map.get(&offset) {
+            return Some(content.1.clone())
         }
         None
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear()
     }
 }
