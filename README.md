@@ -22,9 +22,7 @@ Keys are not sorted and can not be iterated over.
 There is no delete operation. An insert with a key renders a previous insert with same key
 inaccessible. Since header and block have the same id, only the block will be accessible 
 if inserted after the header. 
-
-Both reads and writes are non-blocking. Any number of simultaneous 
-reads or a single write operation is permitted. 
+ 
 Inserts must be grouped into batches. All inserts of a batch will be stored 
 or none of them, in case the process dies while inserting in a batch.
 Data inserted in a batch may be fetched before closing the batch.
@@ -42,12 +40,12 @@ The store is a peristent hash map using [Linear Hashing](https://en.wikipedia.or
 
 The data storage size is limited to 2^48 (256 TiB) due to the use of 6 byte persistent
 pointers. A data element can not exceed 2^24 (16MiB) in length. 
-Writes and reads are performed in multiples of 4096 bytes.
+Writes and reads are performed in multiples of 4096 byte pages.
 
 The persistent store uses up to three files:
 * the persistent hash table (.tbl)
 * the data that is iterable on its own and can be used to rebuild the hash table (.dat)
-* a temporary log file that helps to unwind a partial insert batch at re-open (.log)
+* the log file that helps to unwind a partial insert batch at re-open (.log)
 
 Numbers stored in big endian.
 
@@ -86,14 +84,6 @@ The data file is strictly append only. Anything written stays there the only all
 ....
 </pre>
 
-#### Spill over
-
-A table bucket either points to data of type > 1 or to a spill over of the table with type 0.
-
-A spill over may contain any number of data offsets pointing to data of type > 1.
-
-Spill over must not be the last data element in the data file.
-
 #### Data types
 
 * 0 padding (ignore)
@@ -110,6 +100,8 @@ Spill over must not be the last data element in the data file.
 </pre>
 
 ##### Spill over
+A table bucket either points to data of type 1 or to a spill over as below
+
 <pre>
 +----+-------------------------------------+
 |u48 | data offset                         |
@@ -184,7 +176,7 @@ is the id of the tip with known u256 representation.
 
 ### Log file
 
-The log file starts with last known correct file sizes.
+The log file starts with a page that holds last known correct file sizes.
 Therafter any number of pages that are pre-images of the updated table file.
 
 <pre>
@@ -209,4 +201,4 @@ Should the process crash while in an insert batch, then at open the log file wil
 trigger the following processing:
 * truncate key and data files to last known correct size
 * patch key file by applying the pre-image of its pages
-* delete the log file
+* reset the log file

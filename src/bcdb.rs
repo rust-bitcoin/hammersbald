@@ -221,22 +221,16 @@ mod test {
     fn test () {
         simple_logger::init_with_level(log::Level::Trace).unwrap();
 
-        let mut db = InFile::new_db("first").unwrap();
+        let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();
-
-        //2018-08-17 21:30:38 TRACE [blockchain_store::bcdb] put 9c4151b2e99c9b955e61a1fa0415c828989e5108017d0b681a5d93c7ce891b75 66579fddd27479e662730ed40c56425c845a354fc1ce6f7264315fe5b4c0569d
-        //2018-08-17 21:30:38 TRACE [blockchain_store::bcdb::test] first check 9c4151b2e99c9b955e61a1fa0415c828989e5108017d0b681a5d93c7ce891b75
 
         let mut check = HashMap::new();
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        //db.put(hex::decode("9c4151b2e99c9b955e61a1fa0415c828989e5108017d0b681a5d93c7ce891b75").unwrap().as_slice(), hex::decode("66579fddd27479e662730ed40c56425c845a354fc1ce6f7264315fe5b4c0569d").unwrap().as_slice()).unwrap();
-        //db.get(hex::decode("9c4151b2e99c9b955e61a1fa0415c828989e5108017d0b681a5d93c7ce891b75").unwrap().as_slice()).unwrap().unwrap();
-
-        for i in 1 .. 10000 {
+        for i in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
@@ -246,14 +240,12 @@ mod test {
         }
         db.batch().unwrap();
 
-
-
         for (k, v) in check.iter() {
             trace!("check {}", hex::encode(k.to_vec()));
             assert_eq!(db.get(k).unwrap(), Some(v.to_vec()));
         }
 
-        for i in 1 .. 10000 {
+        for i in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             assert!(db.get(&key).unwrap().is_none());
         }
