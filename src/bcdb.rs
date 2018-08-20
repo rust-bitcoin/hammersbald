@@ -223,7 +223,7 @@ mod test {
     fn test () {
         simple_logger::init_with_level(log::Level::Trace).unwrap();
 
-        let mut db = InMemory::new_db("first").unwrap();
+        let mut db = InFile::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

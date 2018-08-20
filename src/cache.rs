@@ -25,14 +25,10 @@ use types::Offset;
 use std::collections::{HashMap,VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
-// read cache size
-pub const READ_CACHE_PAGES: usize = 100;
-
 #[derive(Default)]
 pub struct Cache {
     writes: HashMap<Offset, (bool, Arc<Page>)>,
-    reads: HashMap<Offset, Arc<Page>>,
-    list: VecDeque<Arc<Page>>
+    reads: HashMap<Offset, Arc<Page>>
 }
 
 impl Cache {
@@ -51,21 +47,12 @@ impl Cache {
     }
 
     fn cache_as_read (&mut self, page: Arc<Page>) {
-        if self.list.len () >= READ_CACHE_PAGES {
-            if let Some(old) = self.list.pop_front() {
-                self.reads.remove(&old.offset);
-            }
-        }
-        if self.reads.insert(page.offset, page.clone()).is_none() {
-            self.list.push_back(page);
-        }
+        self.reads.insert(page.offset, page.clone());
     }
 
     fn put (&mut self, append: bool, page: Arc<Page>) {
         let offset = page.offset;
-        if self.reads.remove(&page.offset).is_some() {
-            self.list.retain(|page| page.offset != offset);
-        }
+        self.reads.remove(&page.offset);
         self.writes.insert(offset, (append, page));
     }
 
@@ -87,7 +74,7 @@ impl Cache {
         None
     }
 
-    pub fn clear_writes(&mut self) {
+    pub fn move_writes_to_reads(&mut self) {
         let values = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
         for (_, page) in values {
             self.cache_as_read(page)
@@ -98,6 +85,5 @@ impl Cache {
     pub fn clear (&mut self) {
         self.writes.clear();
         self.reads.clear();
-        self.list.clear();
     }
 }

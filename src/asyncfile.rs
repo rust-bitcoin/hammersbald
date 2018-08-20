@@ -60,12 +60,21 @@ impl Inner {
     }
 
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        let mut cache = self.cache.lock().unwrap();
-        if let Some(page) = cache.get(offset) {
-            return Ok(page);
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some(page) = cache.get(offset) {
+                return Ok(page);
+            }
         }
+
         let page = self.read_page_from_store(offset)?;
-        cache.cache(page.clone());
+
+        {
+            // if there was a write between above read and this lock
+            // then this cache was irrelevant as write cache has priority
+            let mut cache = self.cache.lock().unwrap();
+            cache.cache(page.clone());
+        }
         Ok(page)
     }
 
@@ -98,43 +107,54 @@ impl AsyncFile {
     fn background(inner: Arc<Inner>) {
         let mut run = true;
         while run {
-            let mut cache = inner.cache.lock().unwrap();
-            while cache.is_empty() {
-                cache = inner.haswork.wait(cache).unwrap();
-            }
-            let mut logged = false;
-            for (append, page) in cache.writes() {
-                if !append {
-                    logged = true;
-                    break;
+
+            let writes;
+            {
+                // limit scope of cache lock to collection of work
+                // since clear_writes() moves work to read cache
+                // lock can be released without risking that subsequent reads do not yet get
+                // the written data
+                let mut cache = inner.cache.lock().unwrap();
+                while cache.is_empty() {
+                    cache = inner.haswork.wait(cache).unwrap();
                 }
-            }
-            if logged {
-                if let Some(ref log_file) = inner.log_file {
-                    let mut log = log_file.lock().unwrap();
-                    let mut log_write = false;
-                    for (append, page) in cache.writes() {
-                        if !append && page.offset.as_u64 () < log.tbl_len && !log.has_page(page.offset) {
-                            if let Ok(prev) = inner.read_page_from_store(page.offset) {
-                                log_write |= log.append_page(prev).unwrap();
+                let mut logged = false;
+                for (append, page) in cache.writes() {
+                    if !append {
+                        logged = true;
+                        break;
+                    }
+                }
+                if logged {
+                    if let Some(ref log_file) = inner.log_file {
+                        let mut log = log_file.lock().unwrap();
+                        let mut log_write = false;
+                        for (append, page) in cache.writes() {
+                            if !append && page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
+                                if let Ok(prev) = inner.read_page_from_store(page.offset) {
+                                    log_write |= log.append_page(prev).unwrap();
+                                }
                             }
                         }
-                    }
-                    if log_write {
-                        log.flush().unwrap();
-                        log.sync().unwrap();
+                        if log_write {
+                            log.flush().unwrap();
+                            log.sync().unwrap();
+                        }
                     }
                 }
+                writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+                cache.move_writes_to_reads();
             }
+
             let mut rw = inner.rw.lock().unwrap();
-            for (append, page) in cache.writes() {
+            for (append, page) in writes {
                 if !append {
                     let pos = page.offset.as_u64();
                     rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
                 }
                 rw.write(&page.finish()).unwrap();
             }
-            cache.clear_writes();
+
             rw.flush().unwrap();
             inner.flushed.notify_all();
 
