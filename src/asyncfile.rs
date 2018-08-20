@@ -147,7 +147,7 @@ impl AsyncFile {
         run.set(false);
     }
 
-    pub fn patch_page(&self, page: Arc<Page>) {
+    pub fn patch_page(&mut self, page: Arc<Page>) {
         let mut rw = self.inner.rw.lock().unwrap();
         let pos = page.offset.as_u64();
         rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
@@ -162,6 +162,10 @@ impl AsyncFile {
     pub fn append_page (&self, page: Arc<Page>) {
         self.inner.cache.lock().unwrap().append(page);
         self.inner.haswork.notify_one();
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.inner.cache.lock().unwrap().clear();
     }
 }
 

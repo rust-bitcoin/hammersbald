@@ -141,6 +141,10 @@ impl DataFile {
         self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
         Ok(())
     }
+
+    pub fn clear_cache(&mut self) {
+        self.async_file.clear_cache();
+    }
 }
 
 impl DBFile for DataFile {

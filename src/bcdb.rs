@@ -120,8 +120,10 @@ impl BCDB {
     pub fn batch (&mut self)  -> Result<(), BCSError> {
         self.data.flush()?;
         self.data.sync()?;
+        self.data.clear_cache();
         self.table.flush()?;
         self.table.sync()?;
+        self.table.clear_cache();
         let data_len = self.data.len()?;
         let table_len = self.table.len()?;
 

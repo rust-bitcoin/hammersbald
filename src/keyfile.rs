@@ -262,8 +262,12 @@ impl KeyFile {
         self.async_file.write_page(page)
     }
 
-    pub fn patch_page(&self, page: Arc<Page>) {
+    pub fn patch_page(&mut self, page: Arc<Page>) {
         self.async_file.patch_page(page)
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.async_file.clear_cache();
     }
 
     pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
