@@ -32,12 +32,13 @@ use std::collections::HashSet;
 /// The buffer pool
 pub struct LogFile {
     rw: Mutex<Box<RW>>,
-    appended: HashSet<Offset>
+    appended: HashSet<Offset>,
+    pub tbl_len: u64
 }
 
 impl LogFile {
     pub fn new(rw: Box<RW>) -> LogFile {
-        LogFile { rw: Mutex::new(rw), appended: HashSet::new() }
+        LogFile { rw: Mutex::new(rw), appended: HashSet::new(), tbl_len: 0 }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -84,7 +85,6 @@ impl DBFile for LogFile {
     }
 
     fn len(&mut self) -> Result<Offset, BCSError> {
-        self.flush()?;
         let mut rw = self.rw.lock().unwrap();
         Offset::new(rw.len()? as u64)
     }
@@ -94,6 +94,10 @@ impl PageFile for LogFile {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let mut buffer = [0u8; PAGE_SIZE];
         let mut rw = self.rw.lock().unwrap();
+        let len = rw.seek(SeekFrom::End(0))?;
+        if offset.as_u64() > len {
+            return Err(BCSError::InvalidOffset);
+        }
         rw.seek(SeekFrom::Start(offset.as_u64()))?;
         rw.read(&mut buffer)?;
         let page = Arc::new(Page::from_buf(buffer));

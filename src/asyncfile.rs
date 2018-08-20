@@ -114,7 +114,7 @@ impl AsyncFile {
                     let mut log = log_file.lock().unwrap();
                     let mut log_write = false;
                     for (append, page) in cache.writes() {
-                        if !append && !log.has_page(page.offset) {
+                        if !append && page.offset.as_u64 () < log.tbl_len && !log.has_page(page.offset) {
                             if let Ok(prev) = inner.read_page_from_store(page.offset) {
                                 log_write |= log.append_page(prev).unwrap();
                             }
@@ -147,6 +147,13 @@ impl AsyncFile {
         run.set(false);
     }
 
+    pub fn patch_page(&self, page: Arc<Page>) {
+        let mut rw = self.inner.rw.lock().unwrap();
+        let pos = page.offset.as_u64();
+        rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
+        rw.write(&page.finish()).unwrap();
+    }
+
     pub fn write_page(&self, page: Arc<Page>) {
         self.inner.cache.lock().unwrap().update(page);
         self.inner.haswork.notify_one();
@@ -164,6 +171,7 @@ impl DBFile for AsyncFile {
         while !cache.is_empty() {
             cache = self.inner.flushed.wait(cache).unwrap();
         }
+        cache.clear();
         Ok(())
     }
 
@@ -173,14 +181,11 @@ impl DBFile for AsyncFile {
     }
 
     fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
-        self.flush()?;
-        self.inner.cache.lock().unwrap().clear();
         let mut rw = self.inner.rw.lock().unwrap();
         rw.truncate(offset.as_u64() as usize)
     }
 
-    fn len(&mut self) -> Result<Offset, BCSError> {
-        self.flush()?;
+    fn len(&mut self) -> Result<Offset, BCSError> { ;
         let mut rw = self.inner.rw.lock().unwrap();
         Offset::new(rw.len()? as u64)
     }

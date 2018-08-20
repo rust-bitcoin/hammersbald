@@ -45,29 +45,26 @@ pub struct KeyFile {
 
 impl KeyFile {
     pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        let mut kf = KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD };
-        if let Ok(first_page) = kf.read_page(Offset::new(0).unwrap()) {
-            let buckets = first_page.read_offset(0).unwrap().as_u64();
-            if buckets > 0 {
-                kf.buckets = buckets;
-                kf.step = first_page.read_offset(6).unwrap().as_u64();
-                kf.log_mod = (63 - buckets.leading_zeros()) as u64 - 1;
-                info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, kf.step, kf.log_mod);
-            }
-        }
-        kf
+        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
-        let mut fp = if let Ok(first_page) = self.read_page(Offset::new(0).unwrap()) {
-            first_page.deref().clone()
+        if let Ok(first_page) = self.read_page(Offset::new(0).unwrap()) {
+            let buckets = first_page.read_offset(0).unwrap().as_u64();
+            if buckets > 0 {
+                self.buckets = buckets;
+                self.step = first_page.read_offset(6).unwrap().as_u64();
+                self.log_mod = (63 - buckets.leading_zeros()) as u64 - 1;
+                info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
+            }
         }
         else {
-            Page::new(Offset::new(0)?)
+            let mut fp = Page::new(Offset::new(0)?);
+            fp.write_offset(0, Offset::new(self.buckets)?)?;
+            fp.write_offset(6, Offset::new(self.step)?)?;
+            self.write_page(Arc::new(fp));
         };
-        fp.write_offset(0, Offset::new(self.buckets)?)?;
-        fp.write_offset(6, Offset::new(self.step)?)?;
-        self.write_page(Arc::new(fp));
+
         Ok(())
     }
 
@@ -263,6 +260,10 @@ impl KeyFile {
 
     pub fn write_page(&self, page: Arc<Page>) {
         self.async_file.write_page(page)
+    }
+
+    pub fn patch_page(&self, page: Arc<Page>) {
+        self.async_file.patch_page(page)
     }
 
     pub fn log_file (&self) -> Arc<Mutex<LogFile>> {

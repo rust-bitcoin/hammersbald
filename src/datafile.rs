@@ -147,6 +147,8 @@ impl DBFile for DataFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         if self.append_pos.in_page_pos() > 0 {
             self.async_file.append_page(Arc::new(self.page.clone()));
+            self.append_pos = self.append_pos.next_page()?;
+            self.page = Page::new (self.append_pos);
         }
         self.async_file.flush()
     }

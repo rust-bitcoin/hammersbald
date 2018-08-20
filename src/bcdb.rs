@@ -77,7 +77,10 @@ impl BCDB {
     /// create a new db with key and data file
     pub fn new (table: KeyFile, data: DataFile) -> Result<BCDB, BCSError> {
         let log = table.log_file();
-        Ok(BCDB {table, data, log})
+        let mut db = BCDB {table, data, log};
+        db.recover()?;
+        db.batch()?;
+        Ok(db)
     }
 
     /// initialize an empty db
@@ -89,30 +92,26 @@ impl BCDB {
     }
 
     fn recover(&mut self) -> Result<(), BCSError> {
-        let mut log = self.log.lock().unwrap();
-        if log.len()?.as_u64() > 0 {
-            {
-                let mut log_pages = log.page_iter();
-                if let Some(first) = log_pages.next() {
-                    let mut size = [0u8; 6];
-
-                    first.read(0, &mut size)?;
-                    let data_len = Offset::from_slice(&size)?;
-                    self.data.truncate(data_len)?;
-
-                    first.read(6, &mut size)?;
-                    let table_len = Offset::from_slice(&size)?;
-                    self.table.truncate(table_len)?;
-
-                    for page in log_pages {
-                        if page.offset.as_u64() < table_len.as_u64() {
-                            self.table.write_page(page);
-                        }
-                    }
-                }
+        let log = self.log.lock().unwrap();
+        let mut first = true;
+        for page in log.page_iter() {
+            if !first {
+                trace!("patch page {}", page.offset.as_u64());
+                self.table.patch_page(page);
             }
-            log.truncate(Offset::new(0)?)?;
-            log.sync()?;
+            else {
+                let mut size = [0u8; 6];
+                page.read(2, &mut size)?;
+                let data_len = Offset::from_slice(&size)?;
+                trace!("data len {}", data_len.as_u64());
+                self.data.truncate(data_len)?;
+
+                page.read(8, &mut size)?;
+                let table_len = Offset::from_slice(&size)?;
+                trace!("table len {}", table_len.as_u64());
+                self.table.truncate(table_len)?;
+                first = false;
+            }
         }
         Ok(())
     }
@@ -137,6 +136,7 @@ impl BCDB {
         first.write(2, &size).unwrap();
         table_len.serialize(&mut size);
         first.write(8, &size).unwrap();
+        log.tbl_len = table_len.as_u64();
 
 
         log.append_page(Arc::new(first))?;
@@ -192,7 +192,7 @@ impl<'file> Iterator for PageIterator<'file> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
-            let offset = Offset::new(self.pagenumber* PAGE_SIZE as u64).unwrap();
+            let offset = Offset::new((self.pagenumber)* PAGE_SIZE as u64).unwrap();
             if let Ok(page) = self.file.read_page(offset) {
                 self.pagenumber += 1;
                 return Some(page);
@@ -221,7 +221,7 @@ mod test {
     fn test () {
         simple_logger::init_with_level(log::Level::Trace).unwrap();
 
-        let mut db = InMemory::new_db("first").unwrap();
+        let mut db = InFile::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();
@@ -245,6 +245,7 @@ mod test {
             assert_eq!(db.get(&key).unwrap().unwrap(), data.to_owned());
         }
         db.batch().unwrap();
+
 
 
         for (k, v) in check.iter() {
