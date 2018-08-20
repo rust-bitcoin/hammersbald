@@ -46,14 +46,18 @@ impl Cache {
 
     pub fn cache (&mut self, page: Arc<Page>) {
         if !self.writes.contains_key(&page.offset) {
-            if self.list.len () >= READ_CACHE_PAGES {
-                if let Some(old) = self.list.pop_front() {
-                    self.reads.remove(&old.offset);
-                }
+            self.cache_as_read(page);
+        }
+    }
+
+    fn cache_as_read (&mut self, page: Arc<Page>) {
+        if self.list.len () >= READ_CACHE_PAGES {
+            if let Some(old) = self.list.pop_front() {
+                self.reads.remove(&old.offset);
             }
-            if self.reads.insert(page.offset, page.clone()).is_none() {
-                self.list.push_back(page);
-            }
+        }
+        if self.reads.insert(page.offset, page.clone()).is_none() {
+            self.list.push_back(page);
         }
     }
 
@@ -84,6 +88,10 @@ impl Cache {
     }
 
     pub fn clear_writes(&mut self) {
+        let values = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+        for (_, page) in values {
+            self.cache_as_read(page)
+        }
         self.writes.clear()
     }
 
