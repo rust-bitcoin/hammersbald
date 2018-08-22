@@ -205,7 +205,9 @@ pub enum DataType {
     /// application defined data
     AppData,
     /// Spillover bucket of the hash table
-    TableSpillOver
+    TableSpillOver,
+    /// Application data extension without key
+    AppDataExtension
 }
 
 impl DataType {
@@ -213,6 +215,7 @@ impl DataType {
         match data_type {
             1 => DataType::AppData,
             2 => DataType::TableSpillOver,
+            3 => DataType::AppDataExtension,
             _ => DataType::Padding
         }
     }
@@ -221,7 +224,8 @@ impl DataType {
         match *self {
             DataType::Padding => 0,
             DataType::AppData => 1,
-            DataType::TableSpillOver => 2
+            DataType::TableSpillOver => 2,
+            DataType::AppDataExtension => 3
         }
     }
 }
@@ -237,6 +241,10 @@ impl DataEntry {
     pub fn new_data (data_key: &[u8], data: &[u8]) -> DataEntry {
         DataEntry{data_type: DataType::AppData, data_key: data_key.to_vec(), data: data.to_vec()}
     }
+    pub fn new_data_extension (data: &[u8]) -> DataEntry {
+        DataEntry{data_type: DataType::AppDataExtension, data_key: Vec::new(), data: data.to_vec()}
+    }
+
     pub fn new_spillover (offset: Offset, next: Offset) -> DataEntry {
         let mut sp = [0u8; 12];
         offset.serialize(&mut sp[..6]);
@@ -267,6 +275,9 @@ impl<'file> DataIterator<'file> {
                     let data_type = DataType::from(current.payload[self.pos]);
                     self.pos += 1;
                     if data_type == DataType::AppData {
+                        return Some(data_type);
+                    }
+                    if data_type == DataType::AppDataExtension {
                         return Some(data_type);
                     }
                     if data_type == DataType::TableSpillOver {
@@ -323,6 +334,17 @@ impl<'file> Iterator for DataIterator<'file> {
                         if self.read_slice(buf.as_mut_slice()) {
                             return Some(
                                 DataEntry::new_data(&buf[0..KEY_LEN], &buf[KEY_LEN..]));
+                        }
+                    }
+                }
+                if data_type == DataType::AppDataExtension {
+                    let mut size = [0u8; 3];
+                    if self.read_slice(&mut size) {
+                        let len = U24::from_slice(&size).unwrap();
+                        let mut buf = vec!(0u8; len.as_usize());
+                        if self.read_slice(buf.as_mut_slice()) {
+                            return Some(
+                                DataEntry::new_data_extension(&buf[..]));
                         }
                     }
                 }

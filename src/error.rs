@@ -16,6 +16,9 @@
 //!
 //! # Error type
 //!
+//!
+use bitcoin::util;
+
 use std::convert;
 use std::error::Error;
 use std::fmt;
@@ -30,7 +33,9 @@ pub enum BCSError {
     /// Data does not fit into the block
     DoesNotFit,
     /// wrapped IO error
-    IO(io::Error)
+    IO(io::Error),
+    /// Wrapped bitcoin util error
+    Util(util::Error)
 }
 
 impl Error for BCSError {
@@ -40,6 +45,7 @@ impl Error for BCSError {
             BCSError::DoesNotFit => "data does not fit into the block",
             BCSError::Corrupted => "corrupted",
             BCSError::IO(_) => "IO Error",
+            BCSError::Util(_) => "Bitcoin Util Error",
         }
     }
 
@@ -48,7 +54,8 @@ impl Error for BCSError {
             BCSError::InvalidOffset => None,
             BCSError::DoesNotFit => None,
             BCSError::Corrupted => None,
-            BCSError::IO(ref e) => Some(e)
+            BCSError::IO(ref e) => Some(e),
+            BCSError::Util(ref e) => Some(e)
         }
     }
 }

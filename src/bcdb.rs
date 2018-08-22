@@ -22,7 +22,18 @@ use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::{DataFile, DataEntry};
 use error::BCSError;
+use types::U24;
+use datafile::DataType;
 
+use bitcoin::blockdata::block::{BlockHeader, Block};
+use bitcoin::blockdata::transaction::Transaction;
+use bitcoin::network::serialize::BitcoinHash;
+use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
+use bitcoin::network::serialize::{RawDecoder, RawEncoder};
+use bitcoin::network::serialize::serialize;
+use bitcoin::util::hash::Sha256dHash;
+
+use std::io::Cursor;
 use std::sync::{Mutex,Arc};
 use std::io::{Read,Write,Seek};
 
@@ -152,7 +163,7 @@ impl BCDB {
         self.table.shutdown();
     }
 
-    /// stora data with a key
+    /// store data with a key
     /// storing with the same key makes previous data unaccessible
     pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
         if key.len() != KEY_LEN {
@@ -170,7 +181,156 @@ impl BCDB {
         }
         self.table.get(key, &self.data)
     }
+
+    /// Insert a block header
+    pub fn insert_header (&mut self, header: &BlockHeader, extension: Vec<Vec<u8>>) -> Result<Offset, BCSError> {
+        let key = encode(&header.bitcoin_hash())?;
+        let mut serialized_header = encode(header)?;
+
+        let mut number_of_data = [0u8;3];
+        U24::new(extension.len())?.serialize(&mut number_of_data);
+        serialized_header.append(&mut number_of_data.to_vec());
+
+        for d in extension {
+            let offset = self.data.append(DataEntry::new_data_extension(d.as_slice()))?;
+            let mut did = [0u8;6];
+            offset.serialize(&mut did);
+            serialized_header.append(&mut did.to_vec());
+        }
+
+        let number_of_transactions = [0u8;3];
+        serialized_header.append(&mut number_of_transactions.to_vec());
+
+        let offset = self.data.append(
+            DataEntry::new_data(key.as_slice(),
+                                serialized_header.as_slice()))?;
+        self.table.put(key.as_slice(), offset, &mut self.data)?;
+        Ok(offset)
+    }
+
+    /// Fetch a header by its id
+    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
+        let key = encode(id)?;
+        if let Some(stored) = self.get(&key)? {
+            let header = decode(stored.as_slice()[0..80].to_vec())?;
+            let mut extension = Vec::new();
+            let n_extensions = U24::from_slice(&stored.as_slice()[80..83])?.as_usize();
+            for i in 0 .. n_extensions {
+                let offset = Offset::from_slice(&stored.as_slice()[83+i*6 .. 83+(i+1)*6])?;
+                if let Some(data) = self.data.get(offset)? {
+                    if data.data_type == DataType::AppDataExtension {
+                        extension.push(data.data);
+                    }
+                    else {
+                        return Err(BCSError::Corrupted);
+                    }
+                }
+                else {
+                    return Err(BCSError::Corrupted);
+                }
+            }
+
+            Ok(Some((header, extension)))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
+    /// insert a block
+    pub fn insert_block(&mut self, block: &Block, extension: Vec<Vec<u8>>) -> Result<Offset, BCSError> {
+        let key = encode(&block.bitcoin_hash())?;
+        let mut serialized_block = encode(block)?;
+
+        let mut number_of_data = [0u8;3];
+        U24::new(extension.len())?.serialize(&mut number_of_data);
+        serialized_block.append(&mut number_of_data.to_vec());
+
+        for d in extension {
+            let offset = self.data.append(DataEntry::new_data_extension(d.as_slice()))?;
+            let mut did = [0u8;6];
+            offset.serialize(&mut did);
+            serialized_block.append(&mut did.to_vec());
+        }
+
+        let mut number_of_transactions = [0u8;3];
+        U24::new(block.txdata.len())?.serialize(&mut number_of_transactions);
+        serialized_block.append(&mut number_of_transactions.to_vec());
+
+        for t in &block.txdata {
+            let offset = self.put(
+                &encode(&t.txid())?.as_slice(), &encode(t)?.as_slice())?;
+            let mut did = [0u8;6];
+            offset.serialize(&mut did);
+            serialized_block.append(&mut did.to_vec());
+        }
+
+        let offset = self.put(key.as_slice(),serialized_block.as_slice())?;
+        Ok(offset)
+    }
+
+    /// Fetch a block by its id
+    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCSError> {
+        let key = encode(id)?;
+        if let Some(stored) = self.get(&key)? {
+            let header = decode(stored.as_slice()[0..80].to_vec())?;
+            let mut extension = Vec::new();
+            let n_extensions = U24::from_slice(&stored.as_slice()[80..83])?.as_usize();
+            for i in 0 .. n_extensions {
+                let offset = Offset::from_slice(&stored.as_slice()[83+i*6 .. 83+(i+1)*6])?;
+                if let Some(data) = self.data.get(offset)? {
+                    if data.data_type == DataType::AppDataExtension {
+                        extension.push(data.data);
+                    }
+                    else {
+                        return Err(BCSError::Corrupted);
+                    }
+                }
+                else {
+                    return Err(BCSError::Corrupted);
+                }
+            }
+
+            let n_transactions = U24::from_slice(&stored.as_slice()[83+n_extensions*6 .. 83+n_extensions*6+3])?.as_usize();
+            let mut txdata = Vec::new();
+            for i in 0 .. n_transactions {
+                let offset = Offset::from_slice(&stored.as_slice()[83+n_extensions*6+3+i*6 .. 83+n_extensions*6+3+(i+1)*6])?;
+                if let Some (tx) = self.data.get(offset)? {
+                    txdata.push(decode(tx.data)?);
+                }
+                else {
+                    return Err(BCSError::Corrupted);
+                }
+            }
+
+            Ok(Some((Block{header, txdata}, extension)))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
+    /// fetch a transaction stored with a block
+    pub fn fetch_transaction (&self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCSError> {
+        let key = encode(id)?;
+        if let Some(stored) = self.get(&key)? {
+            return Ok(decode(stored)?)
+        }
+        Err(BCSError::Corrupted)
+    }
 }
+
+fn decode<T: ? Sized>(data: Vec<u8>) -> Result<T, BCSError>
+    where T: ConsensusDecodable<RawDecoder<Cursor<Vec<u8>>>> {
+    let mut decoder: RawDecoder<Cursor<Vec<u8>>> = RawDecoder::new(Cursor::new(data));
+    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { BCSError::Util(e) })
+}
+
+fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCSError>
+    where T: ConsensusEncodable<RawEncoder<Cursor<Vec<u8>>>> {
+    serialize(data).map_err(|e| { BCSError::Util(e) })
+}
+
 
 /// iterate through pages of a paged file
 pub struct PageIterator<'file> {

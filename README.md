@@ -1,5 +1,5 @@
 # Fast Blockchain store in Rust
-A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
+A very fast persistent blockchain store.
 
 ## Status
 Work in progress, everything might change before 0.1.0 release without notice.
@@ -26,12 +26,6 @@ if inserted after the header.
 Inserts must be grouped into batches. All inserts of a batch will be stored 
 or none of them, in case the process dies while inserting in a batch.
 Data inserted in a batch may be fetched before closing the batch.
-
-A convenience library adds an in-memory cache and methods to:
-
-* iterate backward from any header following the chain
-* iterate forward from genesis header to the tip header with most work
-* compute the list of headers orphaned if a header is added and becomes the new tip
 
 ## Imlementation
 The persistent storage should be opened by only one process. 
@@ -124,13 +118,15 @@ A table bucket either points to data of type 1 or to a spill over as below
 +----+-------------------------------------+
 | u8 | app data type                       |
 +----+-------------------------------------+
-|[u8]| id of previous header               |
+|u256| id of previous header               |
 +----+-------------------------------------+
 |[u8]| header as serialized in blocks      |
 +----+-------------------------------------+
-|u16 | number of data = 0                  |
+|u24 | length of additional of data        |
 +----+-------------------------------------+
-|u256| tip                                 |
+|[u8]| additional data                     |
++----+-------------------------------------+
+|u24 | = 0                                 |
 +----+-------------------------------------+
 </pre>
 
@@ -139,15 +135,17 @@ A table bucket either points to data of type 1 or to a spill over as below
 +------+-------------------------------------+
 | u8   | app data type                       |
 +------+-------------------------------------+
-|[u8]  | id of previous header or block      |
+|u256  | id of previous header or block      |
 +------+-------------------------------------+
 |[u8]  | header as serialized in blocks      |
 +------+-------------------------------------+
-|u16   | number of data for the block        |
+|u24   | number of additional of data        |
 +------+-------------------------------------+
-|[u256]| ids of data for the block           |
+|[u48] | additional data offsets             |
 +------+-------------------------------------+
-|u256  | tip                                 |
+|u24   | number of transactions              |
++------+-------------------------------------+
+|[u48] | offset of transactions              |
 +------+-------------------------------------+
 </pre>
 

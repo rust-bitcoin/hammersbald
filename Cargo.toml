@@ -16,6 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 log = "0.4"
+bitcoin="0.13"
 
 
 [dev-dependencies]
