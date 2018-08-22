@@ -204,7 +204,6 @@ impl<'file> Iterator for PageIterator<'file> {
 
 #[cfg(test)]
 mod test {
-    extern crate hex;
     extern crate simple_logger;
     extern crate rand;
 
@@ -221,7 +220,7 @@ mod test {
     fn test () {
         simple_logger::init_with_level(log::Level::Trace).unwrap();
 
-        let mut db = InFile::new_db("first").unwrap();
+        let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();
@@ -230,22 +229,20 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for _ in 1 .. 100000 {
+        for _ in 1 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
             db.put(&key, &data).unwrap();
-            trace!("first check {}", hex::encode(key.to_vec()));
             assert_eq!(db.get(&key).unwrap().unwrap(), data.to_owned());
         }
         db.batch().unwrap();
 
         for (k, v) in check.iter() {
-            trace!("check {}", hex::encode(k.to_vec()));
             assert_eq!(db.get(k).unwrap(), Some(v.to_vec()));
         }
 
-        for _ in 1 .. 100000 {
+        for _ in 1 .. 10000 {
             rng.fill_bytes(&mut key);
             assert!(db.get(&key).unwrap().is_none());
         }
