@@ -23,8 +23,6 @@ use keyfile::KeyFile;
 use datafile::{DataFile, DataEntry};
 use error::BCSError;
 
-use hex;
-
 use std::sync::{Mutex,Arc};
 use std::io::{Read,Write,Seek};
 
@@ -160,7 +158,6 @@ impl BCDB {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
-        trace!("put {} {}", hex::encode(&key), hex::encode(&data));
         let offset = self.data.append(DataEntry::new_data(key, data))?;
         self.table.put(key, offset, &mut self.data)?;
         Ok(offset)
@@ -177,7 +174,8 @@ impl BCDB {
 
 /// iterate through pages of a paged file
 pub struct PageIterator<'file> {
-    pagenumber: u64,
+    /// the current page of the iterator
+    pub pagenumber: u64,
     file: &'file PageFile
 }
 
@@ -232,7 +230,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for i in 1 .. 100000 {
+        for _ in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
@@ -247,7 +245,7 @@ mod test {
             assert_eq!(db.get(k).unwrap(), Some(v.to_vec()));
         }
 
-        for i in 1 .. 100000 {
+        for _ in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             assert!(db.get(&key).unwrap().is_none());
         }

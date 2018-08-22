@@ -24,8 +24,6 @@ use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};
 
-use hex;
-
 use std::sync::Arc;
 use std::cmp::min;
 
@@ -34,7 +32,7 @@ use std::cmp::min;
 pub struct DataFile {
     async_file: AsyncFile,
     append_pos: Offset,
-    page: Page
+    page: Option<Page>
 }
 
 impl DataFile {
@@ -42,13 +40,13 @@ impl DataFile {
         let offset = Offset::new(0).unwrap();
         DataFile{async_file: AsyncFile::new(rw, None),
             append_pos: offset,
-            page: Page::new(offset) }
+            page: None }
     }
 
     pub fn init(&mut self) -> Result<(), BCSError> {
-        if self.page.offset.as_u64() == 0 && self.append_pos.as_u64() == 0 {
+        if self.append_pos.as_u64() == 0 {
             self.append_pos = self.len()?;
-            self.page = Page::new(self.append_pos);
+            self.page = Some(Page::new(self.append_pos));
             if self.append_pos.as_u64() == 0 {
                 self.append_slice(&[0xBC,0xDA])?;
             }
@@ -65,13 +63,19 @@ impl DataFile {
     }
 
     pub fn data_iter (&self) -> DataIterator {
-        DataIterator::new(self.page_iter(0))
+        DataIterator::new(self.page_iter(0), 2)
     }
 
     pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
-        let page = if offset.this_page() == self.page.offset {
-            Arc::new(self.page.clone())
-        } else {
+        let page = if let Some(ref page) = self.page {
+            if page.offset == offset.this_page() {
+                Arc::new(page.clone())
+            }
+            else {
+                self.read_page(offset.this_page())?
+            }
+        }
+        else {
             self.read_page(offset.this_page())?
         };
         let mut fetch_iterator = DataIterator::new_fetch(
@@ -80,9 +84,15 @@ impl DataFile {
     }
 
     pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
-        let page = if offset.this_page() == self.page.offset {
-            Arc::new(self.page.clone())
-        } else {
+        let page = if let Some(ref page) = self.page {
+            if page.offset == offset.this_page() {
+                Arc::new(page.clone())
+            }
+            else {
+                self.read_page(offset.this_page())?
+            }
+        }
+        else {
             self.read_page(offset.this_page())?
         };
         let mut fetch_iterator = DataIterator::new_fetch(
@@ -121,25 +131,29 @@ impl DataFile {
     }
 
     fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCSError> {
-        let mut wrote = 0;
-        let mut wrote_on_this_page = 0;
-        let mut pos = self.append_pos.in_page_pos();
-        while wrote < slice.len() {
-            let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
-            self.page.payload [pos .. pos + have].copy_from_slice (&slice[wrote .. wrote + have]);
-            pos += have;
-            wrote += have;
-            wrote_on_this_page += have;
-            if pos == PAYLOAD_MAX {
-                self.async_file.append_page(Arc::new(self.page.clone()));
-                self.append_pos = self.append_pos.next_page()?;
-                self.page = Page::new (self.append_pos);
-                pos = 0;
-                wrote_on_this_page = 0;
+        if let Some(ref mut page) = self.page {
+            let mut wrote = 0;
+            let mut wrote_on_this_page = 0;
+            let mut pos = self.append_pos.in_page_pos();
+            while wrote < slice.len() {
+                let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
+                page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
+                pos += have;
+                wrote += have;
+                wrote_on_this_page += have;
+                if pos == PAYLOAD_MAX {
+                    self.async_file.append_page(Arc::new(page.clone()));
+                    self.append_pos = self.append_pos.next_page()?;
+                    *page = Page::new(self.append_pos);
+                    pos = 0;
+                    wrote_on_this_page = 0;
+                }
             }
+            self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
+            Ok(())
+        } else {
+            Err(BCSError::DoesNotFit)
         }
-        self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
-        Ok(())
     }
 
     pub fn clear_cache(&mut self) {
@@ -149,10 +163,12 @@ impl DataFile {
 
 impl DBFile for DataFile {
     fn flush(&mut self) -> Result<(), BCSError> {
-        if self.append_pos.in_page_pos() > 0 {
-            self.async_file.append_page(Arc::new(self.page.clone()));
-            self.append_pos = self.append_pos.next_page()?;
-            self.page = Page::new (self.append_pos);
+        if let Some (ref mut page) = self.page {
+            if self.append_pos.in_page_pos() > 0 {
+                self.async_file.append_page(Arc::new(page.clone()));
+                self.append_pos = self.append_pos.next_page()?;
+                *page = Page::new(self.append_pos);
+            }
         }
         self.async_file.flush()
     }
@@ -172,8 +188,10 @@ impl DBFile for DataFile {
 
 impl PageFile for DataFile {
     fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        if offset == self.page.offset {
-            return Ok(Arc::new(self.page.clone()))
+        if let Some (ref page) = self.page {
+            if offset == page.offset {
+                return Ok(Arc::new(page.clone()))
+            }
         }
         self.async_file.read_page(offset)
     }
@@ -234,8 +252,8 @@ pub struct DataIterator<'file> {
 }
 
 impl<'file> DataIterator<'file> {
-    pub fn new (page_iterator: PageIterator<'file>) -> DataIterator {
-        DataIterator{page_iterator, pos: 0, current: None}
+    pub fn new (page_iterator: PageIterator<'file>, pos: usize) -> DataIterator {
+        DataIterator{page_iterator, pos, current: None}
     }
 
     pub fn new_fetch (page_iterator: PageIterator<'file>, pos: usize, page: Arc<Page>) -> DataIterator {
@@ -311,7 +329,6 @@ impl<'file> Iterator for DataIterator<'file> {
                 else if data_type == DataType::TableSpillOver {
                     let mut size = [0u8; 3];
                     if self.read_slice(&mut size) {
-                        let len = U24::from_slice(&size).unwrap();
                         let mut data = [0u8; 6];
                         let mut next = [0u8; 6];
                         if self.read_slice(&mut data) && self.read_slice(&mut next) {
@@ -338,6 +355,7 @@ mod test {
     fn test() {
         let mem = InMemory::new(true);
         let mut data = DataFile::new(Box::new(mem));
+        data.init().unwrap();
         assert!(data.page_iter(0).next().is_some());
         assert!(data.data_iter().next().is_none());
         let entry = DataEntry::new_data(&[0u8;KEY_LEN], "hello world!".as_bytes());

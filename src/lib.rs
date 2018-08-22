@@ -28,7 +28,6 @@
 
 #[macro_use]
 extern crate log;
-extern crate hex;
 
 mod page;
 mod types;

@@ -20,7 +20,7 @@
 
 
 use bcdb::{DBFile, RW, PageFile};
-use page::{Page, PAGE_SIZE, PAYLOAD_MAX};
+use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
 use cache::Cache;
@@ -28,10 +28,8 @@ use logfile::LogFile;
 
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex, Condvar};
-use std::collections::VecDeque;
 use std::thread;
 use std::cell::Cell;
-use std::time::Duration;
 
 /// The buffer pool
 pub struct AsyncFile {
@@ -119,7 +117,7 @@ impl AsyncFile {
                     cache = inner.haswork.wait(cache).unwrap();
                 }
                 let mut logged = false;
-                for (append, page) in cache.writes() {
+                for (append, _) in cache.writes() {
                     if !append {
                         logged = true;
                         break;
@@ -143,7 +141,7 @@ impl AsyncFile {
                     }
                 }
                 writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
-                cache.move_writes_to_reads();
+                cache.move_writes_to_wrote();
             }
 
             let mut rw = inner.rw.lock().unwrap();
@@ -195,7 +193,6 @@ impl DBFile for AsyncFile {
         while !cache.is_empty() {
             cache = self.inner.flushed.wait(cache).unwrap();
         }
-        cache.clear();
         Ok(())
     }
 
