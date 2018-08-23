@@ -29,7 +29,7 @@ pub enum BCSError {
     /// offset is invalid (> 2^48)
     InvalidOffset,
     /// corrupted data
-    Corrupted,
+    Corrupted(&'static str),
     /// Data does not fit into the block
     DoesNotFit,
     /// wrapped IO error
@@ -43,7 +43,7 @@ impl Error for BCSError {
         match *self {
             BCSError::InvalidOffset => "invalid offset",
             BCSError::DoesNotFit => "data does not fit into the block",
-            BCSError::Corrupted => "corrupted",
+            BCSError::Corrupted (s) => s,
             BCSError::IO(_) => "IO Error",
             BCSError::Util(_) => "Bitcoin Util Error",
         }
@@ -53,7 +53,7 @@ impl Error for BCSError {
         match *self {
             BCSError::InvalidOffset => None,
             BCSError::DoesNotFit => None,
-            BCSError::Corrupted => None,
+            BCSError::Corrupted (_) => None,
             BCSError::IO(ref e) => Some(e),
             BCSError::Util(ref e) => Some(e)
         }

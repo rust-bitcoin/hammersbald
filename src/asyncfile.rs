@@ -216,7 +216,7 @@ impl PageFile for AsyncFile {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let page = self.inner.read_page(offset)?;
         if page.offset != offset {
-            return Err(BCSError::Corrupted);
+            return Err(BCSError::Corrupted ("read page offset does not match its position"));
         }
         Ok(page)
     }

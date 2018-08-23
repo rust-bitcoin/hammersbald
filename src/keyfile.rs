@@ -124,8 +124,7 @@ impl KeyFile {
                             self.write_page(Arc::new(bucket_page.clone()));
 
                         } else {
-                            // can not find previously stored spillover
-                            return Err(BCSError::Corrupted);
+                            return Err(BCSError::Corrupted("can not find previously stored spillover (1)"));
                         }
                     }
                     else {
@@ -148,15 +147,13 @@ impl KeyFile {
                             }
                             spillover = so.1;
                         } else {
-                            // can not find previously stored spillover
-                            return Err(BCSError::Corrupted);
+                            return Err(BCSError::Corrupted("can not find previously stored spillover (2)"));
                         }
                     }
                     break;
                 }
             } else {
-                // can not find previously stored data
-                return Err(BCSError::Corrupted);
+                return Err(BCSError::Corrupted("can not find previously stored data (1)"));
             }
         }
         let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
@@ -172,12 +169,10 @@ impl KeyFile {
                     // rehash next
                     spillover = so.1;
                 } else {
-                    // can not find previously stored data
-                    return Err(BCSError::Corrupted);
+                    return Err(BCSError::Corrupted("can not find previously stored data (2)"));
                 }
             } else {
-                // can not find previously stored spillover
-                return Err(BCSError::Corrupted);
+                return Err(BCSError::Corrupted("can not find previously stored data (3)"));
             }
         }
         Ok(())
@@ -206,7 +201,7 @@ impl KeyFile {
                 }
             } else {
                 // can not find previously stored data
-                return Err(BCSError::Corrupted);
+                return Err(BCSError::Corrupted("can not find previously stored data (4)"));
             }
         }
         self.write_page(Arc::new(bucket_page));
@@ -240,20 +235,18 @@ impl KeyFile {
                             spillover = so.1;
                         }
                         else {
-                            // can not find previously stored data
-                            return Err(BCSError::Corrupted);
+                            return Err(BCSError::Corrupted("can not find previously stored spillover (3)"));
                         }
                     }
                     else {
-                        // can not find previously stored spillover
-                        return Err(BCSError::Corrupted);
+                        return Err(BCSError::Corrupted("can not find previously stored spillover (4)"));
                     }
                 }
             }
         }
         else {
             // can not find previously stored data
-            return Err(BCSError::Corrupted);
+            return Err(BCSError::Corrupted("can not find previously stored data (5)"));
         }
         return Ok(None)
     }

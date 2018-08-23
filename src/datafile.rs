@@ -99,11 +99,11 @@ impl DataFile {
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
             if entry.data_type != DataType::TableSpillOver {
-                return Err(BCSError::Corrupted)
+                return Err(BCSError::Corrupted("expected spillover"))
             }
             return Ok((Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?));
         }
-        return Err(BCSError::Corrupted)
+        return Err(BCSError::Corrupted("can not find spillover"))
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
