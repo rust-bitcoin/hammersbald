@@ -106,7 +106,7 @@ impl AsyncFile {
         let mut run = true;
         while run {
 
-            let writes;
+            let mut writes;
             {
                 // limit scope of cache lock to collection of work
                 // since clear_writes() moves work to read cache
@@ -143,6 +143,8 @@ impl AsyncFile {
                 writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
             }
+
+            writes.sort_unstable_by(|a, b| u64::cmp(&a.1.offset.as_u64(), &b.1.offset.as_u64()));
 
             let mut rw = inner.rw.lock().unwrap();
             for (append, page) in writes {
