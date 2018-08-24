@@ -32,8 +32,8 @@ extern crate bitcoin;
 
 mod page;
 mod types;
-mod inmemory;
-mod infile;
+pub mod inmemory;
+pub mod infile;
 mod asyncfile;
 mod logfile;
 mod keyfile;

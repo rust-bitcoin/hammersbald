@@ -40,6 +40,7 @@ pub struct InFile {
 }
 
 impl InFile {
+    /// create a new DB in memory for tests
     pub fn new (file: File) -> InFile {
         InFile {data: file}
     }
@@ -47,9 +48,9 @@ impl InFile {
 
 impl BCDBFactory for InFile {
     fn new_db (name: &str) -> Result<BCDB, BCSError> {
-        let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.to_owned() + ".tbl")?;
-        let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".dat")?;
-        let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".log")?;
+        let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.to_owned() + ".tb")?;
+        let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".bc")?;
+        let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".lg")?;
 
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InFile::new(log_file)))));
         let table = KeyFile::new(Box::new(InFile::new(table_file)), log);
