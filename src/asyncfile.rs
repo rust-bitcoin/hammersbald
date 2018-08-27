@@ -37,6 +37,7 @@ pub struct AsyncFile {
 }
 
 struct Inner {
+    role: &'static str,
     rw: Mutex<Box<RW>>,
     cache: Mutex<Cache>,
     haswork: Condvar,
@@ -46,8 +47,9 @@ struct Inner {
 }
 
 impl Inner {
-    pub fn new (rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> Inner {
+    pub fn new (role: &'static str, rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> Inner {
         Inner{
+            role,
             rw: Mutex::new(rw),
             cache: Mutex::new(Cache::default()),
             haswork: Condvar::new(),
@@ -64,6 +66,7 @@ impl Inner {
                 return Ok(page);
             }
         }
+
 
         let page = self.read_page_from_store(offset)?;
 
@@ -88,8 +91,8 @@ impl Inner {
 }
 
 impl AsyncFile {
-    pub fn new(rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> AsyncFile {
-        let inner = Arc::new(Inner::new(rw, log_file));
+    pub fn new(role: &'static str, rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> AsyncFile {
+        let inner = Arc::new(Inner::new(role, rw, log_file));
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
         AsyncFile { inner: inner }
@@ -107,6 +110,7 @@ impl AsyncFile {
         while run {
 
             let mut writes;
+            let mut logged = false;
             {
                 // limit scope of cache lock to collection of work
                 // since clear_writes() moves work to read cache
@@ -114,49 +118,54 @@ impl AsyncFile {
                 // the written data
                 let mut cache = inner.cache.lock().unwrap();
                 while cache.is_empty() {
+                    inner.flushed.notify_all();
                     cache = inner.haswork.wait(cache).unwrap();
                 }
-                let mut logged = false;
-                for (append, _) in cache.writes() {
-                    if !append {
-                        logged = true;
-                        break;
-                    }
-                }
-                if logged {
-                    if let Some(ref log_file) = inner.log_file {
-                        let mut log = log_file.lock().unwrap();
-                        let mut log_write = false;
-                        for (append, page) in cache.writes() {
-                            if !append && page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
-                                if let Ok(prev) = inner.read_page_from_store(page.offset) {
-                                    log_write |= log.append_page(prev).unwrap();
-                                }
-                            }
-                        }
-                        if log_write {
-                            log.flush().unwrap();
-                            log.sync().unwrap();
-                        }
-                    }
-                }
+
                 writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
             }
 
+
             writes.sort_unstable_by(|a, b| u64::cmp(&a.1.offset.as_u64(), &b.1.offset.as_u64()));
 
+            for (append, _) in &writes {
+                if !append {
+                    logged = true;
+                    break;
+                }
+            }
+
+            if logged {
+                if let Some(ref log_file) = inner.log_file {
+                    let mut log = log_file.lock().unwrap();
+                    let mut log_write = false;
+                    for (append, page) in &writes {
+                        if !append && page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
+                            debug!("log page {}", page.offset.as_u64());
+                            if let Ok(prev) = inner.read_page_from_store(page.offset) {
+                                log_write |= log.append_page(prev).unwrap();
+                            }
+                        }
+                    }
+                    if log_write {
+                        log.flush().unwrap();
+                        log.sync().unwrap();
+                    }
+                }
+            }
+
             let mut rw = inner.rw.lock().unwrap();
-            for (append, page) in writes {
+            for (append, page) in &writes {
                 if !append {
                     let pos = page.offset.as_u64();
                     rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
+                    debug!("write page {}", pos);
                 }
                 rw.write(&page.finish()).unwrap();
             }
 
             rw.flush().unwrap();
-            inner.flushed.notify_all();
 
             run = inner.run.lock().unwrap().get();
         }
@@ -218,7 +227,7 @@ impl PageFile for AsyncFile {
     fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
         let page = self.inner.read_page(offset)?;
         if page.offset != offset {
-            return Err(BCSError::Corrupted ("read page offset does not match its position"));
+            return Err(BCSError::Corrupted (format!("{}: read page offset does not match its position {} != {}", self.inner.role, offset.as_u64(), page.offset.as_u64())));
         }
         Ok(page)
     }

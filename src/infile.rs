@@ -54,7 +54,7 @@ impl BCDBFactory for InFile {
 
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InFile::new(log_file)))));
         let table = KeyFile::new(Box::new(InFile::new(table_file)), log);
-        let data = DataFile::new(Box::new(InFile::new(data_file)));
+        let data = DataFile::new(Box::new(InFile::new(data_file)))?;
 
         BCDB::new(table, data)
     }

@@ -29,6 +29,7 @@
 #[macro_use]
 extern crate log;
 extern crate bitcoin;
+extern crate hex;
 
 mod page;
 mod types;

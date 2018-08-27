@@ -51,8 +51,7 @@ impl LogFile {
 
     /// append a page if not yet logged in this batch. Returns false if the page was logged before.
     pub fn append_page (&mut self, page: Arc<Page>) -> Result<bool, BCSError> {
-        if !self.appended.contains(&page.offset) {
-            self.appended.insert(page.offset);
+        if self.appended.insert(page.offset) {
             self.rw.lock().unwrap().write(&page.finish())?;
             return Ok(true);
         }
@@ -60,7 +59,7 @@ impl LogFile {
     }
 
     /// empties the set of logged pages
-    pub fn reset (&mut self) {
+    pub fn clear_cache(&mut self) {
         self.appended.clear();
     }
 
@@ -95,7 +94,7 @@ impl PageFile for LogFile {
         let mut buffer = [0u8; PAGE_SIZE];
         let mut rw = self.rw.lock().unwrap();
         let len = rw.seek(SeekFrom::End(0))?;
-        if offset.as_u64() > len {
+        if offset.as_u64() >= len {
             return Err(BCSError::InvalidOffset);
         }
         rw.seek(SeekFrom::Start(offset.as_u64()))?;

@@ -25,6 +25,7 @@ use bcdb::{RW, DBFile, PageFile,KEY_LEN};
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
+use hex;
 
 use std::sync::{Mutex, Arc};
 use std::ops::Deref;
@@ -45,7 +46,7 @@ pub struct KeyFile {
 
 impl KeyFile {
     pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        KeyFile{async_file: AsyncFile::new(rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
+        KeyFile{async_file: AsyncFile::new("key", rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -55,14 +56,15 @@ impl KeyFile {
                 self.buckets = buckets;
                 self.step = first_page.read_offset(6).unwrap().as_u64();
                 self.log_mod = (63 - buckets.leading_zeros()) as u64 - 1;
-                info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
             }
+            info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
         else {
             let mut fp = Page::new(Offset::new(0)?);
             fp.write_offset(0, Offset::new(self.buckets)?)?;
             fp.write_offset(6, Offset::new(self.step)?)?;
             self.write_page(Arc::new(fp));
+            info!("open empty BCDB");
         };
 
         Ok(())
@@ -75,6 +77,7 @@ impl KeyFile {
         if bucket < step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
+
         self.store_to_bucket(bucket, key, offset, data_file)?;
         self.rehash_bucket(step, data_file)?;
 
@@ -89,23 +92,26 @@ impl KeyFile {
             let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
             self.write_page(Arc::new(page));
         }
+
         if let Ok(first_page) = self.async_file.read_page(Offset::new(0).unwrap()) {
             let mut fp = first_page.deref().clone();
             fp.write_offset(0, Offset::new(self.buckets)?)?;
             fp.write_offset(6, Offset::new(self.step)?)?;
             self.async_file.write_page(Arc::new(fp));
         }
+
+
         Ok(())
     }
 
     fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCSError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
-        let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+
         loop {
+            let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
             let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
             if data_offset.as_u64() == 0 {
-                // nothing to do for an empty bucket
-                return Ok(());
+                break;
             }
             // get previously stored key
             if let Some(prev) = data_file.get(data_offset)? {
@@ -113,49 +119,35 @@ impl KeyFile {
                 let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
                     // store to new bucket
-                    self.store_to_bucket(new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
+                    self.store_to_bucket (new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
                     bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
                     // source in first spill-over
-                    let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
                     if spillover.as_u64() != 0 {
                         if let Ok(so) = data_file.get_spillover(spillover) {
                             bucket_page.write_offset(bucket_offset.in_page_pos(), so.0)?;
                             bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so.1)?;
-                            self.write_page(Arc::new(bucket_page.clone()));
-
+                            self.write_page(Arc::new(bucket_page));
                         } else {
-                            return Err(BCSError::Corrupted("can not find previously stored spillover (1)"));
+                            return Err(BCSError::Corrupted(format!("can not find previously stored spillover (1) {}", spillover.as_u64())));
                         }
-                    }
-                    else {
+                    } else {
                         bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
-                        self.write_page(Arc::new(bucket_page.clone()));
+                        self.write_page(Arc::new(bucket_page));
                         break;
                     }
                 }
                 else {
-                    // rehash spillover chain
-                    let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
-                    while spillover.as_u64() != 0 {
-                        if let Ok(so) = data_file.get_spillover(spillover) {
-                            if let Some(prev) = data_file.get(so.0)? {
-                                let hash = Self::hash(prev.data_key.as_slice());
-                                let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-                                if new_bucket != bucket {
-                                    self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
-                                }
-                            }
-                            spillover = so.1;
-                        } else {
-                            return Err(BCSError::Corrupted("can not find previously stored spillover (2)"));
-                        }
-                    }
                     break;
                 }
             } else {
-                return Err(BCSError::Corrupted("can not find previously stored data (1)"));
+                return Err(BCSError::Corrupted(format!("can not find previously stored data (1) {}", data_offset.as_u64())));
             }
         }
+        // rehash spillover chain
+        let mut remaining_spillovers = Vec::new();
+        let mut some_moved = false;
+        let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
         let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
         while spillover.as_u64() != 0 {
             if let Ok(so) = data_file.get_spillover(spillover) {
@@ -163,18 +155,33 @@ impl KeyFile {
                     let hash = Self::hash(prev.data_key.as_slice());
                     let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
-                        // store to new bucket
                         self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
+                        bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+                        some_moved = true;
                     }
-                    // rehash next
-                    spillover = so.1;
-                } else {
-                    return Err(BCSError::Corrupted("can not find previously stored data (2)"));
+                    else {
+                        remaining_spillovers.push(so.0);
+                    }
                 }
+                else {
+                    return Err(BCSError::Corrupted(format!("can not find previously stored data (6) {}", so.0.as_u64())));
+                }
+                spillover = so.1;
             } else {
-                return Err(BCSError::Corrupted("can not find previously stored data (3)"));
+                return Err(BCSError::Corrupted(format!("can not find previously stored spillover (2) {}", spillover.as_u64())));
             }
         }
+        if some_moved {
+            let mut prev = Offset::new(0).unwrap();
+            for offset in remaining_spillovers.iter().rev() {
+                let so = data_file.append(DataEntry::new_spillover(*offset, prev))?;
+                prev = so;
+            }
+            bucket_page.write_offset(bucket_offset.in_page_pos() + 6, prev)?;
+            self.write_page(Arc::new(bucket_page));
+        }
+
+
         Ok(())
     }
 
@@ -201,7 +208,7 @@ impl KeyFile {
                 }
             } else {
                 // can not find previously stored data
-                return Err(BCSError::Corrupted("can not find previously stored data (4)"));
+                return Err(BCSError::Corrupted(format!("can not find previously stored data (4) {}", data_offset.as_u64())));
             }
         }
         self.write_page(Arc::new(bucket_page));
@@ -235,20 +242,20 @@ impl KeyFile {
                             spillover = so.1;
                         }
                         else {
-                            return Err(BCSError::Corrupted("can not find previously stored spillover (3)"));
+                            return Err(BCSError::Corrupted(format!("can not find previously stored spillover (3) {}", so.0.as_u64())));
                         }
                     }
                     else {
-                        return Err(BCSError::Corrupted("can not find previously stored spillover (4)"));
+                        return Err(BCSError::Corrupted(format!("can not find previously stored spillover (4) {}", spillover.as_u64())));
                     }
                 }
+                return Ok(None);
             }
         }
         else {
             // can not find previously stored data
-            return Err(BCSError::Corrupted("can not find previously stored data (5)"));
+            return Err(BCSError::Corrupted(format!("can not find previously stored data (5) {}", data_offset.as_u64())));
         }
-        return Ok(None)
     }
 
     pub fn write_page(&self, page: Arc<Page>) {
@@ -281,7 +288,7 @@ impl KeyFile {
         use std::mem::transmute;
 
         let mut buf = [0u8; 8];
-        buf.copy_from_slice(&key[KEY_LEN-8 .. KEY_LEN]);
+        buf.copy_from_slice(&key[0 .. 8]);
         u64::from_be(unsafe { transmute(buf)})
     }
 }

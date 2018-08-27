@@ -51,7 +51,7 @@ impl BCDBFactory for InMemory {
     fn new_db (_name: &str) -> Result<BCDB, BCSError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = KeyFile::new(Box::new(InMemory::new(false)), log);
-        let data = DataFile::new(Box::new(InMemory::new(true)));
+        let data = DataFile::new(Box::new(InMemory::new(true)))?;
 
         BCDB::new(table, data)
     }

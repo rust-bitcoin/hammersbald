@@ -32,24 +32,21 @@ use std::cmp::min;
 pub struct DataFile {
     async_file: AsyncFile,
     append_pos: Offset,
-    page: Option<Page>
+    page: Arc<Page>
 }
 
 impl DataFile {
-    pub fn new(rw: Box<RW>) -> DataFile {
-        let offset = Offset::new(0).unwrap();
-        DataFile{async_file: AsyncFile::new(rw, None),
-            append_pos: offset,
-            page: None }
+    pub fn new(rw: Box<RW>) -> Result<DataFile, BCSError> {
+        let mut file = AsyncFile::new("data", rw, None);
+        let append_pos = file.len()?;
+        Ok(DataFile{async_file: file,
+            append_pos,
+            page: Arc::new(Page::new(append_pos)) })
     }
 
     pub fn init(&mut self) -> Result<(), BCSError> {
         if self.append_pos.as_u64() == 0 {
-            self.append_pos = self.len()?;
-            self.page = Some(Page::new(self.append_pos));
-            if self.append_pos.as_u64() == 0 {
-                self.append_slice(&[0xBC,0xDA])?;
-            }
+            self.append_slice(&[0xBC,0xDA])?;
         }
         Ok(())
     }
@@ -67,43 +64,45 @@ impl DataFile {
     }
 
     pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
-        let page = if let Some(ref page) = self.page {
-            if page.offset == offset.this_page() {
-                Arc::new(page.clone())
+        let page = {
+            if self.page.offset == offset.this_page() {
+                self.page.clone()
             }
             else {
                 self.read_page(offset.this_page())?
             }
-        }
-        else {
-            self.read_page(offset.this_page())?
         };
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
-        return Ok(fetch_iterator.next());
+        if let Some(entry) = fetch_iterator.next() {
+            if entry.data_type == DataType::AppData {
+                return Ok(Some(entry));
+            }
+            else {
+                return Err(BCSError::Corrupted(format!("expected data at {}", offset.as_u64())));
+            }
+        }
+        return Ok(None);
     }
 
     pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
-        let page = if let Some(ref page) = self.page {
-            if page.offset == offset.this_page() {
-                Arc::new(page.clone())
+        let page = {
+            if self.page.offset == offset.this_page() {
+                self.page.clone()
             }
             else {
                 self.read_page(offset.this_page())?
             }
-        }
-        else {
-            self.read_page(offset.this_page())?
         };
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
             if entry.data_type != DataType::TableSpillOver {
-                return Err(BCSError::Corrupted("expected spillover"))
+                return Err(BCSError::Corrupted(format!("expected spillover {}", offset.as_u64())))
             }
             return Ok((Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?));
         }
-        return Err(BCSError::Corrupted("can not find spillover"))
+        return Err(BCSError::Corrupted(format!("can not find spillover {}", offset.as_u64())))
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
@@ -131,29 +130,29 @@ impl DataFile {
     }
 
     fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCSError> {
-        if let Some(ref mut page) = self.page {
-            let mut wrote = 0;
-            let mut wrote_on_this_page = 0;
-            let mut pos = self.append_pos.in_page_pos();
-            while wrote < slice.len() {
-                let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
-                page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
-                pos += have;
-                wrote += have;
-                wrote_on_this_page += have;
-                if pos == PAYLOAD_MAX {
-                    self.async_file.append_page(Arc::new(page.clone()));
-                    self.append_pos = self.append_pos.next_page()?;
-                    *page = Page::new(self.append_pos);
-                    pos = 0;
-                    wrote_on_this_page = 0;
-                }
+        use std::ops::Deref;
+
+        let mut wrote = 0;
+        let mut wrote_on_this_page = 0;
+        let mut pos = self.append_pos.in_page_pos();
+        while wrote < slice.len() {
+            let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
+            let mut page = self.page.deref().clone();
+            page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
+            self.page = Arc::new(page);
+            pos += have;
+            wrote += have;
+            wrote_on_this_page += have;
+            if pos == PAYLOAD_MAX {
+                self.async_file.append_page(self.page.clone());
+                self.append_pos = self.append_pos.next_page()?;
+                self.page = Arc::new(Page::new(self.append_pos));
+                pos = 0;
+                wrote_on_this_page = 0;
             }
-            self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
-            Ok(())
-        } else {
-            Err(BCSError::DoesNotFit)
         }
+        self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
+        Ok(())
     }
 
     pub fn clear_cache(&mut self) {
@@ -163,12 +162,10 @@ impl DataFile {
 
 impl DBFile for DataFile {
     fn flush(&mut self) -> Result<(), BCSError> {
-        if let Some (ref mut page) = self.page {
-            if self.append_pos.in_page_pos() > 0 {
-                self.async_file.append_page(Arc::new(page.clone()));
-                self.append_pos = self.append_pos.next_page()?;
-                *page = Page::new(self.append_pos);
-            }
+        if self.append_pos.in_page_pos() > 0 {
+            self.async_file.append_page(self.page.clone());
+            self.append_pos = self.append_pos.next_page()?;
+            self.page = Arc::new(Page::new(self.append_pos));
         }
         self.async_file.flush()
     }
@@ -188,10 +185,8 @@ impl DBFile for DataFile {
 
 impl PageFile for DataFile {
     fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        if let Some (ref page) = self.page {
-            if offset == page.offset {
-                return Ok(Arc::new(page.clone()))
-            }
+        if offset == self.page.offset {
+            return Ok(self.page.clone())
         }
         self.async_file.read_page(offset)
     }
@@ -376,7 +371,7 @@ mod test {
     #[test]
     fn test() {
         let mem = InMemory::new(true);
-        let mut data = DataFile::new(Box::new(mem));
+        let mut data = DataFile::new(Box::new(mem)).unwrap();
         data.init().unwrap();
         assert!(data.page_iter(0).next().is_some());
         assert!(data.data_iter().next().is_none());
