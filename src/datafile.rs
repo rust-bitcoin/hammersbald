@@ -75,7 +75,7 @@ impl DataFile {
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
-            if entry.data_type == DataType::AppData {
+            if entry.data_type == DataType::AppData || entry.data_type == DataType::AppDataExtension {
                 return Ok(Some(entry));
             }
             else {

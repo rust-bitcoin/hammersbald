@@ -17,9 +17,9 @@ path = "src/lib.rs"
 [dependencies]
 log = "0.4"
 bitcoin="0.13"
-hex = "0.3"
 
 
 [dev-dependencies]
 simple_logger = "0.5.0"
 rand="0.5"
+hex = "0.3"

@@ -203,17 +203,13 @@ impl BCDB {
         let number_of_transactions = [0u8;3];
         serialized_header.append(&mut number_of_transactions.to_vec());
 
-        let offset = self.data.append(
-            DataEntry::new_data(key.as_slice(),
-                                serialized_header.as_slice()))?;
-        self.table.put(key.as_slice(), offset, &mut self.data)?;
-        Ok(offset)
+        self.put(key.as_slice(), serialized_header.as_slice())
     }
 
     /// Fetch a header by its id
     pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
         let key = encode(id)?;
-        if let Some(stored) = self.get(&key)? {
+        if let Some(stored) = self.get(key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut extension = Vec::new();
             let n_extensions = U24::from_slice(&stored.as_slice()[80..83])?.as_usize();
@@ -391,7 +387,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for _ in 1 .. 100000 {
+        for _ in 1 .. 1000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);

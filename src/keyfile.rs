@@ -25,7 +25,6 @@ use bcdb::{RW, DBFile, PageFile,KEY_LEN};
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
-use hex;
 
 use std::sync::{Mutex, Arc};
 use std::ops::Deref;
