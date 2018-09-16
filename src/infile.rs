@@ -19,11 +19,13 @@
 //! Implements persistent store
 
 use error::BCSError;
-use bcdb::RW;
+use bcdb::PageFile;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
 use bcdb::{BCDBFactory, BCDB};
+use types::Offset;
+use page::{Page,PAGE_SIZE};
 
 
 use std::io::Read;
@@ -60,16 +62,43 @@ impl BCDBFactory for InFile {
     }
 }
 
-impl RW for InFile {
-    fn len(&mut self) -> Result<usize, BCSError> {
-        Ok(self.data.seek(SeekFrom::End(0))? as usize)
+impl PageFile for InFile {
+    fn flush(&mut self) -> Result<(), BCSError> {
+        Ok(self.data.flush()?)
     }
 
-    fn truncate(&mut self, len: usize) -> Result<(), BCSError> {
-        Ok(self.data.set_len(len as u64)?)
+    fn len(&mut self) -> Result<u64, BCSError> {
+        Ok(self.data.seek(SeekFrom::End(0))?)
+    }
+
+    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+        Ok(self.data.set_len(len)?)
     }
 
     fn sync(&self) -> Result<(), BCSError> { Ok(self.data.sync_data()?) }
+
+    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
+        let mut buffer = [0u8; PAGE_SIZE];
+        let len = self.len()?;
+        if offset.as_u64() >= len {
+            return Err(BCSError::InvalidOffset);
+        }
+        self.seek(SeekFrom::Start(offset.as_u64()))?;
+        self.read(&mut buffer)?;
+        let page = Page::from_buf(buffer);
+        Ok(page)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.write(&page.finish()[..])?;
+        Ok(())
+    }
+
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.seek(SeekFrom::Start(page.offset.as_u64()))?;
+        self.write(&page.finish()[..])?;
+        Ok(())
+    }
 }
 
 impl Read for InFile {

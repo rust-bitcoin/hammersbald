@@ -36,15 +36,15 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn append (&mut self, page: Arc<Page>) {
+    pub fn append (&mut self, page: Page) {
         self.put(true, page)
     }
 
-    pub fn update (&mut self, page: Arc<Page>) {
+    pub fn update (&mut self, page: Page) {
         self.put(false, page)
     }
 
-    pub fn cache (&mut self, page: Arc<Page>) {
+    pub fn cache (&mut self, page: Page) {
         if !self.writes.contains_key(&page.offset) && !self.wrote.contains_key(&page.offset) {
             if self.fifo.len() >= READ_CACHE_PAGES {
                 if let Some(old) = self.fifo.pop_front() {
@@ -52,16 +52,17 @@ impl Cache {
                 }
             }
 
-            self.fifo.push_back(page.clone());
-            if self.reads.insert(page.offset, page.clone()).is_some() {
-                if let Some(prev) = self.fifo.iter().position(move |p| p.offset == page.offset) {
+            let pp = Arc::new(page);
+            self.fifo.push_back(pp.clone());
+            if self.reads.insert(pp.offset, pp.clone()).is_some() {
+                if let Some(prev) = self.fifo.iter().position(move |p| p.offset == pp.offset) {
                     self.fifo.swap_remove_back(prev);
                 }
             }
         }
     }
 
-    fn put (&mut self, append: bool, page: Arc<Page>) {
+    fn put (&mut self, append: bool, page: Page) {
         let offset = page.offset;
         if self.reads.remove(&page.offset).is_some() {
             if let Some(prev) = self.fifo.iter().position(move |p| p.offset == offset) {
@@ -69,7 +70,7 @@ impl Cache {
             }
         }
         self.wrote.remove(&offset);
-        self.writes.insert(offset, (append, page));
+        self.writes.insert(offset, (append, Arc::new(page)));
     }
 
     pub fn is_empty (&self) -> bool {

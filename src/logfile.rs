@@ -20,24 +20,23 @@
 //! this set.
 //!
 
-use bcdb::{DBFile, RW, PageIterator, PageFile};
-use page::{Page, PAGE_SIZE};
+use bcdb::{PageIterator, PageFile};
+use page::Page;
 use error::BCSError;
 use types::Offset;
 
-use std::io::{Read,Write,Seek,SeekFrom};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::collections::HashSet;
 
 /// The buffer pool
 pub struct LogFile {
-    rw: Mutex<Box<RW>>,
+    rw: Mutex<Box<PageFile>>,
     appended: HashSet<Offset>,
     pub tbl_len: u64
 }
 
 impl LogFile {
-    pub fn new(rw: Box<RW>) -> LogFile {
+    pub fn new(rw: Box<PageFile>) -> LogFile {
         LogFile { rw: Mutex::new(rw), appended: HashSet::new(), tbl_len: 0 }
     }
 
@@ -50,9 +49,9 @@ impl LogFile {
     }
 
     /// append a page if not yet logged in this batch. Returns false if the page was logged before.
-    pub fn append_page (&mut self, page: Arc<Page>) -> Result<bool, BCSError> {
+    pub fn append_page (&mut self, page: Page) -> Result<bool, BCSError> {
         if self.appended.insert(page.offset) {
-            self.rw.lock().unwrap().write(&page.finish())?;
+            self.rw.lock().unwrap().append_page(page)?;
             return Ok(true);
         }
         Ok(false)
@@ -63,43 +62,42 @@ impl LogFile {
         self.appended.clear();
     }
 
-    pub fn page_iter (&self) -> PageIterator {
+    pub fn page_iter (&mut self) -> PageIterator {
         PageIterator::new(self, 0)
     }
 }
 
-impl DBFile for LogFile {
+impl PageFile for LogFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         Ok(self.rw.lock().unwrap().flush()?)
     }
 
-    fn sync(&mut self) -> Result<(), BCSError> {
+    fn len(&mut self) -> Result<u64, BCSError> {
+        let mut rw = self.rw.lock().unwrap();
+        rw.len()
+    }
+
+    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+        let mut rw = self.rw.lock().unwrap();
+        rw.truncate(len)
+    }
+
+    fn sync(&self) -> Result<(), BCSError> {
         let rw = self.rw.lock().unwrap();
         rw.sync()
     }
 
-    fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
+    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
         let mut rw = self.rw.lock().unwrap();
-        rw.truncate(offset.as_u64() as usize)
+        rw.read_page(offset)
     }
 
-    fn len(&mut self) -> Result<Offset, BCSError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
         let mut rw = self.rw.lock().unwrap();
-        Offset::new(rw.len()? as u64)
+        rw.append_page(page)
     }
-}
 
-impl PageFile for LogFile {
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        let mut buffer = [0u8; PAGE_SIZE];
-        let mut rw = self.rw.lock().unwrap();
-        let len = rw.seek(SeekFrom::End(0))?;
-        if offset.as_u64() >= len {
-            return Err(BCSError::InvalidOffset);
-        }
-        rw.seek(SeekFrom::Start(offset.as_u64()))?;
-        rw.read(&mut buffer)?;
-        let page = Arc::new(Page::from_buf(buffer));
-        Ok(page)
+    fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
+        unimplemented!()
     }
 }

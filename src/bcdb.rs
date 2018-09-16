@@ -35,7 +35,6 @@ use bitcoin::util::hash::Sha256dHash;
 
 use std::io::Cursor;
 use std::sync::{Mutex,Arc};
-use std::io::{Read,Write,Seek};
 
 /// fixed key length of 256 bits
 pub const KEY_LEN : usize = 32;
@@ -47,33 +46,22 @@ pub trait BCDBFactory {
 }
 
 /// a read-write-seak-able storage with added methods
-pub trait RW : Read + Write + Seek + Send {
-    /// length of the storage
-    fn len (&mut self) -> Result<usize, BCSError>;
-    /// truncate storage
-    fn truncate(&mut self, new_len: usize) -> Result<(), BCSError>;
-    /// tell OS to flush buffers to disk
-    fn sync (&self) -> Result<(), BCSError>;
-}
-
-/// a paged file with added features
-pub trait DBFile : PageFile {
+pub trait PageFile : Send {
     /// flush buffered writes
     fn flush(&mut self) -> Result<(), BCSError>;
-    /// tel OS to flush buffers to disk
-    fn sync (&mut self) -> Result<(), BCSError>;
-    /// truncate to a given length
-    fn truncate(&mut self, offset: Offset) -> Result<(), BCSError>;
-    /// return storage length
-    fn len(&mut self) -> Result<Offset, BCSError>;
-}
-
-/// a paged storage
-pub trait PageFile {
+    /// length of the storage
+    fn len (&mut self) -> Result<u64, BCSError>;
+    /// truncate storage
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError>;
+    /// tell OS to flush buffers to disk
+    fn sync (&self) -> Result<(), BCSError>;
     /// read a page at given offset
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError>;
+    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError>;
+    /// append a page (ignore offset in the Page)
+    fn append_page (&mut self, page: Page) -> Result<(), BCSError>;
+    /// write a page at its position as specified in page.offset
+    fn write_page (&mut self, page: Page) -> Result<(), BCSError>;
 }
-
 
 /// The blockchain db
 pub struct BCDB {
@@ -101,24 +89,24 @@ impl BCDB {
     }
 
     fn recover(&mut self) -> Result<(), BCSError> {
-        let log = self.log.lock().unwrap();
+        let mut log = self.log.lock().unwrap();
         let mut first = true;
         for page in log.page_iter() {
             if !first {
                 debug!("recover BCDB: patch page {}", page.offset.as_u64());
-                self.table.patch_page(page);
+                self.table.patch_page(page)?;
             }
             else {
                 let mut size = [0u8; 6];
                 page.read(2, &mut size)?;
-                let data_len = Offset::from_slice(&size)?;
+                let data_len = Offset::from_slice(&size)?.as_u64();
                 self.data.truncate(data_len)?;
 
                 page.read(8, &mut size)?;
-                let table_len = Offset::from_slice(&size)?;
+                let table_len = Offset::from_slice(&size)?.as_u64();
                 self.table.truncate(table_len)?;
                 first = false;
-                debug!("recover BCDB: set lengths to table: {} data: {}", table_len.as_u64(), data_len.as_u64());
+                debug!("recover BCDB: set lengths to table: {} data: {}", table_len, data_len);
             }
         }
         Ok(())
@@ -138,19 +126,19 @@ impl BCDB {
 
         let mut log = self.log.lock().unwrap();
         log.clear_cache();
-        log.truncate(Offset::new(0).unwrap())?;
+        log.truncate(0)?;
 
         let mut first = Page::new(Offset::new(0).unwrap());
         first.write(0, &[0xBC, 0x00]).unwrap();
         let mut size = [0u8; 6];
-        data_len.serialize(&mut size);
+        Offset::new(data_len)?.serialize(&mut size);
         first.write(2, &size).unwrap();
-        table_len.serialize(&mut size);
+        Offset::new(table_len)?.serialize(&mut size);
         first.write(8, &size).unwrap();
-        log.tbl_len = table_len.as_u64();
+        log.tbl_len = table_len;
 
 
-        log.append_page(Arc::new(first))?;
+        log.append_page(first)?;
         log.flush()?;
         log.sync()?;
         log.clear_cache();
@@ -177,11 +165,11 @@ impl BCDB {
     }
 
     /// retrieve data by key
-    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
-        self.table.get(key, &self.data)
+        self.table.get(key, &mut self.data)
     }
 
     /// Insert a block header
@@ -207,7 +195,7 @@ impl BCDB {
     }
 
     /// Fetch a header by its id
-    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
+    pub fn fetch_header (&mut self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
@@ -268,7 +256,7 @@ impl BCDB {
     }
 
     /// Fetch a block by its id
-    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCSError> {
+    pub fn fetch_block (&mut self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCSError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(&key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
@@ -309,7 +297,7 @@ impl BCDB {
     }
 
     /// fetch a transaction stored with a block
-    pub fn fetch_transaction (&self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCSError> {
+    pub fn fetch_transaction (&mut self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCSError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(&key)? {
             return Ok(Some(decode(stored)?));
@@ -334,19 +322,19 @@ fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCSError>
 pub struct PageIterator<'file> {
     /// the current page of the iterator
     pub pagenumber: u64,
-    file: &'file PageFile
+    file: &'file mut PageFile
 }
 
 /// page iterator
 impl<'file> PageIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file PageFile, pagenumber: u64) -> PageIterator {
+    pub fn new (file: &'file mut PageFile, pagenumber: u64) -> PageIterator {
         PageIterator{pagenumber, file}
     }
 }
 
 impl<'file> Iterator for PageIterator<'file> {
-    type Item = Arc<Page>;
+    type Item = Page;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
@@ -387,7 +375,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for _ in 1 .. 1000 {
+        for _ in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);

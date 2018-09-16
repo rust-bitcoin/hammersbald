@@ -19,14 +19,13 @@
 //! Write operations are performed in a dedicated background thread.
 
 
-use bcdb::{DBFile, RW, PageFile};
-use page::{Page, PAGE_SIZE};
+use bcdb::PageFile;
+use page::Page;
 use error::BCSError;
 use types::Offset;
 use cache::Cache;
 use logfile::LogFile;
 
-use std::io::{Read,Write,Seek,SeekFrom};
 use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
 use std::cell::Cell;
@@ -38,7 +37,7 @@ pub struct AsyncFile {
 
 struct Inner {
     role: &'static str,
-    rw: Mutex<Box<RW>>,
+    rw: Mutex<Box<PageFile>>,
     cache: Mutex<Cache>,
     haswork: Condvar,
     flushed: Condvar,
@@ -47,7 +46,7 @@ struct Inner {
 }
 
 impl Inner {
-    pub fn new (role: &'static str, rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> Inner {
+    pub fn new (role: &'static str, rw: Box<PageFile>, log_file: Option<Arc<Mutex<LogFile>>>) -> Inner {
         Inner{
             role,
             rw: Mutex::new(rw),
@@ -59,11 +58,13 @@ impl Inner {
         }
     }
 
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
         {
+            use std::ops::Deref;
+
             let cache = self.cache.lock().unwrap();
             if let Some(page) = cache.get(offset) {
-                return Ok(page);
+                return Ok(page.deref().clone());
             }
         }
 
@@ -79,19 +80,15 @@ impl Inner {
         Ok(page)
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
-        let mut buffer = [0u8; PAGE_SIZE];
+    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
         let mut rw = self.rw.lock().unwrap();
-        rw.seek(SeekFrom::Start(offset.as_u64()))?;
-        rw.read(&mut buffer)?;
-        let page = Arc::new(Page::from_buf(buffer));
-        Ok(page)
+        rw.read_page(offset)
     }
 
 }
 
 impl AsyncFile {
-    pub fn new(role: &'static str, rw: Box<RW>, log_file: Option<Arc<Mutex<LogFile>>>) -> AsyncFile {
+    pub fn new(role: &'static str, rw: Box<PageFile>, log_file: Option<Arc<Mutex<LogFile>>>) -> AsyncFile {
         let inner = Arc::new(Inner::new(role, rw, log_file));
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
@@ -156,13 +153,15 @@ impl AsyncFile {
             }
 
             let mut rw = inner.rw.lock().unwrap();
-            for (append, page) in &writes {
+            for (append, page) in writes {
+                use std::ops::Deref;
+
                 if !append {
-                    let pos = page.offset.as_u64();
-                    rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
-                    debug!("write page {}", pos);
+                    rw.write_page(page.deref().clone()).unwrap();
                 }
-                rw.write(&page.finish()).unwrap();
+                else {
+                    rw.append_page(page.deref().clone()).unwrap();
+                }
             }
 
             rw.flush().unwrap();
@@ -176,21 +175,9 @@ impl AsyncFile {
         run.set(false);
     }
 
-    pub fn patch_page(&mut self, page: Arc<Page>) {
+    pub fn patch_page(&mut self, page: Page) -> Result<(), BCSError> {
         let mut rw = self.inner.rw.lock().unwrap();
-        let pos = page.offset.as_u64();
-        rw.seek(SeekFrom::Start(pos)).expect(format!("can not seek to {}", pos).as_str());
-        rw.write(&page.finish()).unwrap();
-    }
-
-    pub fn write_page(&self, page: Arc<Page>) {
-        self.inner.cache.lock().unwrap().update(page);
-        self.inner.haswork.notify_one();
-    }
-
-    pub fn append_page (&self, page: Arc<Page>) {
-        self.inner.cache.lock().unwrap().append(page);
-        self.inner.haswork.notify_one();
+        rw.write_page(page)
     }
 
     pub fn clear_cache(&mut self) {
@@ -198,7 +185,7 @@ impl AsyncFile {
     }
 }
 
-impl DBFile for AsyncFile {
+impl PageFile for AsyncFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut cache = self.inner.cache.lock().unwrap();
         while !cache.is_empty() {
@@ -207,28 +194,38 @@ impl DBFile for AsyncFile {
         Ok(())
     }
 
-    fn sync(&mut self) -> Result<(), BCSError> {
+    fn len(&mut self) -> Result<u64, BCSError> { ;
+        let mut rw = self.inner.rw.lock().unwrap();
+        rw.len()
+    }
+
+    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+        let mut rw = self.inner.rw.lock().unwrap();
+        rw.truncate(len)
+    }
+
+    fn sync(&self) -> Result<(), BCSError> {
         let rw = self.inner.rw.lock().unwrap();
         rw.sync()
     }
 
-    fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
-        let mut rw = self.inner.rw.lock().unwrap();
-        rw.truncate(offset.as_u64() as usize)
-    }
-
-    fn len(&mut self) -> Result<Offset, BCSError> { ;
-        let mut rw = self.inner.rw.lock().unwrap();
-        Offset::new(rw.len()? as u64)
-    }
-}
-
-impl PageFile for AsyncFile {
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
         let page = self.inner.read_page(offset)?;
         if page.offset != offset {
             return Err(BCSError::Corrupted (format!("{}: read page offset does not match its position {} != {}", self.inner.role, offset.as_u64(), page.offset.as_u64())));
         }
         Ok(page)
+    }
+
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().update(page);
+        self.inner.haswork.notify_one();
+        Ok(())
+    }
+
+    fn append_page (&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().append(page);
+        self.inner.haswork.notify_one();
+        Ok(())
     }
 }

@@ -19,11 +19,13 @@
 //! Implements in-memory Read and Write for tests
 
 use error::BCSError;
-use bcdb::RW;
+use bcdb::PageFile;
 use logfile::LogFile;
 use bcdb::{BCDBFactory, BCDB};
 use keyfile::KeyFile;
 use datafile::DataFile;
+use types::Offset;
+use page::{Page,PAGE_SIZE};
 
 use std::io::Read;
 use std::io::Write;
@@ -57,17 +59,42 @@ impl BCDBFactory for InMemory {
     }
 }
 
-impl RW for InMemory {
-    fn len(&mut self) -> Result<usize, BCSError> {
-        Ok(self.data.len())
+impl PageFile for InMemory {
+    fn flush(&mut self) -> Result<(), BCSError> {Ok(())}
+
+    fn len(&mut self) -> Result<u64, BCSError> {
+        Ok(self.data.len() as u64)
     }
 
-    fn truncate(&mut self, len: usize) -> Result<(), BCSError> {
-        self.data.truncate(len);
+    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+        self.data.truncate(len as usize);
         Ok(())
     }
 
     fn sync(&self) -> Result<(), BCSError> { Ok(()) }
+
+    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
+        let mut buffer = [0u8; PAGE_SIZE];
+        let len = self.seek(SeekFrom::End(0))?;
+        if offset.as_u64() >= len {
+            return Err(BCSError::InvalidOffset);
+        }
+        self.seek(SeekFrom::Start(offset.as_u64()))?;
+        self.read(&mut buffer)?;
+        let page = Page::from_buf(buffer);
+        Ok(page)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.write(&page.finish()[..])?;
+        Ok(())
+    }
+
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.seek(SeekFrom::Start(page.offset.as_u64()))?;
+        self.write(&page.finish()[..])?;
+        Ok(())
+    }
 }
 
 impl Read for InMemory {

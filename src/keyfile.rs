@@ -21,13 +21,12 @@
 use asyncfile::AsyncFile;
 use logfile::LogFile;
 use datafile::{DataFile, DataEntry};
-use bcdb::{RW, DBFile, PageFile,KEY_LEN};
+use bcdb::PageFile;
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
 
 use std::sync::{Mutex, Arc};
-use std::ops::Deref;
 
 const PAGE_HEAD :u64 = 12;
 const INIT_BUCKETS: u64 = 256;
@@ -44,7 +43,7 @@ pub struct KeyFile {
 }
 
 impl KeyFile {
-    pub fn new(rw: Box<RW>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
+    pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
         KeyFile{async_file: AsyncFile::new("key", rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
     }
 
@@ -62,7 +61,7 @@ impl KeyFile {
             let mut fp = Page::new(Offset::new(0)?);
             fp.write_offset(0, Offset::new(self.buckets)?)?;
             fp.write_offset(6, Offset::new(self.step)?)?;
-            self.write_page(Arc::new(fp));
+            self.write_page(fp)?;
             info!("open empty BCDB");
         };
 
@@ -89,14 +88,13 @@ impl KeyFile {
         self.buckets += 1;
         if self.buckets % BUCKETS_PER_PAGE == 0 {
             let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
-            self.write_page(Arc::new(page));
+            self.write_page(page)?;
         }
 
-        if let Ok(first_page) = self.async_file.read_page(Offset::new(0).unwrap()) {
-            let mut fp = first_page.deref().clone();
-            fp.write_offset(0, Offset::new(self.buckets)?)?;
-            fp.write_offset(6, Offset::new(self.step)?)?;
-            self.async_file.write_page(Arc::new(fp));
+        if let Ok(mut first_page) = self.async_file.read_page(Offset::new(0).unwrap()) {
+            first_page.write_offset(0, Offset::new(self.buckets)?)?;
+            first_page.write_offset(6, Offset::new(self.step)?)?;
+            self.async_file.write_page(first_page)?;
         }
 
 
@@ -107,7 +105,7 @@ impl KeyFile {
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         loop {
-            let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+            let mut bucket_page = self.read_page(bucket_offset.this_page())?;
             let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
             if data_offset.as_u64() == 0 {
                 break;
@@ -119,20 +117,20 @@ impl KeyFile {
                 if new_bucket != bucket {
                     // store to new bucket
                     self.store_to_bucket (new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
-                    bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+                    bucket_page = self.read_page(bucket_offset.this_page())?;
                     // source in first spill-over
                     let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
                     if spillover.as_u64() != 0 {
                         if let Ok(so) = data_file.get_spillover(spillover) {
                             bucket_page.write_offset(bucket_offset.in_page_pos(), so.0)?;
                             bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so.1)?;
-                            self.write_page(Arc::new(bucket_page));
+                            self.write_page(bucket_page)?;
                         } else {
                             return Err(BCSError::Corrupted(format!("can not find previously stored spillover (1) {}", spillover.as_u64())));
                         }
                     } else {
                         bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
-                        self.write_page(Arc::new(bucket_page));
+                        self.write_page(bucket_page)?;
                         break;
                     }
                 }
@@ -146,7 +144,7 @@ impl KeyFile {
         // rehash spillover chain
         let mut remaining_spillovers = Vec::new();
         let mut some_moved = false;
-        let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+        let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
         while spillover.as_u64() != 0 {
             if let Ok(so) = data_file.get_spillover(spillover) {
@@ -155,7 +153,7 @@ impl KeyFile {
                     let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
                         self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
-                        bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+                        bucket_page = self.read_page(bucket_offset.this_page())?;
                         some_moved = true;
                     }
                     else {
@@ -177,7 +175,7 @@ impl KeyFile {
                 prev = so;
             }
             bucket_page.write_offset(bucket_offset.in_page_pos() + 6, prev)?;
-            self.write_page(Arc::new(bucket_page));
+            self.write_page(bucket_page)?;
         }
 
 
@@ -186,7 +184,7 @@ impl KeyFile {
 
     fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
-        let mut bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+        let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {
             // empty bucket, just store data
@@ -210,18 +208,18 @@ impl KeyFile {
                 return Err(BCSError::Corrupted(format!("can not find previously stored data (4) {}", data_offset.as_u64())));
             }
         }
-        self.write_page(Arc::new(bucket_page));
+        self.write_page(bucket_page)?;
         Ok(())
     }
 
-    pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get (&mut self, key: &[u8], data_file: &mut DataFile) -> Result<Option<Vec<u8>>, BCSError> {
         let hash = Self::hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
         let bucket_offset = Self::bucket_offset(bucket)?;
-        let bucket_page = self.read_page(bucket_offset.this_page())?.deref().clone();
+        let bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {
             return Ok(None);
@@ -257,11 +255,11 @@ impl KeyFile {
         }
     }
 
-    pub fn write_page(&self, page: Arc<Page>) {
+    pub fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
         self.async_file.write_page(page)
     }
 
-    pub fn patch_page(&mut self, page: Arc<Page>) {
+    pub fn patch_page(&mut self, page: Page) -> Result<(), BCSError> {
         self.async_file.patch_page(page)
     }
 
@@ -292,26 +290,32 @@ impl KeyFile {
     }
 }
 
-impl DBFile for KeyFile {
+impl PageFile for KeyFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         self.async_file.flush()
     }
 
-    fn sync(&mut self) -> Result<(), BCSError> {
+    fn len(&mut self) -> Result<u64, BCSError> {
+        self.async_file.len()
+    }
+
+    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+        self.async_file.truncate(len)
+    }
+
+    fn sync(&self) -> Result<(), BCSError> {
         self.async_file.sync()
     }
 
-    fn truncate(&mut self, offset: Offset) -> Result<(), BCSError> {
-        self.async_file.truncate(offset)
-    }
-
-    fn len(&mut self) -> Result<Offset, BCSError> {
-        self.async_file.len()
-    }
-}
-
-impl PageFile for KeyFile {
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCSError> {
+    fn read_page(&mut self, offset: Offset) -> Result<Page, BCSError> {
         self.async_file.read_page(offset)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.async_file.append_page(page)
+    }
+
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.async_file.write_page(page)
     }
 }
