@@ -188,6 +188,9 @@ impl PageFile for DataFile {
         if offset == self.page.offset {
             return Ok(self.page.clone())
         }
+        if offset.as_u64() >= self.page.offset.as_u64() {
+            return Err(BCSError::Corrupted(format!("Read past EOF on data {}", offset.as_u64())));
+        }
         self.async_file.read_page(offset)
     }
 }

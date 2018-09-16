@@ -137,8 +137,8 @@ impl BCDB {
         let table_len = self.table.len()?;
 
         let mut log = self.log.lock().unwrap();
-        log.truncate(Offset::new(0).unwrap())?;
         log.clear_cache();
+        log.truncate(Offset::new(0).unwrap())?;
 
         let mut first = Page::new(Offset::new(0).unwrap());
         first.write(0, &[0xBC, 0x00]).unwrap();
