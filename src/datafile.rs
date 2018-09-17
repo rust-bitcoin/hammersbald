@@ -222,6 +222,7 @@ impl DataPageFile {
 impl PageFile for DataPageFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut cache = self.inner.cache.lock().unwrap();
+        self.inner.work.notify_one();
         cache = self.inner.flushed.wait(cache).unwrap();
         self.inner.file.lock().unwrap().flush()
     }
