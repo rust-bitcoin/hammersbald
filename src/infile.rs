@@ -32,7 +32,6 @@ use std::io::Read;
 use std::io::Write;
 use std::io::Seek;
 use std::io::SeekFrom;
-use std::io;
 use std::fs::{File, OpenOptions};
 use std::sync::{Mutex,Arc};
 

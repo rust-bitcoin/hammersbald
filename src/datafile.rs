@@ -18,7 +18,6 @@
 //! Specific implementation details to data file
 //!
 
-use asyncfile::AsyncFile;
 use bcdb::{PageIterator, PageFile, KEY_LEN};
 use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
@@ -188,18 +187,18 @@ impl DataPageFile {
     fn background (inner: Arc<DataPageFileInner>) {
         let mut run = true;
         while run {
-            let mut cache = inner.cache.lock().unwrap();
+            let mut cache = inner.cache.lock().expect("cache lock poisoned");
             while run && cache.is_empty() {
                 inner.flushed.notify_all();
-                cache = inner.work.wait(cache).unwrap();
-                run = inner.run.lock().unwrap().get();
+                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                run = inner.run.lock().expect("run lock poisoned").get();
             }
             if run {
                 let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
                 for (_, page) in writes {
                     use std::ops::Deref;
-                    inner.file.lock().unwrap().append_page(page.deref().clone()).unwrap();
+                    inner.file.lock().unwrap().append_page(page.deref().clone()).expect("file lock poisoned");
                 }
             }
         }
@@ -220,10 +219,11 @@ impl DataPageFile {
 }
 
 impl PageFile for DataPageFile {
+    #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut cache = self.inner.cache.lock().unwrap();
         self.inner.work.notify_one();
-        cache = self.inner.flushed.wait(cache).unwrap();
+        cache = self.inner.flushed.wait(cache)?;
         self.inner.file.lock().unwrap().flush()
     }
 

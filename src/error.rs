@@ -23,6 +23,7 @@ use std::convert;
 use std::error::Error;
 use std::fmt;
 use std::io;
+use std::sync;
 
 /// Errors returned by this library
 pub enum BCSError {
@@ -35,7 +36,9 @@ pub enum BCSError {
     /// wrapped IO error
     IO(io::Error),
     /// Wrapped bitcoin util error
-    Util(util::Error)
+    Util(util::Error),
+    /// Lock poisoned
+    Poisoned(String)
 }
 
 impl Error for BCSError {
@@ -46,6 +49,7 @@ impl Error for BCSError {
             BCSError::Corrupted (ref s) => s.as_str(),
             BCSError::IO(_) => "IO Error",
             BCSError::Util(_) => "Bitcoin Util Error",
+            BCSError::Poisoned(ref s) => s.as_str()
         }
     }
 
@@ -55,7 +59,8 @@ impl Error for BCSError {
             BCSError::DoesNotFit => None,
             BCSError::Corrupted (_) => None,
             BCSError::IO(ref e) => Some(e),
-            BCSError::Util(ref e) => Some(e)
+            BCSError::Util(ref e) => Some(e),
+            BCSError::Poisoned(_) => None
         }
     }
 }
@@ -75,5 +80,11 @@ impl fmt::Debug for BCSError {
 impl convert::From<io::Error> for BCSError {
     fn from(err: io::Error) -> BCSError {
         BCSError::IO(err)
+    }
+}
+
+impl<T> convert::From<sync::PoisonError<T>> for BCSError {
+    fn from(err: sync::PoisonError<T>) -> BCSError {
+        BCSError::Poisoned(err.to_string())
     }
 }

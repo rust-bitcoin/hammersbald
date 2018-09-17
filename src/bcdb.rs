@@ -357,7 +357,6 @@ mod test {
 
     use inmemory::InMemory;
     use infile::InFile;
-    use log;
 
     use super::*;
     use self::rand::thread_rng;

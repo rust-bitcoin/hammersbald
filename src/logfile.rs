@@ -25,7 +25,6 @@ use page::Page;
 use error::BCSError;
 use types::Offset;
 
-use std::sync::Mutex;
 use std::collections::HashSet;
 
 /// The buffer pool
