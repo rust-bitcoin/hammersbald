@@ -56,7 +56,7 @@ pub trait PageFile : Send {
     /// tell OS to flush buffers to disk
     fn sync (&self) -> Result<(), BCSError>;
     /// read a page at given offset
-    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError>;
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError>;
     /// append a page (ignore offset in the Page)
     fn append_page (&mut self, page: Page) -> Result<(), BCSError>;
     /// write a page at its position as specified in page.offset
@@ -89,7 +89,7 @@ impl BCDB {
     }
 
     fn recover(&mut self) -> Result<(), BCSError> {
-        let mut log = self.log.lock().unwrap();
+        let log = self.log.lock().unwrap();
         let mut first = true;
         for page in log.page_iter() {
             if !first {
@@ -165,11 +165,11 @@ impl BCDB {
     }
 
     /// retrieve data by key
-    pub fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
-        self.table.get(key, &mut self.data)
+        self.table.get(key, &self.data)
     }
 
     /// Insert a block header
@@ -195,7 +195,7 @@ impl BCDB {
     }
 
     /// Fetch a header by its id
-    pub fn fetch_header (&mut self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
+    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
@@ -256,7 +256,7 @@ impl BCDB {
     }
 
     /// Fetch a block by its id
-    pub fn fetch_block (&mut self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCSError> {
+    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCSError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(&key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
@@ -297,7 +297,7 @@ impl BCDB {
     }
 
     /// fetch a transaction stored with a block
-    pub fn fetch_transaction (&mut self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCSError> {
+    pub fn fetch_transaction (&self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCSError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(&key)? {
             return Ok(Some(decode(stored)?));
@@ -322,13 +322,13 @@ fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCSError>
 pub struct PageIterator<'file> {
     /// the current page of the iterator
     pub pagenumber: u64,
-    file: &'file mut PageFile
+    file: &'file PageFile
 }
 
 /// page iterator
 impl<'file> PageIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file mut PageFile, pagenumber: u64) -> PageIterator {
+    pub fn new (file: &'file PageFile, pagenumber: u64) -> PageIterator {
         PageIterator{pagenumber, file}
     }
 }

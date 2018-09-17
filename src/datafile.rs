@@ -54,15 +54,15 @@ impl DataFile {
         self.async_file.shutdown()
     }
 
-    fn page_iter (&mut self, pagenumber: u64) -> PageIterator {
+    fn page_iter (&self, pagenumber: u64) -> PageIterator {
         PageIterator::new(self, pagenumber)
     }
 
-    pub fn data_iter (&mut self) -> DataIterator {
+    pub fn data_iter (&self) -> DataIterator {
         DataIterator::new(self.page_iter(0), 2)
     }
 
-    pub fn get (&mut self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
+    pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
         let page = {
             if self.page.offset == offset.this_page() {
                 self.page.clone()
@@ -84,7 +84,7 @@ impl DataFile {
         return Ok(None);
     }
 
-    pub fn get_spillover (&mut self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
+    pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
         let page = {
             if self.page.offset == offset.this_page() {
                 self.page.clone()
@@ -177,7 +177,7 @@ impl PageFile for DataFile {
         self.async_file.sync()
     }
 
-    fn read_page(&mut self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
         if offset == self.page.offset {
             return Ok(self.page.clone())
         }

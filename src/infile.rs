@@ -38,13 +38,13 @@ use std::sync::{Mutex,Arc};
 
 /// in file store
 pub struct InFile {
-    data: File
+    data: Mutex<File>
 }
 
 impl InFile {
     /// create a new DB in memory for tests
     pub fn new (file: File) -> InFile {
-        InFile {data: file}
+        InFile {data: Mutex::new(file)}
     }
 }
 
@@ -64,61 +64,42 @@ impl BCDBFactory for InFile {
 
 impl PageFile for InFile {
     fn flush(&mut self) -> Result<(), BCSError> {
-        Ok(self.data.flush()?)
+        Ok(self.data.lock().unwrap().flush()?)
     }
 
     fn len(&mut self) -> Result<u64, BCSError> {
-        Ok(self.data.seek(SeekFrom::End(0))?)
+        Ok(self.data.lock().unwrap().seek(SeekFrom::End(0))?)
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
-        Ok(self.data.set_len(len)?)
+        Ok(self.data.lock().unwrap().set_len(len)?)
     }
 
-    fn sync(&self) -> Result<(), BCSError> { Ok(self.data.sync_data()?) }
+    fn sync(&self) -> Result<(), BCSError> { Ok(self.data.lock().unwrap().sync_data()?) }
 
-    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
+        let mut data = self.data.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
-        let len = self.len()?;
+        let len = data.seek(SeekFrom::End(0))?;
         if offset.as_u64() >= len {
             return Err(BCSError::InvalidOffset);
         }
-        self.seek(SeekFrom::Start(offset.as_u64()))?;
-        self.read(&mut buffer)?;
+        data.seek(SeekFrom::Start(offset.as_u64()))?;
+        data.read(&mut buffer)?;
         let page = Page::from_buf(buffer);
         Ok(page)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.write(&page.finish()[..])?;
+        let mut data = self.data.lock().unwrap();
+        data.write(&page.finish()[..])?;
         Ok(())
     }
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.seek(SeekFrom::Start(page.offset.as_u64()))?;
-        self.write(&page.finish()[..])?;
+        let mut data = self.data.lock().unwrap();
+        data.seek(SeekFrom::Start(page.offset.as_u64()))?;
+        data.write(&page.finish()[..])?;
         Ok(())
-    }
-}
-
-impl Read for InFile {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
-       self.data.read(buf)
-    }
-}
-
-impl Write for InFile {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
-        self.data.write(buf)
-    }
-
-    fn flush(&mut self) -> Result<(), io::Error> {
-        self.data.flush()
-    }
-}
-
-impl Seek for InFile {
-    fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
-        self.data.seek(pos)
     }
 }

@@ -81,7 +81,7 @@ impl Inner {
     }
 
     fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
-        let mut rw = self.rw.lock().unwrap();
+        let rw = self.rw.lock().unwrap();
         rw.read_page(offset)
     }
 
@@ -209,7 +209,7 @@ impl PageFile for AsyncFile {
         rw.sync()
     }
 
-    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
         let page = self.inner.read_page(offset)?;
         if page.offset != offset {
             return Err(BCSError::Corrupted (format!("{}: read page offset does not match its position {} != {}", self.inner.role, offset.as_u64(), page.offset.as_u64())));

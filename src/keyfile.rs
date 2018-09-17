@@ -212,7 +212,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn get (&mut self, key: &[u8], data_file: &mut DataFile) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
         let hash = Self::hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -307,7 +307,7 @@ impl PageFile for KeyFile {
         self.async_file.sync()
     }
 
-    fn read_page(&mut self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
         self.async_file.read_page(offset)
     }
 

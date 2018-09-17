@@ -62,7 +62,7 @@ impl LogFile {
         self.appended.clear();
     }
 
-    pub fn page_iter (&mut self) -> PageIterator {
+    pub fn page_iter (&self) -> PageIterator {
         PageIterator::new(self, 0)
     }
 }
@@ -87,8 +87,8 @@ impl PageFile for LogFile {
         rw.sync()
     }
 
-    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
-        let mut rw = self.rw.lock().unwrap();
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
+        let rw = self.rw.lock().unwrap();
         rw.read_page(offset)
     }
 

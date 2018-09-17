@@ -37,6 +37,10 @@ use std::sync::{Mutex,Arc};
 
 /// in memory representation of a file
 pub struct InMemory {
+    inner: Mutex<Inner>
+}
+
+struct Inner {
     data: Vec<u8>,
     pos: usize,
     append: bool
@@ -45,7 +49,7 @@ pub struct InMemory {
 impl InMemory {
     /// create a new file
     pub fn new (append: bool) -> InMemory {
-        InMemory{data: Vec::new(), pos: 0, append}
+        InMemory{inner: Mutex::new(Inner{data: Vec::new(), pos: 0, append})}
     }
 }
 
@@ -63,41 +67,46 @@ impl PageFile for InMemory {
     fn flush(&mut self) -> Result<(), BCSError> {Ok(())}
 
     fn len(&mut self) -> Result<u64, BCSError> {
-        Ok(self.data.len() as u64)
+        let inner = self.inner.lock().unwrap();
+        Ok(inner.data.len() as u64)
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
-        self.data.truncate(len as usize);
+        let mut inner = self.inner.lock().unwrap();
+        inner.data.truncate(len as usize);
         Ok(())
     }
 
     fn sync(&self) -> Result<(), BCSError> { Ok(()) }
 
-    fn read_page (&mut self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
+        let mut inner = self.inner.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
-        let len = self.seek(SeekFrom::End(0))?;
+        let len = inner.seek(SeekFrom::End(0))?;
         if offset.as_u64() >= len {
             return Err(BCSError::InvalidOffset);
         }
-        self.seek(SeekFrom::Start(offset.as_u64()))?;
-        self.read(&mut buffer)?;
+        inner.seek(SeekFrom::Start(offset.as_u64()))?;
+        inner.read(&mut buffer)?;
         let page = Page::from_buf(buffer);
         Ok(page)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.write(&page.finish()[..])?;
+        let mut inner = self.inner.lock().unwrap();
+        inner.write(&page.finish()[..])?;
         Ok(())
     }
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.seek(SeekFrom::Start(page.offset.as_u64()))?;
-        self.write(&page.finish()[..])?;
+        let mut inner = self.inner.lock().unwrap();
+        inner.seek(SeekFrom::Start(page.offset.as_u64()))?;
+        inner.write(&page.finish()[..])?;
         Ok(())
     }
 }
 
-impl Read for InMemory {
+impl Read for Inner {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         let buflen = buf.len();
         if self.pos + buflen > self.data.len () {
@@ -109,7 +118,7 @@ impl Read for InMemory {
     }
 }
 
-impl Write for InMemory {
+impl Write for Inner {
     fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
         let buflen = buf.len();
         if self.append {
@@ -133,7 +142,7 @@ impl Write for InMemory {
     }
 }
 
-impl Seek for InMemory {
+impl Seek for Inner {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
         match pos {
             SeekFrom::Start(o) => {
@@ -158,44 +167,5 @@ impl Seek for InMemory {
             }
         }
         Ok(self.pos as u64)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    extern crate hex;
-
-    use super::*;
-
-    #[test]
-    fn in_memory_test() {
-        let mut mem = InMemory::new(false);
-        assert!(mem.seek(SeekFrom::Start(0)).is_ok());
-        assert!(mem.write("Hello".as_bytes()).is_ok());
-        assert!(mem.seek(SeekFrom::Start(1)).is_ok());
-        let mut buf = [0u8;4];
-        assert!(mem.read(&mut buf[..]).is_ok());
-        assert_eq! (String::from_utf8(buf.to_vec()).unwrap(), "ello".to_owned());
-        assert!(mem.write(" world ".as_bytes()).is_ok());
-        assert_eq!(mem.pos, 12);
-        assert!(mem.seek(SeekFrom::End(-1)).is_ok());
-        assert!(mem.write("!".as_bytes()).is_ok());
-        assert_eq!(String::from_utf8(mem.data.clone()).unwrap(), "Hello world!");
-        assert_eq!(mem.pos, 12);
-        assert!(mem.seek(SeekFrom::Start(12)).is_ok());
-        assert!(mem.seek(SeekFrom::Start(13)).is_err());
-        assert!(mem.seek(SeekFrom::End(-12)).is_ok());
-        assert!(mem.seek(SeekFrom::End(-13)).is_err());
-        assert!(mem.seek(SeekFrom::End(-2)).is_ok());
-        assert!(mem.seek(SeekFrom::Current(2)).is_ok());
-        assert!(mem.seek(SeekFrom::Current(3)).is_err());
-        assert!(mem.seek(SeekFrom::Current(-12)).is_ok());
-        assert!(mem.seek(SeekFrom::Current(-13)).is_err());
-        assert!(mem.seek(SeekFrom::Current(0)).is_ok());
-        assert!(mem.seek(SeekFrom::Current(12)).is_ok());
-        assert!(mem.write("!".as_bytes()).is_ok());
-        assert_eq!(String::from_utf8(mem.data.clone()).unwrap(), "Hello world!!");
-        assert!(mem.truncate(10).is_ok());
-        assert_eq!(mem.len().unwrap(), 10);
     }
 }
