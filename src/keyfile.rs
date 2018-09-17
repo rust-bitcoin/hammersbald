@@ -18,15 +18,17 @@
 //! Specific implementation details to key file
 //!
 
-use asyncfile::AsyncFile;
 use logfile::LogFile;
 use datafile::{DataFile, DataEntry};
 use bcdb::PageFile;
 use page::{Page, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
+use cache::Cache;
 
-use std::sync::{Mutex, Arc};
+use std::sync::{Mutex, Arc, Condvar};
+use std::cell::Cell;
+use std::thread;
 
 const PAGE_HEAD :u64 = 12;
 const INIT_BUCKETS: u64 = 256;
@@ -36,7 +38,7 @@ const BUCKET_SIZE: u64 = 12;
 
 /// The key file
 pub struct KeyFile {
-    async_file: AsyncFile,
+    async_file: KeyPageFile,
     step: u64,
     buckets: u64,
     log_mod: u64
@@ -44,7 +46,7 @@ pub struct KeyFile {
 
 impl KeyFile {
     pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        KeyFile{async_file: AsyncFile::new("key", rw, Some(log_file)), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
+        KeyFile{async_file: KeyPageFile::new(rw, log_file), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -268,7 +270,7 @@ impl KeyFile {
     }
 
     pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
-        self.async_file.log_file().unwrap()
+        self.async_file.log_file()
     }
 
     pub fn shutdown (&mut self) {
@@ -317,5 +319,141 @@ impl PageFile for KeyFile {
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
         self.async_file.write_page(page)
+    }
+}
+
+struct KeyPageFile {
+    inner: Arc<KeyPageFileInner>
+}
+
+struct KeyPageFileInner {
+    file: Mutex<Box<PageFile>>,
+    log: Arc<Mutex<LogFile>>,
+    cache: Mutex<Cache>,
+    flushed: Condvar,
+    work: Condvar,
+    run: Mutex<Cell<bool>>
+}
+
+impl KeyPageFileInner {
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> KeyPageFileInner {
+        KeyPageFileInner { file: Mutex::new(file), log,
+            cache: Mutex::new(Cache::default()), flushed: Condvar::new(), work: Condvar::new(), run: Mutex::new(Cell::new(true)) }
+    }
+
+    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
+        self.file.lock().unwrap().read_page(offset)
+    }
+}
+
+impl KeyPageFile {
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> KeyPageFile {
+        let inner = Arc::new(KeyPageFileInner::new(file, log));
+        let inner2 = inner.clone();
+        thread::spawn(move || { KeyPageFile::background(inner2) });
+        KeyPageFile { inner }
+    }
+
+    fn background (inner: Arc<KeyPageFileInner>) {
+        let mut run = true;
+        while run {
+            let mut cache = inner.cache.lock().expect("cache lock poisoned");
+            while run && cache.is_empty() {
+                inner.flushed.notify_all();
+                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                run = inner.run.lock().expect("run lock poisoned").get();
+            }
+            if run {
+                let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+                cache.move_writes_to_wrote();
+                let mut log = inner.log.lock().expect("log lock poisoned");
+                let mut log_write = false;
+                for (_, page) in writes {
+                    use std::ops::Deref;
+
+                    if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
+                        if let Ok(prev) = inner.read_page_from_store(page.offset) {
+                            log.append_page(prev).expect("can not write log");
+                            log_write = true;
+                        }
+                    }
+
+                    inner.file.lock().expect("file lock poisoned").write_page(page.deref().clone()).expect("can not write key file");
+                }
+                if log_write {
+                    log.flush().expect("can not flush log");
+                    log.sync().expect("can not sync log");
+                }
+            }
+        }
+    }
+
+    pub fn patch_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.file.lock().unwrap().write_page(page)
+    }
+
+    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
+        self.inner.file.lock().unwrap().read_page(offset)
+    }
+
+    pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
+        self.inner.log.clone()
+    }
+
+    pub fn shutdown (&mut self) {
+        self.inner.run.lock().unwrap().set(false);
+        self.inner.work.notify_one();
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.inner.cache.lock().unwrap().clear();
+    }
+}
+
+impl PageFile for KeyPageFile {
+    #[allow(unused_assignments)]
+    fn flush(&mut self) -> Result<(), BCSError> {
+        let mut cache = self.inner.cache.lock().unwrap();
+        self.inner.work.notify_one();
+        cache = self.inner.flushed.wait(cache)?;
+        self.inner.file.lock().unwrap().flush()
+    }
+
+    fn len(&self) -> Result<u64, BCSError> {
+        self.inner.file.lock().unwrap().len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
+        self.inner.file.lock().unwrap().truncate(new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCSError> {
+        self.inner.file.lock().unwrap().sync()
+    }
+
+    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+
+        use std::ops::Deref;
+
+        let mut cache = self.inner.cache.lock().unwrap();
+        if let Some(page) = cache.get(offset) {
+            return Ok(page.deref().clone());
+        }
+
+        let page = self.read_page_from_store(offset)?;
+
+        cache.cache(page.clone());
+
+        Ok(page)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+        unimplemented!()
+    }
+
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().update(page);
+        self.inner.work.notify_one();
+        Ok(())
     }
 }

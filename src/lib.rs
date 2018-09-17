@@ -34,7 +34,6 @@ mod page;
 mod types;
 pub mod inmemory;
 pub mod infile;
-mod asyncfile;
 mod logfile;
 mod keyfile;
 mod datafile;

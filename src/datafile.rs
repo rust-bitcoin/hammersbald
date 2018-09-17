@@ -262,9 +262,7 @@ impl PageFile for DataPageFile {
     }
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.inner.cache.lock().unwrap().update(page);
-        self.inner.work.notify_one();
-        Ok(())
+        unimplemented!()
     }
 }
 
