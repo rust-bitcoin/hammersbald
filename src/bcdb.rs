@@ -46,11 +46,12 @@ pub trait BCDBFactory {
 }
 
 /// a read-write-seak-able storage with added methods
-pub trait PageFile : Send {
+/// synchronized in its implementation
+pub trait PageFile : Send + Sync {
     /// flush buffered writes
     fn flush(&mut self) -> Result<(), BCSError>;
     /// length of the storage
-    fn len (&mut self) -> Result<u64, BCSError>;
+    fn len (&self) -> Result<u64, BCSError>;
     /// truncate storage
     fn truncate(&mut self, new_len: u64) -> Result<(), BCSError>;
     /// tell OS to flush buffers to disk

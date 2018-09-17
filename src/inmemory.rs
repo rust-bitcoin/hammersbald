@@ -66,7 +66,7 @@ impl BCDBFactory for InMemory {
 impl PageFile for InMemory {
     fn flush(&mut self) -> Result<(), BCSError> {Ok(())}
 
-    fn len(&mut self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCSError> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.data.len() as u64)
     }

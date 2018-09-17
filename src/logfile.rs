@@ -48,15 +48,6 @@ impl LogFile {
         self.appended.contains(&offset)
     }
 
-    /// append a page if not yet logged in this batch. Returns false if the page was logged before.
-    pub fn append_page (&mut self, page: Page) -> Result<bool, BCSError> {
-        if self.appended.insert(page.offset) {
-            self.rw.append_page(page)?;
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
     /// empties the set of logged pages
     pub fn clear_cache(&mut self) {
         self.appended.clear();
@@ -72,7 +63,7 @@ impl PageFile for LogFile {
         Ok(self.rw.flush()?)
     }
 
-    fn len(&mut self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCSError> {
         self.rw.len()
     }
 
@@ -89,7 +80,10 @@ impl PageFile for LogFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.rw.append_page(page)
+        if self.appended.insert(page.offset) {
+            self.rw.append_page(page)?;
+        }
+        Ok(())
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCSError> {

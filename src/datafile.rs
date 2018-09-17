@@ -23,20 +23,24 @@ use bcdb::{PageIterator, PageFile, KEY_LEN};
 use page::{Page, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};
+use cache::Cache;
 
 use std::cmp::min;
+use std::sync::{Arc, Condvar, Mutex};
+use std::cell::Cell;
+use std::thread;
 
 
 /// The key file
 pub struct DataFile {
-    async_file: AsyncFile,
+    async_file: DataPageFile,
     append_pos: Offset,
     page: Page
 }
 
 impl DataFile {
     pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCSError> {
-        let mut file = AsyncFile::new("data", rw, None);
+        let file = DataPageFile::new(rw);
         let append_pos = Offset::new(file.len()?)?;
         Ok(DataFile{async_file: file,
             append_pos,
@@ -155,6 +159,117 @@ impl DataFile {
     }
 }
 
+struct DataPageFile {
+    inner: Arc<DataPageFileInner>
+}
+
+struct DataPageFileInner {
+    file: Mutex<Box<PageFile>>,
+    cache: Mutex<Cache>,
+    flushed: Condvar,
+    work: Condvar,
+    run: Mutex<Cell<bool>>
+}
+
+impl DataPageFileInner {
+    pub fn new (file: Box<PageFile>) -> DataPageFileInner {
+        DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::default()), flushed: Condvar::new(), work: Condvar::new(), run: Mutex::new(Cell::new(true)) }
+    }
+}
+
+impl DataPageFile {
+    pub fn new (file: Box<PageFile>) -> DataPageFile {
+        let inner = Arc::new(DataPageFileInner::new(file));
+        let inner2 = inner.clone();
+        thread::spawn(move || { DataPageFile::background(inner2) });
+        DataPageFile { inner }
+    }
+
+    fn background (inner: Arc<DataPageFileInner>) {
+        let mut run = true;
+        while run {
+            let mut cache = inner.cache.lock().unwrap();
+            while run && cache.is_empty() {
+                inner.flushed.notify_all();
+                cache = inner.work.wait(cache).unwrap();
+                run = inner.run.lock().unwrap().get();
+            }
+            if run {
+                let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+                cache.move_writes_to_wrote();
+                for (_, page) in writes {
+                    use std::ops::Deref;
+                    inner.file.lock().unwrap().append_page(page.deref().clone()).unwrap();
+                }
+            }
+        }
+    }
+
+    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
+        self.inner.file.lock().unwrap().read_page(offset)
+    }
+
+    pub fn shutdown (&mut self) {
+        self.inner.run.lock().unwrap().set(false);
+        self.inner.work.notify_one();
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.inner.cache.lock().unwrap().clear();
+    }
+}
+
+impl PageFile for DataPageFile {
+    fn flush(&mut self) -> Result<(), BCSError> {
+        let mut cache = self.inner.cache.lock().unwrap();
+        cache = self.inner.flushed.wait(cache).unwrap();
+        self.inner.file.lock().unwrap().flush()
+    }
+
+    fn len(&self) -> Result<u64, BCSError> {
+        self.inner.file.lock().unwrap().len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
+        self.inner.file.lock().unwrap().truncate(new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCSError> {
+        self.inner.file.lock().unwrap().sync()
+    }
+
+    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+        {
+            use std::ops::Deref;
+
+            let cache = self.inner.cache.lock().unwrap();
+            if let Some(page) = cache.get(offset) {
+                return Ok(page.deref().clone());
+            }
+        }
+        let page = self.read_page_from_store(offset)?;
+        {
+            // if there was a write between above read and this lock
+            // then this cache is irrelevant as write cache has priority
+            let mut cache = self.inner.cache.lock().unwrap();
+            cache.cache(page.clone());
+        }
+        Ok(page)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().append(page);
+        self.inner.work.notify_one();
+        Ok(())
+    }
+
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().update(page);
+        self.inner.work.notify_one();
+        Ok(())
+    }
+}
+
 impl PageFile for DataFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         if self.append_pos.in_page_pos() > 0 {
@@ -165,7 +280,7 @@ impl PageFile for DataFile {
         self.async_file.flush()
     }
 
-    fn len(&mut self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCSError> {
         self.async_file.len()
     }
 

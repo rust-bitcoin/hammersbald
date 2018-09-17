@@ -295,7 +295,7 @@ impl PageFile for KeyFile {
         self.async_file.flush()
     }
 
-    fn len(&mut self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCSError> {
         self.async_file.len()
     }
 

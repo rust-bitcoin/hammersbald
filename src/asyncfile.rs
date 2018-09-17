@@ -141,7 +141,8 @@ impl AsyncFile {
                         if !append && page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
                             debug!("log page {}", page.offset.as_u64());
                             if let Ok(prev) = inner.read_page_from_store(page.offset) {
-                                log_write |= log.append_page(prev).unwrap();
+                                log_write |= log.has_page(page.offset);
+                                log.append_page(prev).unwrap();
                             }
                         }
                     }
@@ -194,8 +195,8 @@ impl PageFile for AsyncFile {
         Ok(())
     }
 
-    fn len(&mut self) -> Result<u64, BCSError> { ;
-        let mut rw = self.inner.rw.lock().unwrap();
+    fn len(&self) -> Result<u64, BCSError> { ;
+        let rw = self.inner.rw.lock().unwrap();
         rw.len()
     }
 
@@ -217,14 +218,14 @@ impl PageFile for AsyncFile {
         Ok(page)
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.inner.cache.lock().unwrap().update(page);
+    fn append_page (&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().append(page);
         self.inner.haswork.notify_one();
         Ok(())
     }
 
-    fn append_page (&mut self, page: Page) -> Result<(), BCSError> {
-        self.inner.cache.lock().unwrap().append(page);
+    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+        self.inner.cache.lock().unwrap().update(page);
         self.inner.haswork.notify_one();
         Ok(())
     }

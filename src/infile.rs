@@ -67,7 +67,7 @@ impl PageFile for InFile {
         Ok(self.data.lock().unwrap().flush()?)
     }
 
-    fn len(&mut self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCSError> {
         Ok(self.data.lock().unwrap().seek(SeekFrom::End(0))?)
     }
 
