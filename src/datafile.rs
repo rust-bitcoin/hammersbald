@@ -240,21 +240,18 @@ impl PageFile for DataPageFile {
     }
 
     fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
-        {
-            use std::ops::Deref;
 
-            let cache = self.inner.cache.lock().unwrap();
-            if let Some(page) = cache.get(offset) {
-                return Ok(page.deref().clone());
-            }
+        use std::ops::Deref;
+
+        let mut cache = self.inner.cache.lock().unwrap();
+        if let Some(page) = cache.get(offset) {
+            return Ok(page.deref().clone());
         }
+
         let page = self.read_page_from_store(offset)?;
-        {
-            // if there was a write between above read and this lock
-            // then this cache is irrelevant as write cache has priority
-            let mut cache = self.inner.cache.lock().unwrap();
-            cache.cache(page.clone());
-        }
+
+        cache.cache(page.clone());
+
         Ok(page)
     }
 
