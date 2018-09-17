@@ -30,14 +30,14 @@ use std::collections::HashSet;
 
 /// The buffer pool
 pub struct LogFile {
-    rw: Mutex<Box<PageFile>>,
+    rw: Box<PageFile>,
     appended: HashSet<Offset>,
     pub tbl_len: u64
 }
 
 impl LogFile {
     pub fn new(rw: Box<PageFile>) -> LogFile {
-        LogFile { rw: Mutex::new(rw), appended: HashSet::new(), tbl_len: 0 }
+        LogFile { rw, appended: HashSet::new(), tbl_len: 0 }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -51,7 +51,7 @@ impl LogFile {
     /// append a page if not yet logged in this batch. Returns false if the page was logged before.
     pub fn append_page (&mut self, page: Page) -> Result<bool, BCSError> {
         if self.appended.insert(page.offset) {
-            self.rw.lock().unwrap().append_page(page)?;
+            self.rw.append_page(page)?;
             return Ok(true);
         }
         Ok(false)
@@ -69,32 +69,27 @@ impl LogFile {
 
 impl PageFile for LogFile {
     fn flush(&mut self) -> Result<(), BCSError> {
-        Ok(self.rw.lock().unwrap().flush()?)
+        Ok(self.rw.flush()?)
     }
 
     fn len(&mut self) -> Result<u64, BCSError> {
-        let mut rw = self.rw.lock().unwrap();
-        rw.len()
+        self.rw.len()
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
-        let mut rw = self.rw.lock().unwrap();
-        rw.truncate(len)
+        self.rw.truncate(len)
     }
 
     fn sync(&self) -> Result<(), BCSError> {
-        let rw = self.rw.lock().unwrap();
-        rw.sync()
+        self.rw.sync()
     }
 
     fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
-        let rw = self.rw.lock().unwrap();
-        rw.read_page(offset)
+        self.rw.read_page(offset)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        let mut rw = self.rw.lock().unwrap();
-        rw.append_page(page)
+        self.rw.append_page(page)
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
