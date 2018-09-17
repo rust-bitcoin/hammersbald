@@ -257,10 +257,6 @@ impl KeyFile {
         }
     }
 
-    pub fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.async_file.write_page(page)
-    }
-
     pub fn patch_page(&mut self, page: Page) -> Result<(), BCSError> {
         self.async_file.patch_page(page)
     }
@@ -313,8 +309,8 @@ impl PageFile for KeyFile {
         self.async_file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.async_file.append_page(page)
+    fn append_page(&mut self, _: Page) -> Result<(), BCSError> {
+        unimplemented!()
     }
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
@@ -368,7 +364,7 @@ impl KeyPageFile {
                 cache.move_writes_to_wrote();
                 let mut log = inner.log.lock().expect("log lock poisoned");
                 let mut log_write = false;
-                for (_, page) in writes {
+                for page in writes {
                     use std::ops::Deref;
 
                     if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
@@ -447,12 +443,12 @@ impl PageFile for KeyPageFile {
         Ok(page)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, _: Page) -> Result<(), BCSError> {
         unimplemented!()
     }
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.inner.cache.lock().unwrap().update(page);
+        self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())
     }

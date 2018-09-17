@@ -196,7 +196,7 @@ impl DataPageFile {
             if run {
                 let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
-                for (_, page) in writes {
+                for page in writes {
                     use std::ops::Deref;
                     inner.file.lock().unwrap().append_page(page.deref().clone()).expect("file lock poisoned");
                 }
@@ -256,12 +256,12 @@ impl PageFile for DataPageFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.inner.cache.lock().unwrap().append(page);
+        self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
         unimplemented!()
     }
 }

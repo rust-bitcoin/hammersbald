@@ -29,21 +29,13 @@ pub const READ_CACHE_PAGES: usize = 1000;
 
 #[derive(Default)]
 pub struct Cache {
-    writes: HashMap<Offset, (bool, Arc<Page>)>,
+    writes: HashMap<Offset, Arc<Page>>,
     wrote: HashMap<Offset, Arc<Page>>,
     reads: HashMap<Offset, Arc<Page>>,
     fifo: VecDeque<Arc<Page>>
 }
 
 impl Cache {
-    pub fn append (&mut self, page: Page) {
-        self.put(true, page)
-    }
-
-    pub fn update (&mut self, page: Page) {
-        self.put(false, page)
-    }
-
     pub fn cache (&mut self, page: Page) {
         if !self.writes.contains_key(&page.offset) && !self.wrote.contains_key(&page.offset) {
             if self.fifo.len() >= READ_CACHE_PAGES {
@@ -62,7 +54,7 @@ impl Cache {
         }
     }
 
-    fn put (&mut self, append: bool, page: Page) {
+    pub fn write (&mut self, page: Page) {
         let offset = page.offset;
         if self.reads.remove(&page.offset).is_some() {
             if let Some(prev) = self.fifo.iter().position(move |p| p.offset == offset) {
@@ -70,20 +62,20 @@ impl Cache {
             }
         }
         self.wrote.remove(&offset);
-        self.writes.insert(offset, (append, Arc::new(page)));
+        self.writes.insert(offset, Arc::new(page));
     }
 
     pub fn is_empty (&self) -> bool {
         self.writes.is_empty()
     }
 
-    pub fn writes(&self) -> impl Iterator<Item=&(bool, Arc<Page>)> {
+    pub fn writes(&self) -> impl Iterator<Item=&Arc<Page>> {
         self.writes.values().into_iter()
     }
 
     pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
-        if let Some(ref content) = self.writes.get(&offset) {
-            return Some(content.1.clone())
+        if let Some(content) = self.writes.get(&offset) {
+            return Some(content.clone())
         }
         if let Some(content) = self.wrote.get(&offset) {
             return Some(content.clone())
@@ -96,7 +88,7 @@ impl Cache {
 
     pub fn move_writes_to_wrote(&mut self) {
         let values = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
-        for (_, page) in values {
+        for page in values {
             self.wrote.insert(page.offset, page);
         }
         self.writes.clear()
