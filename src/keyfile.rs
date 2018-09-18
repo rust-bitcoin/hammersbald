@@ -360,25 +360,27 @@ impl KeyPageFile {
                 run = inner.run.lock().expect("run lock poisoned").get();
             }
             if run {
+                use std::ops::Deref;
+
                 let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
                 let mut log = inner.log.lock().expect("log lock poisoned");
                 let mut log_write = false;
-                for page in writes {
-                    use std::ops::Deref;
-
+                for page in &writes {
                     if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
                         if let Ok(prev) = inner.read_page_from_store(page.offset) {
                             log.append_page(prev).expect("can not write log");
                             log_write = true;
                         }
                     }
-
-                    inner.file.lock().expect("file lock poisoned").write_page(page.deref().clone()).expect("can not write key file");
                 }
                 if log_write {
                     log.flush().expect("can not flush log");
                     log.sync().expect("can not sync log");
+                }
+                let mut file = inner.file.lock().expect("file lock poisoned");
+                for page in &writes {
+                    file.write_page(page.deref().clone()).expect("can not write key file");
                 }
             }
         }

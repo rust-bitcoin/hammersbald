@@ -281,6 +281,8 @@ impl PageFile for DataFile {
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+        self.append_pos = Offset::new(len)?;
+        self.page.offset = self.append_pos;
         self.async_file.truncate(len)
     }
 

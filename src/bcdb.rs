@@ -92,6 +92,7 @@ impl BCDB {
     fn recover(&mut self) -> Result<(), BCSError> {
         let log = self.log.lock().unwrap();
         let mut first = true;
+        debug!("recover");
         for page in log.page_iter() {
             if !first {
                 debug!("recover BCDB: patch page {}", page.offset.as_u64());
@@ -357,6 +358,7 @@ mod test {
 
     use inmemory::InMemory;
     use infile::InFile;
+    use log;
 
     use super::*;
     use self::rand::thread_rng;
@@ -365,7 +367,7 @@ mod test {
 
     #[test]
     fn test () {
-
+        simple_logger::init_with_level(log::Level::Debug).unwrap();
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
