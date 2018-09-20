@@ -367,7 +367,7 @@ mod test {
 
     #[test]
     fn test () {
-        simple_logger::init_with_level(log::Level::Debug).unwrap();
+        simple_logger::init_with_level(log::Level::Info).unwrap();
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
@@ -386,7 +386,7 @@ mod test {
             assert_eq!(db.get(&key).unwrap().unwrap(), data.to_owned());
         }
         db.batch().unwrap();
-        println!("spillovers: {}", spill);
+        debug!("spillovers: {}", spill);
 
         for (k, v) in check.iter() {
             assert_eq!(db.get(k).unwrap(), Some(v.to_vec()));
