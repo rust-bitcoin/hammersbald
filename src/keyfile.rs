@@ -31,10 +31,10 @@ use std::cell::Cell;
 use std::thread;
 
 const PAGE_HEAD :u64 = 12;
-const INIT_BUCKETS: u64 = 256;
-const INIT_LOGMOD :u64 = 7;
-const BUCKETS_PER_PAGE :u64 = 339;
-const BUCKET_SIZE: u64 = 12;
+const INIT_BUCKETS: u64 = 128;
+const INIT_LOGMOD :u64 = 6;
+const BUCKETS_PER_PAGE :u64 = 226;
+const BUCKET_SIZE: u64 = 18;
 
 /// The key file
 pub struct KeyFile {
@@ -70,7 +70,8 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError>{
+    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<i32, BCSError>{
+        let mut spill = 0;
         let hash = Self::hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         let step = self.step;
@@ -78,8 +79,8 @@ impl KeyFile {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
 
-        self.store_to_bucket(bucket, key, offset, data_file)?;
-        self.rehash_bucket(step, data_file)?;
+        spill += self.store_to_bucket(bucket, key, offset, data_file)?;
+        spill += self.rehash_bucket(step, data_file)?;
 
         self.step +=1;
         if self.step == (1 << (self.log_mod + 1))  {
@@ -100,10 +101,11 @@ impl KeyFile {
         }
 
 
-        Ok(())
+        Ok(spill)
     }
 
-    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCSError> {
+    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<i32, BCSError> {
+        let mut spill = 0;
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         loop {
@@ -118,14 +120,15 @@ impl KeyFile {
                 let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
                     // store to new bucket
-                    self.store_to_bucket (new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
+                    spill += self.store_to_bucket (new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
                     bucket_page = self.read_page(bucket_offset.this_page())?;
                     // source in first spill-over
-                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
                     if spillover.as_u64() != 0 {
+                        spill -= 1;
                         if let Ok(so) = data_file.get_spillover(spillover) {
                             bucket_page.write_offset(bucket_offset.in_page_pos(), so.0)?;
-                            bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so.1)?;
+                            bucket_page.write_offset(bucket_offset.in_page_pos() + 12, so.1)?;
                             self.write_page(bucket_page)?;
                         } else {
                             return Err(BCSError::Corrupted(format!("can not find previously stored spillover (1) {}", spillover.as_u64())));
@@ -147,14 +150,15 @@ impl KeyFile {
         let mut remaining_spillovers = Vec::new();
         let mut some_moved = false;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+        let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
         while spillover.as_u64() != 0 {
             if let Ok(so) = data_file.get_spillover(spillover) {
                 if let Some(prev) = data_file.get(so.0)? {
                     let hash = Self::hash(prev.data_key.as_slice());
                     let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
-                        self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
+                        spill -= 1;
+                        spill += self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
                         bucket_page = self.read_page(bucket_offset.this_page())?;
                         some_moved = true;
                     }
@@ -176,15 +180,16 @@ impl KeyFile {
                 let so = data_file.append(DataEntry::new_spillover(*offset, prev))?;
                 prev = so;
             }
-            bucket_page.write_offset(bucket_offset.in_page_pos() + 6, prev)?;
+            bucket_page.write_offset(bucket_offset.in_page_pos() + 12, prev)?;
             self.write_page(bucket_page)?;
         }
 
 
-        Ok(())
+        Ok(spill)
     }
 
-    fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
+    fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<i32, BCSError> {
+        let mut spill = 0;
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -198,12 +203,13 @@ impl KeyFile {
                     // point to new data
                     bucket_page.write_offset(bucket_offset.in_page_pos(), offset)?;
                 } else {
+                    spill += 1;
                     // prepend spillover chain
                     // this logically overwrites previous key association in the spillover chain
                     // since search stops at first key match
-                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
                     let so = data_file.append(DataEntry::new_spillover(offset, spillover))?;
-                    bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so)?;
+                    bucket_page.write_offset(bucket_offset.in_page_pos() + 12, so)?;
                 }
             } else {
                 // can not find previously stored data
@@ -211,7 +217,7 @@ impl KeyFile {
             }
         }
         self.write_page(bucket_page)?;
-        Ok(())
+        Ok(spill)
     }
 
     pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
@@ -231,7 +237,7 @@ impl KeyFile {
                 return Ok(Some(prev.data));
             }
             else {
-                let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
                 while spillover.as_u64() != 0 {
                     if let Ok(so) = data_file.get_spillover(spillover) {
                         if let Some(prev) = data_file.get(so.0)? {
