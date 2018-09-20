@@ -226,39 +226,50 @@ impl KeyFile {
         if bucket < self.step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
+        // first slot
         let bucket_offset = Self::bucket_offset(bucket)?;
         let bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {
+            // assuming that second slot is also empty
             return Ok(None);
         }
         if let Some(prev) = data_file.get(data_offset)? {
             if prev.data_key == key {
                 return Ok(Some(prev.data));
             }
-            else {
-                let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
-                while spillover.as_u64() != 0 {
-                    if let Ok(so) = data_file.get_spillover(spillover) {
-                        if let Some(prev) = data_file.get(so.0)? {
-                            if prev.data_key == key {
-                                return Ok(Some(prev.data));
-                            }
-                            spillover = so.1;
+            // second slot
+            let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+            if data_offset.as_u64() != 0 {
+                if let Some(prev) = data_file.get(data_offset)? {
+                    if prev.data_key == key {
+                        return Ok(Some(prev.data));
+                    }
+                } else {
+                    return Err(BCSError::Corrupted(format!("can not find previously stored data (5) {}", data_offset.as_u64())));
+                }
+            }
+            // spill-over
+            let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
+            while spillover.as_u64() != 0 {
+                if let Ok(so) = data_file.get_spillover(spillover) {
+                    if let Some(prev) = data_file.get(so.0)? {
+                        if prev.data_key == key {
+                            return Ok(Some(prev.data));
                         }
-                        else {
-                            return Err(BCSError::Corrupted(format!("can not find previously stored spillover (3) {}", so.0.as_u64())));
-                        }
+                        spillover = so.1;
                     }
                     else {
-                        return Err(BCSError::Corrupted(format!("can not find previously stored spillover (4) {}", spillover.as_u64())));
+                        return Err(BCSError::Corrupted(format!("can not find previously stored spillover (3) {}", so.0.as_u64())));
                     }
                 }
-                return Ok(None);
+                else {
+                    return Err(BCSError::Corrupted(format!("can not find previously stored spillover (4) {}", spillover.as_u64())));
+                }
             }
+            return Ok(None);
         }
         else {
-            // can not find previously stored data
             return Err(BCSError::Corrupted(format!("can not find previously stored data (5) {}", data_offset.as_u64())));
         }
     }
