@@ -110,6 +110,7 @@ impl KeyFile {
 
         loop {
             let mut bucket_page = self.read_page(bucket_offset.this_page())?;
+            // first slot
             let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
             if data_offset.as_u64() == 0 {
                 break;
@@ -118,29 +119,54 @@ impl KeyFile {
             if let Some(prev) = data_file.get(data_offset)? {
                 let hash = Self::hash(prev.data_key.as_slice());
                 let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                let mut write = false;
                 if new_bucket != bucket {
                     // store to new bucket
-                    spill += self.store_to_bucket (new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
+                    spill += self.store_to_bucket(new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
                     bucket_page = self.read_page(bucket_offset.this_page())?;
-                    // source in first spill-over
-                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
-                    if spillover.as_u64() != 0 {
-                        spill -= 1;
-                        if let Ok(so) = data_file.get_spillover(spillover) {
-                            bucket_page.write_offset(bucket_offset.in_page_pos(), so.0)?;
-                            bucket_page.write_offset(bucket_offset.in_page_pos() + 12, so.1)?;
-                            self.write_page(bucket_page)?;
-                        } else {
-                            return Err(BCSError::Corrupted(format!("can not find previously stored spillover (1) {}", spillover.as_u64())));
-                        }
-                    } else {
-                        bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
+                    // move second slot to first
+                    let second = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                    bucket_page.write_offset(bucket_offset.in_page_pos(), second)?;
+                    write = true;
+                }
+                // second slot
+                let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                if data_offset.as_u64() == 0 {
+                    if write {
                         self.write_page(bucket_page)?;
+                    }
+                    break;
+                }
+                if let Some(prev) = data_file.get(data_offset)? {
+                    let hash = Self::hash(prev.data_key.as_slice());
+                    let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                    if new_bucket != bucket {
+                        // store to new bucket
+                        spill += self.store_to_bucket(new_bucket, prev.data_key.as_slice(), data_offset, data_file)?;
+                        bucket_page = self.read_page(bucket_offset.this_page())?;
+                        // source in first spill-over
+                        let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
+                        if spillover.as_u64() != 0 {
+                            spill -= 1;
+                            if let Ok(so) = data_file.get_spillover(spillover) {
+                                bucket_page.write_offset(bucket_offset.in_page_pos() + 6, so.0)?;
+                                bucket_page.write_offset(bucket_offset.in_page_pos() + 12, so.1)?;
+                                self.write_page(bucket_page)?;
+                            } else {
+                                return Err(BCSError::Corrupted(format!("can not find previously stored spillover (1) {}", spillover.as_u64())));
+                            }
+                        } else {
+                            bucket_page.write_offset(bucket_offset.in_page_pos() + 6, Offset::new(0)?)?;
+                            self.write_page(bucket_page)?;
+                            break;
+                        }
+                    }
+                    else {
+                        if write {
+                            self.write_page(bucket_page)?;
+                        }
                         break;
                     }
-                }
-                else {
-                    break;
                 }
             } else {
                 return Err(BCSError::Corrupted(format!("can not find previously stored data (1) {}", data_offset.as_u64())));
@@ -194,7 +220,7 @@ impl KeyFile {
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         if data_offset.as_u64() == 0 {
-            // empty bucket, just store data
+            // empty slot, just store data
             bucket_page.write_offset(bucket_offset.in_page_pos(), offset)?;
         } else {
             // check if this is overwrite of same key
@@ -203,13 +229,32 @@ impl KeyFile {
                     // point to new data
                     bucket_page.write_offset(bucket_offset.in_page_pos(), offset)?;
                 } else {
-                    spill += 1;
-                    // prepend spillover chain
-                    // this logically overwrites previous key association in the spillover chain
-                    // since search stops at first key match
-                    let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
-                    let so = data_file.append(DataEntry::new_spillover(offset, spillover))?;
-                    bucket_page.write_offset(bucket_offset.in_page_pos() + 12, so)?;
+                    // second slot
+                    let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
+                    if data_offset.as_u64() == 0 {
+                        // empty slot, just store data
+                        bucket_page.write_offset(bucket_offset.in_page_pos() + 6, offset)?;
+                    }
+                    else {
+                        // check if this is overwrite of same key
+                        if let Some(prev) = data_file.get(data_offset)? {
+                            if prev.data_key == key {
+                                // point to new data
+                                bucket_page.write_offset(bucket_offset.in_page_pos() + 6, offset)?;
+                            } else {
+                                spill += 1;
+                                // prepend spillover chain
+                                // this logically overwrites previous key association in the spillover chain
+                                // since search stops at first key match
+                                let spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
+                                let so = data_file.append(DataEntry::new_spillover(offset, spillover))?;
+                                bucket_page.write_offset(bucket_offset.in_page_pos() + 12, so)?;
+                            }
+                        } else {
+                            // can not find previously stored data
+                            return Err(BCSError::Corrupted(format!("can not find previously stored data (4) {}", data_offset.as_u64())));
+                        }
+                    }
                 }
             } else {
                 // can not find previously stored data
