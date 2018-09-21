@@ -1,13 +1,18 @@
 # Fast Blockchain store in Rust
 A very fast persistent blockchain store.
 
-## Status
-Work in progress, everything might change before 0.1.0 release without notice.
-
 ## Motivation
 Generic databases and key-value stores offer much more functionality 
 than needed to store and process a blockchain. Superflous functionality (for a blockchain)
 comes at a high cost in speed. 
+
+## Status
+It works.
+
+### Storage requirements
+* data file: less than 20% over stored data.
+* key file: less than 18 bytes * number of keys rounded up to next exponent of 2
+* log file: size can temporarily reach the size of the key file
 
 ## API
 This library in contrast only implements the bare mininum of operations:
@@ -37,9 +42,9 @@ pointers. A data element can not exceed 2^24 (16MiB) in length.
 Writes and reads are performed in multiples of 4096 byte pages.
 
 The persistent store uses up to three files:
-* the persistent hash table (.tbl)
-* the data that is iterable on its own and can be used to rebuild the hash table (.dat)
-* the log file that helps to unwind a partial insert batch at re-open (.log)
+* the persistent hash table (.tb)
+* the data that is iterable on its own and can be used to rebuild the hash table (.bc)
+* the log file that helps to unwind a partial insert batch at re-open (.lg)
 
 Numbers stored in big endian.
 
@@ -66,6 +71,9 @@ The data file is strictly append only. Anything written stays there the only all
 
 +------------- page        -----------------+
 |                                           |
+|   +--------+----first page only--------+  |
+|   | [u8;2] | magic: 0xBC 0xDA          |  |
+|   +--------+---------------------------+  |
 |   +----+-------------------------------+  |
 |   |u8  | data type                     |  |
 |   +----+-------------------------------+  |
@@ -78,83 +86,9 @@ The data file is strictly append only. Anything written stays there the only all
 ....
 </pre>
 
-#### Data types
-
-* 0 padding (ignore)
-* 1 application defined data
-* 2 spill over of the hash table
-
-##### Application specific data
-<pre>
-+----+-------------------------------------+
-|u256| id                                  |
-+----+-------------------------------------+
-|    | app data                            |
-+----+-------------------------------------+
-</pre>
-
-##### Spill over
-A table bucket either points to data of type 1 or to a spill over as below
-
-<pre>
-+----+-------------------------------------+
-|u48 | data offset                         |
-+----+-------------------------------------+
-|u48 | next spill over or 0                |
-+----+-------------------------------------+
-</pre>
-
-##### Transaction
-<pre>
-+----+-------------------------------------+
-| u8 | app data type                       |
-+----+-------------------------------------+
-|[u8]| serialized transactio               |
-+----+-------------------------------------+
-</pre>
-
-##### Header
-<pre>
-+----+-------------------------------------+
-| u8 | app data type                       |
-+----+-------------------------------------+
-|u256| id of previous header               |
-+----+-------------------------------------+
-|[u8]| header as serialized in blocks      |
-+----+-------------------------------------+
-|u24 | length of additional of data        |
-+----+-------------------------------------+
-|[u8]| additional data                     |
-+----+-------------------------------------+
-|u24 | = 0                                 |
-+----+-------------------------------------+
-</pre>
-
-##### Block
-<pre>
-+------+-------------------------------------+
-| u8   | app data type                       |
-+------+-------------------------------------+
-|u256  | id of previous header or block      |
-+------+-------------------------------------+
-|[u8]  | header as serialized in blocks      |
-+------+-------------------------------------+
-|u24   | number of additional of data        |
-+------+-------------------------------------+
-|[u48] | additional data offsets             |
-+------+-------------------------------------+
-|u24   | number of transactions              |
-+------+-------------------------------------+
-|[u48] | offset of transactions              |
-+------+-------------------------------------+
-</pre>
-
-Transactions and application defined data are inserted through insert of a block
-therefore the last data element is always a header or a block and the last stored data
-is the id of the tip with known u256 representation.
-
-
 ### Table file
+
+A linear hash table with two slots per bucket and a spill over chain stored in the data file.
 
 <pre>
 +------------- page        ---------------------------+
@@ -181,6 +115,8 @@ Therafter any number of pages that are pre-images of the updated table file.
 +------------- page        --------------------+
 |                                              |
 |  +--------+-------------------------------+  |
+|  | [u8;2] | magic: 0xBC 0x00              |  |
+|  +--------+-------------------------------+  |
 |  | u48    | last correct data file size   |  |
 |  +--------+-------------------------------+  |
 |  | u48    | last correct table file size  |  |
@@ -194,9 +130,85 @@ Therafter any number of pages that are pre-images of the updated table file.
 ....
 </pre>
 
-
 Should the process crash while in an insert batch, then at open the log file will
 trigger the following processing:
 * truncate key and data files to last known correct size
 * patch key file by applying the pre-image of its pages
 * reset the log file
+
+### Data types
+
+* 0 padding (ignore)
+* 1 application defined data
+* 2 spill over of the hash table
+
+#### Application specific data
+<pre>
++----+-------------------------------------+
+|u256| id                                  |
++----+-------------------------------------+
+|    | app data                            |
++----+-------------------------------------+
+</pre>
+
+#### Spill over
+A table bucket either points to data of type 1 or to a spill over as below
+
+<pre>
++----+-------------------------------------+
+|u48 | data offset                         |
++----+-------------------------------------+
+|u48 | next spill over or 0                |
++----+-------------------------------------+
+</pre>
+
+#### Transaction
+<pre>
++----+-------------------------------------+
+| u8 | app data type                       |
++----+-------------------------------------+
+|[u8]| serialized transactio               |
++----+-------------------------------------+
+</pre>
+
+#### Header
+<pre>
++----+-------------------------------------+
+| u8 | app data type                       |
++----+-------------------------------------+
+|u256| id of previous header               |
++----+-------------------------------------+
+|[u8]| header as serialized in blocks      |
++----+-------------------------------------+
+|u24 | length of additional of data        |
++----+-------------------------------------+
+|[u8]| additional data                     |
++----+-------------------------------------+
+|u24 | = 0                                 |
++----+-------------------------------------+
+</pre>
+
+#### Block
+<pre>
++------+-------------------------------------+
+| u8   | app data type                       |
++------+-------------------------------------+
+|u256  | id of previous header or block      |
++------+-------------------------------------+
+|[u8]  | header as serialized in blocks      |
++------+-------------------------------------+
+|u24   | number of additional of data        |
++------+-------------------------------------+
+|[u48] | additional data offsets             |
++------+-------------------------------------+
+|u24   | number of transactions              |
++------+-------------------------------------+
+|[u48] | offset of transactions              |
++------+-------------------------------------+
+</pre>
+
+Transactions and application defined data are inserted through insert of a block
+therefore the last data element is always a header or a block and the last stored data
+is the id of the tip with known u256 representation.
+
+
