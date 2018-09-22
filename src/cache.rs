@@ -32,7 +32,7 @@ pub struct Cache {
     writes: HashMap<Offset, Arc<Page>>,
     wrote: HashMap<Offset, Arc<Page>>,
     reads: HashMap<Offset, Arc<Page>>,
-    fifo: VecDeque<Arc<Page>>
+    fifo: VecDeque<Offset>
 }
 
 impl Cache {
@@ -40,14 +40,14 @@ impl Cache {
         if !self.writes.contains_key(&page.offset) && !self.wrote.contains_key(&page.offset) {
             if self.fifo.len() >= READ_CACHE_PAGES {
                 if let Some(old) = self.fifo.pop_front() {
-                    self.reads.remove(&old.offset);
+                    self.reads.remove(&old);
                 }
             }
 
             let pp = Arc::new(page);
-            self.fifo.push_back(pp.clone());
+            self.fifo.push_back(pp.offset);
             if self.reads.insert(pp.offset, pp.clone()).is_some() {
-                if let Some(prev) = self.fifo.iter().position(move |p| p.offset == pp.offset) {
+                if let Some(prev) = self.fifo.iter().position(move |o| *o == pp.offset) {
                     self.fifo.swap_remove_back(prev);
                 }
             }
@@ -57,7 +57,7 @@ impl Cache {
     pub fn write (&mut self, page: Page) {
         let offset = page.offset;
         if self.reads.remove(&page.offset).is_some() {
-            if let Some(prev) = self.fifo.iter().position(move |p| p.offset == offset) {
+            if let Some(prev) = self.fifo.iter().position(move |o| *o == offset) {
                 self.fifo.remove(prev);
             }
         }
