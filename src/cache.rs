@@ -44,14 +44,18 @@ impl Cache {
         }
 
         let pp = Arc::new(page);
-        if self.reads.insert(pp.offset, pp.clone()).is_some() {
+        if self.reads.insert(pp.offset, pp.clone()).is_none() {
             self.fifo.push_back(pp.offset);
         }
     }
 
     pub fn write (&mut self, page: Page) {
         let offset = page.offset;
-        self.reads.remove(&page.offset);
+        if self.reads.remove(&page.offset).is_some() {
+            if let Some(prev) = self.fifo.iter().position(move |o| *o == offset) {
+                self.fifo.remove(prev);
+            }
+        }
         self.wrote.remove(&offset);
         self.writes.insert(offset, Arc::new(page));
     }
@@ -60,8 +64,8 @@ impl Cache {
         self.writes.is_empty()
     }
 
-    pub fn writes(&self) -> impl Iterator<Item=&Arc<Page>> {
-        self.writes.values().into_iter()
+    pub fn writes_len(&self) -> usize {
+        self.writes.len()
     }
 
     pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
@@ -77,15 +81,17 @@ impl Cache {
         None
     }
 
-    pub fn move_writes_to_wrote(&mut self) {
+    pub fn move_writes_to_wrote(&mut self) -> Vec<Arc<Page>> {
         let values = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
-        for page in values {
-            self.wrote.insert(page.offset, page);
+        for page in &values {
+            self.wrote.insert(page.offset, page.clone());
         }
-        self.writes.clear()
+        self.writes.clear();
+        values
     }
 
     pub fn clear (&mut self) {
+        println!("writes: {} wrote: {}, reads: {} fifo: {}", self.writes.len(), self.wrote.len(), self.reads.len(), self.fifo.len());
         self.writes.clear();
         self.wrote.clear();
         self.reads.clear();

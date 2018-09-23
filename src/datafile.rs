@@ -28,6 +28,8 @@ use std::cmp::min;
 use std::sync::{Arc, Condvar, Mutex};
 use std::cell::Cell;
 use std::thread;
+use std::time::{Duration, Instant};
+use std::cmp::Ordering;
 
 
 /// The key file
@@ -186,17 +188,29 @@ impl DataPageFile {
 
     fn background (inner: Arc<DataPageFileInner>) {
         let mut run = true;
+        let mut last_loop;
         while run {
+            last_loop = Instant::now();
             let mut writes;
             {
-                let mut cache = inner.cache.lock().expect("cache lock poisoned");
-                while run && cache.is_empty() {
-                    inner.flushed.notify_all();
-                    cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                    run = inner.run.lock().expect("run lock poisoned").get();
+                loop {
+                    {
+                        let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                        while run && cache.is_empty() {
+                            inner.flushed.notify_all();
+                            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                            run = inner.run.lock().expect("run lock poisoned").get();
+                        }
+
+                        if cache.writes_len() > 1000 || (Instant::now() - last_loop).cmp(&Duration::from_millis(500)) == Ordering::Greater {
+                            writes = cache.move_writes_to_wrote();
+                            break;
+                        }
+                    }
+                    if run {
+                        thread::sleep(Duration::from_millis(10));
+                    }
                 }
-                writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
-                cache.move_writes_to_wrote();
             }
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
@@ -253,8 +267,8 @@ impl PageFile for DataPageFile {
             return Ok(page.deref().clone());
         }
 
+        // read outside of cache lock
         let page = self.read_page_from_store(offset)?;
-
         cache.cache(page.clone());
 
         Ok(page)

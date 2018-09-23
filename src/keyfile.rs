@@ -29,6 +29,8 @@ use cache::Cache;
 use std::sync::{Mutex, Arc, Condvar};
 use std::cell::Cell;
 use std::thread;
+use std::time::{Duration, Instant};
+use std::cmp::Ordering;
 
 const PAGE_HEAD :u64 = 12;
 const INIT_BUCKETS: u64 = 128;
@@ -414,19 +416,31 @@ impl KeyPageFile {
 
     fn background (inner: Arc<KeyPageFileInner>) {
         let mut run = true;
+        let mut last_loop;
         while run {
-            let writes;
-
+            let mut writes;
+            last_loop = Instant::now();
             {
-                let mut cache = inner.cache.lock().expect("cache lock poisoned");
-                while run && cache.is_empty() {
-                    inner.flushed.notify_all();
-                    cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                    run = inner.run.lock().expect("run lock poisoned").get();
+                loop {
+                    {
+                        let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                        while run && cache.is_empty() {
+                            inner.flushed.notify_all();
+                            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                            run = inner.run.lock().expect("run lock poisoned").get();
+                        }
+
+                        if cache.writes_len() > 1000 || (Instant::now() - last_loop).cmp(&Duration::from_millis(500)) == Ordering::Greater {
+                            writes = cache.move_writes_to_wrote();
+                            break;
+                        }
+                    }
+                    if run {
+                        thread::sleep(Duration::from_millis(10));
+                    }
                 }
-                writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
-                cache.move_writes_to_wrote();
             }
+            writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
             let mut log = inner.log.lock().expect("log lock poisoned");
             let mut log_write = false;
             for page in &writes {
@@ -439,7 +453,7 @@ impl KeyPageFile {
             }
             if log_write {
                 log.flush().expect("can not flush log");
-                //log.sync().expect("can not sync log");
+                log.sync().expect("can not sync log");
             }
             if !writes.is_empty() {
                 use std::ops::Deref;
@@ -504,8 +518,8 @@ impl PageFile for KeyPageFile {
             return Ok(page.deref().clone());
         }
 
+        // read outside of cache lock
         let page = self.read_page_from_store(offset)?;
-
         cache.cache(page.clone());
 
         Ok(page)

@@ -25,11 +25,14 @@ pub fn main () {
         check.insert(key, data);
     }
 
-    let now = Instant::now();
     let mut n = 0;
+    let now = Instant::now();
     for (k, v) in check {
-        db.put(&k, &v).unwrap().1;
+        db.put(&k, &v).unwrap();
         n += 1;
+        if n % 100000 == 0 {
+           db.batch().unwrap();
+        }
     }
     db.batch().unwrap();
     println!("{}", now.elapsed().as_secs());
