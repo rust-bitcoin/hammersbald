@@ -187,18 +187,23 @@ impl DataPageFile {
     fn background (inner: Arc<DataPageFileInner>) {
         let mut run = true;
         while run {
-            let mut cache = inner.cache.lock().expect("cache lock poisoned");
-            while run && cache.is_empty() {
-                inner.flushed.notify_all();
-                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                run = inner.run.lock().expect("run lock poisoned").get();
-            }
-            if run {
-                let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+            let mut writes;
+            {
+                let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                while run && cache.is_empty() {
+                    inner.flushed.notify_all();
+                    cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                    run = inner.run.lock().expect("run lock poisoned").get();
+                }
+                writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
+            }
+            if !writes.is_empty() {
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+                let mut file = inner.file.lock().expect("file lock poisoned");
                 for page in writes {
                     use std::ops::Deref;
-                    inner.file.lock().unwrap().append_page(page.deref().clone()).expect("file lock poisoned");
+                    file.append_page(page.deref().clone()).expect("can not extend data file");
                 }
             }
         }

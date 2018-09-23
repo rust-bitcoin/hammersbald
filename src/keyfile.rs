@@ -415,31 +415,35 @@ impl KeyPageFile {
     fn background (inner: Arc<KeyPageFileInner>) {
         let mut run = true;
         while run {
-            let mut cache = inner.cache.lock().expect("cache lock poisoned");
-            while run && cache.is_empty() {
-                inner.flushed.notify_all();
-                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                run = inner.run.lock().expect("run lock poisoned").get();
-            }
-            if run {
-                use std::ops::Deref;
+            let writes;
 
-                let writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+            {
+                let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                while run && cache.is_empty() {
+                    inner.flushed.notify_all();
+                    cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                    run = inner.run.lock().expect("run lock poisoned").get();
+                }
+                writes = cache.writes().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
                 cache.move_writes_to_wrote();
-                let mut log = inner.log.lock().expect("log lock poisoned");
-                let mut log_write = false;
-                for page in &writes {
-                    if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
-                        if let Ok(prev) = inner.read_page_from_store(page.offset) {
-                            log.append_page(prev).expect("can not write log");
-                            log_write = true;
-                        }
+            }
+            let mut log = inner.log.lock().expect("log lock poisoned");
+            let mut log_write = false;
+            for page in &writes {
+                if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
+                    if let Ok(prev) = inner.read_page_from_store(page.offset) {
+                        log.append_page(prev).expect("can not write log");
+                        log_write = true;
                     }
                 }
-                if log_write {
-                    log.flush().expect("can not flush log");
-                    log.sync().expect("can not sync log");
-                }
+            }
+            if log_write {
+                log.flush().expect("can not flush log");
+                //log.sync().expect("can not sync log");
+            }
+            if !writes.is_empty() {
+                use std::ops::Deref;
+
                 let mut file = inner.file.lock().expect("file lock poisoned");
                 for page in &writes {
                     file.write_page(page.deref().clone()).expect("can not write key file");
