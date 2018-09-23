@@ -90,7 +90,6 @@ impl Cache {
     }
 
     pub fn clear (&mut self) {
-        println!("writes: {} wrote: {}, reads: {} fifo: {}", self.writes.len(), self.wrote.len(), self.reads.len(), self.fifo.len());
         self.writes.clear();
         self.wrote.clear();
         self.reads.clear();
