@@ -513,14 +513,21 @@ impl PageFile for KeyPageFile {
 
         use std::ops::Deref;
 
-        let mut cache = self.inner.cache.lock().unwrap();
-        if let Some(page) = cache.get(offset) {
-            return Ok(page.deref().clone());
+        {
+            let cache = self.inner.cache.lock().unwrap();
+            if let Some(page) = cache.get(offset) {
+                return Ok(page.deref().clone());
+            }
         }
 
         // read outside of cache lock
         let page = self.read_page_from_store(offset)?;
-        cache.cache(page.clone());
+
+        {
+            // write cache takes precedence, therefore insert of outdated read will be ignored
+            let mut cache = self.inner.cache.lock().unwrap();
+            cache.cache(page.clone());
+        }
 
         Ok(page)
     }
