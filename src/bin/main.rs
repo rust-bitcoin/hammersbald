@@ -21,7 +21,7 @@ pub fn main () {
     let mut check = HashMap::new();
 
     // number of transactions
-    let ntx = 10000000;
+    let ntx = 500000000;
     // transactions per block
     let tb = 2000;
     // download batch size (number of blocks)
@@ -44,7 +44,7 @@ pub fn main () {
     }
 
     db.batch().unwrap();
-    println!("{} million tx stored in {} blocks in batches of {} in {} seconds", ntx/1000000, ntx/tb, tb, now.elapsed().as_secs());
+    println!("{} million tx stored in {} batches in {} s", ntx/1000000, ntx/tb, now.elapsed().as_secs());
 
     now = Instant::now();
     for (k, v) in check {
@@ -52,7 +52,7 @@ pub fn main () {
             println!("failed to store correctly");
         }
     }
-    println!("{} million tx retrieved in {} seconds", ntx/10000000, now.elapsed().as_secs());
+    println!("{} million tx retrieved in {} s", ntx/1000000, now.elapsed().as_secs());
 
 
     db.shutdown();

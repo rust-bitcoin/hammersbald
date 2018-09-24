@@ -26,16 +26,20 @@ use error::BCSError;
 use types::Offset;
 use cache::Cache;
 
+use rand::{thread_rng, RngCore};
+use siphasher::sip::SipHasher;
+
 use std::sync::{Mutex, Arc, Condvar};
 use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
+use std::hash::Hasher;
 
-const PAGE_HEAD :u64 = 12;
+const PAGE_HEAD :u64 = 28;
 const INIT_BUCKETS: u64 = 128;
 const INIT_LOGMOD :u64 = 6;
-const BUCKETS_PER_PAGE :u64 = 226;
+const BUCKETS_PER_PAGE :u64 = 225;
 const BUCKET_SIZE: u64 = 18;
 
 /// The key file
@@ -43,12 +47,17 @@ pub struct KeyFile {
     async_file: KeyPageFile,
     step: u64,
     buckets: u64,
-    log_mod: u64
+    log_mod: u64,
+    sip0: u64,
+    sip1: u64
 }
 
 impl KeyFile {
     pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
-        KeyFile{async_file: KeyPageFile::new(rw, log_file), step: 0, buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD }
+        let mut rng = thread_rng();
+        KeyFile{async_file: KeyPageFile::new(rw, log_file), step: 0,
+            buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD,
+        sip0: rng.next_u64(), sip1: rng.next_u64() }
     }
 
     pub fn init (&mut self) -> Result<(), BCSError> {
@@ -58,6 +67,8 @@ impl KeyFile {
                 self.buckets = buckets;
                 self.step = first_page.read_offset(6).unwrap().as_u64();
                 self.log_mod = (63 - buckets.leading_zeros()) as u64 - 1;
+                self.sip0 = first_page.read_u64(12).unwrap();
+                self.sip1 = first_page.read_u64(20).unwrap();
             }
             info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
@@ -65,6 +76,8 @@ impl KeyFile {
             let mut fp = Page::new(Offset::new(0)?);
             fp.write_offset(0, Offset::new(self.buckets)?)?;
             fp.write_offset(6, Offset::new(self.step)?)?;
+            fp.write_u64(12, self.sip0)?;
+            fp.write_u64(20, self.sip1)?;
             self.write_page(fp)?;
             info!("open empty BCDB");
         };
@@ -74,7 +87,7 @@ impl KeyFile {
 
     pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<i32, BCSError>{
         let mut spill = 0;
-        let hash = Self::hash(key);
+        let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         let step = self.step;
         if bucket < step {
@@ -119,7 +132,7 @@ impl KeyFile {
             }
             // get previously stored key
             if let Some(prev) = data_file.get(data_offset)? {
-                let hash = Self::hash(prev.data_key.as_slice());
+                let hash = self.hash(prev.data_key.as_slice());
                 let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                 let mut write = false;
                 if new_bucket != bucket {
@@ -140,7 +153,7 @@ impl KeyFile {
                     break;
                 }
                 if let Some(prev) = data_file.get(data_offset)? {
-                    let hash = Self::hash(prev.data_key.as_slice());
+                    let hash = self.hash(prev.data_key.as_slice());
                     let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
                         // store to new bucket
@@ -182,7 +195,7 @@ impl KeyFile {
         while spillover.as_u64() != 0 {
             if let Ok(so) = data_file.get_spillover(spillover) {
                 if let Some(prev) = data_file.get(so.0)? {
-                    let hash = Self::hash(prev.data_key.as_slice());
+                    let hash = self.hash(prev.data_key.as_slice());
                     let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
                         spill -= 1;
@@ -268,7 +281,7 @@ impl KeyFile {
     }
 
     pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
-        let hash = Self::hash(key);
+        let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
@@ -342,13 +355,10 @@ impl KeyFile {
                          + (bucket % BUCKETS_PER_PAGE) * BUCKET_SIZE + PAGE_HEAD)
     }
 
-    // assuming that key is already a good hash
-    fn hash (key: &[u8]) -> u64 {
-        use std::mem::transmute;
-
-        let mut buf = [0u8; 8];
-        buf.copy_from_slice(&key[0 .. 8]);
-        u64::from_be(unsafe { transmute(buf)})
+    fn hash (&self, key: &[u8]) -> u64 {
+        let mut hasher = SipHasher::new_with_keys(self.sip0, self.sip1);
+        hasher.write(key);
+        hasher.finish()
     }
 }
 

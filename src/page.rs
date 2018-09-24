@@ -91,6 +91,24 @@ impl Page {
         Offset::from_slice(&buf)
     }
 
+    pub fn read_u64(&self, pos: usize) -> Result<u64, BCSError> {
+        let mut buf = [0u8;8];
+        self.read(pos, &mut buf)?;
+        let mut size= 0u64;
+        for i in 0 .. 8 {
+            size <<= 8;
+            size += buf[i] as u64;
+        }
+        Ok(size)
+    }
+
+    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCSError> {
+        use std::mem::transmute;
+
+        let bytes: [u8; 8] = unsafe { transmute(n.to_be()) };
+        self.write(pos, &bytes)
+    }
+
     /// finish a page after appends to write out
     pub fn finish (&self) -> [u8; PAGE_SIZE] {
         let mut page = [0u8; PAGE_SIZE];

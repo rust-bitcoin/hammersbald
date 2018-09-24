@@ -29,6 +29,8 @@
 #[macro_use]
 extern crate log;
 extern crate bitcoin;
+extern crate siphasher;
+extern crate rand;
 
 mod page;
 mod types;
