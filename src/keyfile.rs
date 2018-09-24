@@ -33,8 +33,8 @@ use std::sync::{Mutex, Arc, Condvar};
 use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::cmp::Ordering;
 use std::hash::Hasher;
+use std::cmp::Ordering;
 
 const PAGE_HEAD :u64 = 28;
 const INIT_BUCKETS: u64 = 128;
@@ -426,46 +426,53 @@ impl KeyPageFile {
 
     fn background (inner: Arc<KeyPageFileInner>) {
         let mut run = true;
-        let mut last_loop;
+        let mut last_loop= Instant::now();
         while run {
+            run = inner.run.lock().expect("run lock poisoned").get();
             let mut writes;
+            loop {
+                let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                if cache.is_empty() {
+                    inner.flushed.notify_all();
+                }
+                else {
+                    if cache.writes_len() > 1000 {
+                        writes = cache.move_writes_to_wrote();
+                        break;
+                    }
+                }
+                let time_spent = Instant::now() - last_loop;
+                if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
+                    writes = cache.move_writes_to_wrote();
+                    break;
+                }
+                else {
+                    let (c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
+                    if t.timed_out() {
+                        cache = c;
+                        writes = cache.move_writes_to_wrote();
+                        break;
+                    }
+                }
+            }
             last_loop = Instant::now();
-            {
-                loop {
-                    {
-                        let mut cache = inner.cache.lock().expect("cache lock poisoned");
-                        while run && cache.is_empty() {
-                            inner.flushed.notify_all();
-                            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                            run = inner.run.lock().expect("run lock poisoned").get();
-                        }
-
-                        if cache.writes_len() > 1000 || (Instant::now() - last_loop).cmp(&Duration::from_millis(500)) == Ordering::Greater {
-                            writes = cache.move_writes_to_wrote();
-                            break;
-                        }
-                    }
-                    if run {
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                }
-            }
-            writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
-            let mut log = inner.log.lock().expect("log lock poisoned");
-            let mut log_write = false;
-            for page in &writes {
-                if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
-                    if let Ok(prev) = inner.read_page_from_store(page.offset) {
-                        log.append_page(prev).expect("can not write log");
-                        log_write = true;
-                    }
-                }
-            }
-            if log_write {
-                log.flush().expect("can not flush log");
-                log.sync().expect("can not sync log");
-            }
             if !writes.is_empty() {
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+                let mut log = inner.log.lock().expect("log lock poisoned");
+                let mut log_write = false;
+                for page in &writes {
+                    if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
+                        if let Ok(prev) = inner.read_page_from_store(page.offset) {
+                            log.append_page(prev).expect("can not write log");
+                            log_write = true;
+                        }
+                    }
+                }
+                if log_write {
+                    log.flush().expect("can not flush log");
+                    log.sync().expect("can not sync log");
+                }
+
                 use std::ops::Deref;
 
                 let mut file = inner.file.lock().expect("file lock poisoned");
@@ -502,8 +509,10 @@ impl PageFile for KeyPageFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut cache = self.inner.cache.lock().unwrap();
-        self.inner.work.notify_one();
-        cache = self.inner.flushed.wait(cache)?;
+        if !cache.is_empty() {
+            self.inner.work.notify_one();
+            cache = self.inner.flushed.wait(cache)?;
+        }
         self.inner.file.lock().unwrap().flush()
     }
 

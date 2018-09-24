@@ -188,34 +188,38 @@ impl DataPageFile {
 
     fn background (inner: Arc<DataPageFileInner>) {
         let mut run = true;
-        let mut last_loop;
+        let mut last_loop = Instant::now();
         while run {
-            last_loop = Instant::now();
+            run = inner.run.lock().expect("run lock poisoned").get();
             let mut writes;
-            {
-                loop {
-                    {
-                        let mut cache = inner.cache.lock().expect("cache lock poisoned");
-                        while run && cache.is_empty() {
-                            inner.flushed.notify_all();
-                            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                            run = inner.run.lock().expect("run lock poisoned").get();
-                        }
-
-                        if cache.writes_len() > 1000 || (Instant::now() - last_loop).cmp(&Duration::from_millis(500)) == Ordering::Greater {
-                            writes = cache.move_writes_to_wrote();
-                            break;
-                        }
-                    }
-                    if run {
-                        thread::sleep(Duration::from_millis(10));
+            loop {
+                let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                if cache.is_empty() {
+                    inner.flushed.notify_all();
+                }
+                else {
+                    writes = cache.move_writes_to_wrote();
+                    break;
+                }
+                let time_spent = Instant::now() - last_loop;
+                if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
+                    writes = cache.move_writes_to_wrote();
+                    break;
+                }
+                else {
+                    let (c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
+                    if t.timed_out() {
+                        cache = c;
+                        writes = cache.move_writes_to_wrote();
+                        break;
                     }
                 }
             }
+            last_loop = Instant::now();
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
-                for page in writes {
+                for page in &writes {
                     use std::ops::Deref;
                     file.append_page(page.deref().clone()).expect("can not extend data file");
                 }
@@ -241,8 +245,10 @@ impl PageFile for DataPageFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCSError> {
         let mut cache = self.inner.cache.lock().unwrap();
-        self.inner.work.notify_one();
-        cache = self.inner.flushed.wait(cache)?;
+        if !cache.is_empty() {
+            self.inner.work.notify_one();
+            cache = self.inner.flushed.wait(cache)?;
+        }
         self.inner.file.lock().unwrap().flush()
     }
 
