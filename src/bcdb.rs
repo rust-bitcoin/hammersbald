@@ -20,10 +20,9 @@ use page::{Page, PAGE_SIZE};
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
-use datafile::{DataFile, DataEntry};
+use datafile::{DataFile, DataEntry, Content};
 use error::BCSError;
 use types::U24;
-use datafile::DataType;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
 use bitcoin::blockdata::transaction::Transaction;
@@ -207,13 +206,8 @@ impl BCDB {
             let n_extensions = U24::from_slice(&stored.as_slice()[80..83])?.as_usize();
             for i in 0 .. n_extensions {
                 let offset = Offset::from_slice(&stored.as_slice()[83+i*6 .. 83+(i+1)*6])?;
-                if let Some(data) = self.data.get(offset)? {
-                    if data.data_type == DataType::AppDataExtension {
-                        extension.push(data.data);
-                    }
-                    else {
-                        return Err(BCSError::Corrupted(format!("expected app data extension {}", offset.as_u64())));
-                    }
+                if let Content::Extension(data) = self.data.get_content(offset)? {
+                    extension.push(data);
                 }
                 else {
                     return Err(BCSError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
@@ -268,13 +262,8 @@ impl BCDB {
             let n_extensions = U24::from_slice(&stored.as_slice()[80..83])?.as_usize();
             for i in 0 .. n_extensions {
                 let offset = Offset::from_slice(&stored.as_slice()[83+i*6 .. 83+(i+1)*6])?;
-                if let Some(data) = self.data.get(offset)? {
-                    if data.data_type == DataType::AppDataExtension {
-                        extension.push(data.data);
-                    }
-                    else {
-                        return Err(BCSError::Corrupted(format!("expected app data extension {}", offset.as_u64())));
-                    }
+                if let Content::Extension(data) = self.data.get_content(offset)? {
+                    extension.push(data);
                 }
                 else {
                     return Err(BCSError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
@@ -285,8 +274,8 @@ impl BCDB {
             let mut txdata: Vec<Transaction> = Vec::new();
             for i in 0 .. n_transactions {
                 let offset = Offset::from_slice(&stored.as_slice()[83+n_extensions*6+3+i*6 .. 83+n_extensions*6+3+(i+1)*6])?;
-                if let Some (tx) = self.data.get(offset)? {
-                    txdata.push(decode(tx.data)?);
+                if let Content::Data (_, tx) = self.data.get_content(offset)? {
+                    txdata.push(decode(tx)?);
                 }
                 else {
                     return Err(BCSError::Corrupted(format!("can not find transaction of a block {}", offset.as_u64())));

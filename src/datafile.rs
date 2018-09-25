@@ -67,7 +67,7 @@ impl DataFile {
         DataIterator::new(self.page_iter(0), 2)
     }
 
-    pub fn get_whatever(&self, offset: Offset) -> Result<DataEntry, BCSError> {
+    pub fn get_content(&self, offset: Offset) -> Result<Content, BCSError> {
         let page = {
             if self.page.offset == offset.this_page() {
                 self.page.clone()
@@ -79,33 +79,15 @@ impl DataFile {
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
-            return Ok(entry);
+            if entry.data_type == DataType::AppData {
+                return Ok(Content::Data(entry.data_key, entry.data));
+            }
+            else if entry.data_type == DataType::TableSpillOver {
+                return Ok(Content::Spillover(Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?))
+            }
+            return Ok(Content::Extension(entry.data))
         }
-        return Err(BCSError::Corrupted(format!("expected something at {}", offset.as_u64())));
-    }
-
-    pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
-        if let Ok(entry) = self.get_whatever(offset) {
-            if entry.data_type == DataType::AppData || entry.data_type == DataType::AppDataExtension {
-                return Ok(Some(entry));
-            }
-            else {
-                return Err(BCSError::Corrupted(format!("expected data at {}", offset.as_u64())));
-            }
-        }
-        return Ok(None);
-    }
-
-    pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
-        if let Ok(entry) = self.get_whatever(offset) {
-            if entry.data_type == DataType::TableSpillOver {
-                return Ok((Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?));
-            }
-            else {
-                return Err(BCSError::Corrupted(format!("expected spillover {}", offset.as_u64())));
-            }
-        }
-        return Err(BCSError::Corrupted(format!("can not find spillover {}", offset.as_u64())));
+        return Err(BCSError::Corrupted(format!("expected content at {}", offset.as_u64())));
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
@@ -347,6 +329,16 @@ impl PageFile for DataFile {
     }
 }
 
+/// content of the db
+pub enum Content {
+    /// spillover
+    Spillover(Offset, Offset),
+    /// regular data referred in index
+    Data(Vec<u8>, Vec<u8>),
+    /// data referred by data, not in index
+    Extension(Vec<u8>)
+}
+
 /// types of data stored in the data file
 #[derive(Eq, PartialEq,Debug,Copy, Clone)]
 pub enum DataType {
@@ -513,36 +505,5 @@ impl<'file> Iterator for DataIterator<'file> {
             }
         }
         None
-    }
-}
-
-#[cfg(test)]
-mod test {
-    extern crate hex;
-
-    use super::*;
-    use inmemory::InMemory;
-
-    #[test]
-    fn test() {
-        let mem = InMemory::new(true);
-        let mut data = DataFile::new(Box::new(mem)).unwrap();
-        data.init().unwrap();
-        assert!(data.page_iter(0).next().is_some());
-        assert!(data.data_iter().next().is_none());
-        let entry = DataEntry::new_data(&[0u8;KEY_LEN], "hello world!".as_bytes());
-        let hello_offset = data.append(entry.clone()).unwrap();
-        let big_entry = DataEntry::new_data(&[1u8;KEY_LEN], vec!(1u8; 5000).as_slice());
-        let big_offset = data.append(big_entry.clone()).unwrap();
-        data.flush().unwrap();
-        {
-            let mut iter = data.data_iter();
-            assert_eq!(iter.next().unwrap(), entry.clone());
-            assert_eq!(iter.next().unwrap(), big_entry.clone());
-            assert!(iter.next().is_none());
-        }
-        assert_eq!(data.get(hello_offset).unwrap().unwrap(), entry);
-        assert_eq!(data.get(big_offset).unwrap().unwrap(), big_entry);
-        data.sync().unwrap();
     }
 }
