@@ -25,37 +25,31 @@ use keyfile::KeyFile;
 use datafile::DataFile;
 use bcdb::{BCDBFactory, BCDB};
 use types::Offset;
-use page::{Page,PAGE_SIZE};
+use page::Page;
+use rolled::RolledFile;
 
-
-use std::io::Read;
-use std::io::Write;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::fs::{File, OpenOptions};
 use std::sync::{Mutex,Arc};
 
-/// in file store
+/// Implements persistent storage
 pub struct InFile {
-    data: Mutex<File>
+    file: RolledFile
 }
 
 impl InFile {
     /// create a new DB in memory for tests
-    pub fn new (file: File) -> InFile {
-        InFile {data: Mutex::new(file)}
+    pub fn new (file: RolledFile) -> InFile {
+        InFile {file: file}
     }
 }
 
 impl BCDBFactory for InFile {
     fn new_db (name: &str) -> Result<BCDB, BCSError> {
-        let table_file = OpenOptions::new().read(true).write(true).create(true).open(name.to_owned() + ".tb")?;
-        let data_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".bc")?;
-        let log_file = OpenOptions::new().read(true).append(true).create(true).open(name.to_owned() + ".lg")?;
-
-        let log = Arc::new(Mutex::new(LogFile::new(Box::new(InFile::new(log_file)))));
-        let table = KeyFile::new(Box::new(InFile::new(table_file)), log);
-        let data = DataFile::new(Box::new(InFile::new(data_file)))?;
+        let log = Arc::new(Mutex::new(LogFile::new(Box::new(
+            RolledFile::new(name.to_string(), "lg".to_string(), true)?))));
+        let table = KeyFile::new(Box::new(InFile::new(
+            RolledFile::new(name.to_string(), "tb".to_string(), false)?
+        )), log);
+        let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true)?))?;
 
         BCDB::new(table, data)
     }
@@ -63,42 +57,30 @@ impl BCDBFactory for InFile {
 
 impl PageFile for InFile {
     fn flush(&mut self) -> Result<(), BCSError> {
-        Ok(self.data.lock().unwrap().flush()?)
+        self.file.flush()
     }
 
     fn len(&self) -> Result<u64, BCSError> {
-        Ok(self.data.lock().unwrap().seek(SeekFrom::End(0))?)
+        self.file.len()
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
-        Ok(self.data.lock().unwrap().set_len(len)?)
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
+        self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> { Ok(self.data.lock().unwrap().sync_data()?) }
+    fn sync(&self) -> Result<(), BCSError> {
+        self.file.sync()
+    }
 
-    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
-        let mut data = self.data.lock().unwrap();
-        let mut buffer = [0u8; PAGE_SIZE];
-        let len = data.seek(SeekFrom::End(0))?;
-        if offset.as_u64() >= len {
-            return Err(BCSError::InvalidOffset);
-        }
-        data.seek(SeekFrom::Start(offset.as_u64()))?;
-        data.read(&mut buffer)?;
-        let page = Page::from_buf(buffer);
-        Ok(page)
+    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+        self.file.read_page(offset)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        let mut data = self.data.lock().unwrap();
-        data.write(&page.finish()[..])?;
-        Ok(())
+        self.file.append_page(page)
     }
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        let mut data = self.data.lock().unwrap();
-        data.seek(SeekFrom::Start(page.offset.as_u64()))?;
-        data.write(&page.finish()[..])?;
-        Ok(())
+        self.file.write_page(page)
     }
 }
