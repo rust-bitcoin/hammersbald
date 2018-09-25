@@ -67,7 +67,7 @@ impl DataFile {
         DataIterator::new(self.page_iter(0), 2)
     }
 
-    pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
+    pub fn get_whatever(&self, offset: Offset) -> Result<DataEntry, BCSError> {
         let page = {
             if self.page.offset == offset.this_page() {
                 self.page.clone()
@@ -79,6 +79,13 @@ impl DataFile {
         let mut fetch_iterator = DataIterator::new_fetch(
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
+            return Ok(entry);
+        }
+        return Err(BCSError::Corrupted(format!("expected something at {}", offset.as_u64())));
+    }
+
+    pub fn get (&self, offset: Offset) -> Result<Option<DataEntry>, BCSError> {
+        if let Ok(entry) = self.get_whatever(offset) {
             if entry.data_type == DataType::AppData || entry.data_type == DataType::AppDataExtension {
                 return Ok(Some(entry));
             }
@@ -90,23 +97,15 @@ impl DataFile {
     }
 
     pub fn get_spillover (&self, offset: Offset) -> Result<(Offset, Offset), BCSError> {
-        let page = {
-            if self.page.offset == offset.this_page() {
-                self.page.clone()
+        if let Ok(entry) = self.get_whatever(offset) {
+            if entry.data_type == DataType::TableSpillOver {
+                return Ok((Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?));
             }
             else {
-                self.read_page(offset.this_page())?
+                return Err(BCSError::Corrupted(format!("expected spillover {}", offset.as_u64())));
             }
-        };
-        let mut fetch_iterator = DataIterator::new_fetch(
-            PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
-        if let Some(entry) = fetch_iterator.next() {
-            if entry.data_type != DataType::TableSpillOver {
-                return Err(BCSError::Corrupted(format!("expected spillover {}", offset.as_u64())))
-            }
-            return Ok((Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?));
         }
-        return Err(BCSError::Corrupted(format!("can not find spillover {}", offset.as_u64())))
+        return Err(BCSError::Corrupted(format!("can not find spillover {}", offset.as_u64())));
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
