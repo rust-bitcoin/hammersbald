@@ -295,6 +295,10 @@ impl PageFile for DataPageFile {
     fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
         unimplemented!()
     }
+
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
+        unimplemented!()
+    }
 }
 
 impl PageFile for DataFile {
@@ -336,6 +340,10 @@ impl PageFile for DataFile {
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
+        unimplemented!()
+    }
+
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
         unimplemented!()
     }
 }

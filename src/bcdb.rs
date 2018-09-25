@@ -62,6 +62,8 @@ pub trait PageFile : Send + Sync {
     fn append_page (&mut self, page: Page) -> Result<(), BCSError>;
     /// write a page at its position as specified in page.offset
     fn write_page (&mut self, page: Page) -> Result<(), BCSError>;
+    /// write a batch of pages in parallel (if possible)
+    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError>;
 }
 
 /// The blockchain db

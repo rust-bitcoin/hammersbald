@@ -26,6 +26,7 @@ use error::BCSError;
 use types::Offset;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// The buffer pool
 pub struct LogFile {
@@ -91,6 +92,10 @@ impl PageFile for LogFile {
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
+        unimplemented!()
+    }
+
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
         unimplemented!()
     }
 }

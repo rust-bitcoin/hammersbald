@@ -31,6 +31,7 @@ extern crate log;
 extern crate bitcoin;
 extern crate siphasher;
 extern crate rand;
+extern crate threadpool;
 
 mod page;
 mod types;

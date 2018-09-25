@@ -22,6 +22,7 @@ use bcdb::PageFile;
 use error::BCSError;
 use types::Offset;
 use page::{Page, PAGE_SIZE};
+use threadpool::ThreadPool;
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -29,20 +30,26 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::cmp::max;
+use std::sync::{Arc, Barrier};
 
-const CHUNK_SIZE: u64 = 128*1024*1024;
+const WORKERS: usize = 4;
 
 pub struct RolledFile {
     name: String,
     extension: String,
-    files: HashMap<u16, SingleFile>,
+    files: HashMap<u16, Arc<Mutex<SingleFile>>>,
     len: u64,
-    append_only: bool
+    append_only: bool,
+    pool: Option<Mutex<ThreadPool>>,
+    chunk_size: u64
 }
 
 impl RolledFile {
-    pub fn new (name: String, extension: String, append_only: bool) -> Result<RolledFile, BCSError> {
-        let mut rolled = RolledFile { name, extension, files: HashMap::new(), len: 0, append_only };
+    pub fn new (name: String, extension: String, append_only: bool, chunk_size: u64) -> Result<RolledFile, BCSError> {
+        let tp = if append_only { None } else { Some(Mutex::new(ThreadPool::new(WORKERS)))};
+
+        let mut rolled = RolledFile { name, extension, files: HashMap::new(), len: 0, append_only,
+        pool: tp, chunk_size};
         rolled.open()?;
         Ok(rolled)
     }
@@ -73,7 +80,8 @@ impl RolledFile {
                                             if let Ok(number) =  index.to_string_lossy().parse::<u16>() {
                                                 let filename = path.clone().to_string_lossy().to_string();
                                                 let file = Self::open_file(self.append_only, filename)?;
-                                                self.files.insert(number, SingleFile::new(file, number as u64 * CHUNK_SIZE)?);
+                                                self.files.insert(number, Arc::new(Mutex::new(
+                                                                  SingleFile::new(file, number as u64 * self.chunk_size, self.chunk_size)?)));
                                             }
                                         }
                                     }
@@ -106,14 +114,14 @@ impl RolledFile {
 impl PageFile for RolledFile {
     fn flush(&mut self) -> Result<(), BCSError> {
         if self.append_only {
-            let lc = (self.len / CHUNK_SIZE) as u16;
+            let lc = (self.len / self.chunk_size) as u16;
             if let Some (file) = self.files.get_mut(&lc) {
-                file.flush()?;
+                file.lock().unwrap().flush()?;
             }
         }
         else {
             for file in &mut self.files.values_mut() {
-                file.flush()?;
+                file.lock().unwrap().flush()?;
             }
         }
         Ok(())
@@ -124,14 +132,14 @@ impl PageFile for RolledFile {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
-        let chunk = (new_len / CHUNK_SIZE) as u16;
+        let chunk = (new_len / self.chunk_size) as u16;
         for (c, file) in &mut self.files {
             if *c > chunk {
-                file.truncate(0)?;
+                file.lock ().unwrap().truncate(0)?;
             }
         }
-        if let Some (last) = self.files.get_mut(&chunk) {
-            last.truncate(new_len % CHUNK_SIZE)?;
+        if let Some (last) = self.files.get(&chunk) {
+            last.lock().unwrap().truncate(new_len % self.chunk_size)?;
         }
         self.len = new_len;
         Ok(())
@@ -139,45 +147,45 @@ impl PageFile for RolledFile {
 
     fn sync(&self) -> Result<(), BCSError> {
         if self.append_only {
-            let lc = (self.len / CHUNK_SIZE) as u16;
+            let lc = (self.len / self.chunk_size) as u16;
             if let Some (file) = self.files.get(&lc) {
-                file.sync()?;
+                file.lock().unwrap().sync()?;
             }
         }
         else {
             for file in self.files.values() {
-                file.sync()?;
+                file.lock().unwrap().sync()?;
             }
         }
         Ok(())
     }
 
     fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
-        let chunk = (offset.as_u64() / CHUNK_SIZE) as u16;
+        let chunk = (offset.as_u64() / self.chunk_size) as u16;
         if let Some(file) = self.files.get(&chunk) {
-            return file.read_page(offset);
+            return file.lock().unwrap().read_page(offset);
         }
         Err(BCSError::Corrupted("missing chunk in read".to_string()))
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
-        let chunk = (self.len / CHUNK_SIZE) as u16;
+        let chunk = (self.len / self.chunk_size) as u16;
 
-        if self.len % CHUNK_SIZE == 0 && !self.files.contains_key(&chunk) {
+        if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
             let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
                 + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new(file, self.len)?);
+            self.files.insert(chunk, Arc::new(Mutex::new(SingleFile::new(file, self.len, self.chunk_size)?)));
             if chunk > 0 {
-                if let Some(prev) = self.files.get_mut(&(chunk - 1)) {
-                    prev.flush()?;
-                    prev.sync()?;
+                if let Some(prev) = self.files.get(&(chunk - 1)) {
+                    prev.lock().unwrap().flush()?;
+                    prev.lock().unwrap().sync()?;
                 }
             }
         }
 
-        if let Some (file) = self.files.get_mut(&chunk) {
+        if let Some (file) = self.files.get(&chunk) {
             self.len += PAGE_SIZE as u64;
-            return file.append_page(page);
+            return file.lock().unwrap().append_page(page);
         }
         else {
             return Err(BCSError::Corrupted("missing chunk in append".to_string()));
@@ -186,33 +194,80 @@ impl PageFile for RolledFile {
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
         let offset = page.offset.as_u64();
-        let chunk = (offset / CHUNK_SIZE) as u16;
+        let chunk = (offset / self.chunk_size) as u16;
 
-        if self.len % CHUNK_SIZE == 0 && !self.files.contains_key(&chunk) {
+        if !self.files.contains_key(&chunk) {
             let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
                 + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new(file, offset)?);
+            self.files.insert(chunk, Arc::new(Mutex::new(SingleFile::new(file, (offset/self.chunk_size) * self.chunk_size, self.chunk_size)?)));
         }
 
-        if let Some(file) = self.files.get_mut(&chunk) {
+        if let Some(file) = self.files.get(&chunk) {
             self.len = max(self.len, offset + PAGE_SIZE as u64);
-            return file.write_page(page);
+            return file.lock().unwrap().write_page(page);
         } else {
             return Err(BCSError::Corrupted("missing chunk in append".to_string()));
         }
+    }
+
+    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
+
+        let mut by_chunk = HashMap::new();
+        for page in &writes {
+            let chunk = (page.offset.as_u64()/self.chunk_size) as u16;
+            if !self.files.contains_key(&chunk) {
+                use std::ops::Deref;
+                self.write_page(page.deref().clone()).unwrap();
+            }
+            else {
+                by_chunk.entry(chunk).or_insert(Vec::new()).push(page.clone());
+            }
+        }
+
+        let chunks : Vec<&u16> = by_chunk.keys().collect();
+        for task in chunks.chunks(WORKERS) {
+            let barrier = Arc::new(Barrier::new(task.len() + 1));
+            for chunk in task {
+                if let Some(file) = self.files.get(*chunk) {
+                    let sf = file.clone();
+                    let mut list = by_chunk.get(*chunk).unwrap().clone();
+                    let b = barrier.clone();
+                    list.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+                    for page in &list {
+                        self.len = max(self.len, page.offset.as_u64() + PAGE_SIZE as u64);
+                    }
+                    if let Some(tp) = &self.pool {
+                        tp.lock().unwrap().execute(move || {
+                            let mut f = sf.lock().unwrap();
+
+                            for page in list {
+                                use std::ops::Deref;
+
+                                f.write_page(page.deref().clone()).unwrap();
+                            }
+                            b.wait();
+                        });
+                    }
+                }
+            }
+            barrier.wait();
+        }
+
+        Ok(())
     }
 }
 
 struct SingleFile {
     file: Mutex<File>,
     base: u64,
-    len: u64
+    len: u64,
+    chunk_size: u64
 }
 
 impl SingleFile {
-    pub fn new (mut file: File, base: u64) -> Result<SingleFile, BCSError> {
+    pub fn new (mut file: File, base: u64, chunk_size: u64) -> Result<SingleFile, BCSError> {
         let len = file.seek(SeekFrom::End(0))?;
-        Ok(SingleFile{file: Mutex::new(file), base, len})
+        Ok(SingleFile{file: Mutex::new(file), base, len, chunk_size})
     }
 }
 
@@ -236,7 +291,7 @@ impl PageFile for SingleFile {
 
     fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
         let o = offset.as_u64();
-        if o < self.base || o >= self.base + CHUNK_SIZE {
+        if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCSError::Corrupted("read from wrong file".to_string()));
         }
         let pos = o - self.base;
@@ -261,8 +316,8 @@ impl PageFile for SingleFile {
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
         let o = page.offset.as_u64();
-        if o < self.base || o >= self.base + CHUNK_SIZE {
-            return Err(BCSError::Corrupted("read from wrong file".to_string()));
+        if o < self.base || o >= self.base + self.chunk_size {
+            return Err(BCSError::Corrupted("write to wrong file".to_string()));
         }
         let pos = o - self.base;
 
@@ -271,5 +326,9 @@ impl PageFile for SingleFile {
         file.write(&page.finish()[..])?;
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(())
+    }
+
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
+        unimplemented!()
     }
 }

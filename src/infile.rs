@@ -30,6 +30,10 @@ use rolled::RolledFile;
 
 use std::sync::{Mutex,Arc};
 
+const KEY_CHUNK_SIZE: u64 = 8*1024*1024;
+const DATA_CHUNK_SIZE: u64 = 64*1024*1024;
+const LOG_CHUNK_SIZE: u64 = 64*1024*1024;
+
 /// Implements persistent storage
 pub struct InFile {
     file: RolledFile
@@ -45,11 +49,11 @@ impl InFile {
 impl BCDBFactory for InFile {
     fn new_db (name: &str) -> Result<BCDB, BCSError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(
-            RolledFile::new(name.to_string(), "lg".to_string(), true)?))));
+            RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))));
         let table = KeyFile::new(Box::new(InFile::new(
-            RolledFile::new(name.to_string(), "tb".to_string(), false)?
+            RolledFile::new(name.to_string(), "tb".to_string(), false, KEY_CHUNK_SIZE)?
         )), log);
-        let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true)?))?;
+        let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?;
 
         BCDB::new(table, data)
     }
@@ -82,5 +86,9 @@ impl PageFile for InFile {
 
     fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
         self.file.write_page(page)
+    }
+
+    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
+        self.file.write_batch(writes)
     }
 }

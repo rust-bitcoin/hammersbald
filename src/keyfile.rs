@@ -449,7 +449,7 @@ impl KeyPageFile {
         let mut last_loop= Instant::now();
         while run {
             run = inner.run.lock().expect("run lock poisoned").get();
-            let mut writes;
+            let writes;
             loop {
                 let mut cache = inner.cache.lock().expect("cache lock poisoned");
                 if cache.is_empty() {
@@ -482,13 +482,8 @@ impl KeyPageFile {
                     log.flush().expect("can not flush log");
                     log.sync().expect("can not sync log");
                 }
-
-                use std::ops::Deref;
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
-                for page in &writes {
-                    file.write_page(page.deref().clone()).expect("can not write key file");
-                }
+                file.write_batch(writes).expect("batch write failed");
             }
         }
     }
@@ -570,5 +565,9 @@ impl PageFile for KeyPageFile {
         self.inner.work.notify_one();
         Ok(())
 
+    }
+
+    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
+        self.inner.file.lock().unwrap().write_batch(writes)
     }
 }
