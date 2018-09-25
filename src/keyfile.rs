@@ -86,8 +86,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<i32, BCSError>{
-        let mut spill = 0;
+    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError>{
         let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         let step = self.step;
@@ -95,8 +94,8 @@ impl KeyFile {
             bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
 
-        spill += self.store_to_bucket(bucket, key, offset, data_file)?;
-        spill += self.rehash_bucket(step, data_file)?;
+        self.store_to_bucket(bucket, key, offset, data_file)?;
+        self.rehash_bucket(step, data_file)?;
 
         self.step +=1;
         if self.step == (1 << (self.log_mod + 1))  {
@@ -118,11 +117,10 @@ impl KeyFile {
         }
 
 
-        Ok(spill)
+        Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<i32, BCSError> {
-        let mut spill = 0;
+    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCSError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         loop {
@@ -166,15 +164,14 @@ impl KeyFile {
         let mut remaining_spillovers = Vec::new();
         let mut some_moved = false;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 12)?;
+        let mut spillover = bucket_page.read_offset(bucket_offset.in_page_pos() + 6)?;
         while spillover.as_u64() != 0 {
             if let Ok(so) = data_file.get_spillover(spillover) {
                 if let Some(prev) = data_file.get(so.0)? {
                     let hash = self.hash(prev.data_key.as_slice());
                     let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
-                        spill -= 1;
-                        spill += self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
+                        self.store_to_bucket(new_bucket, prev.data_key.as_slice(), so.0, data_file)?;
                         bucket_page = self.read_page(bucket_offset.this_page())?;
                         some_moved = true;
                     }
@@ -201,11 +198,10 @@ impl KeyFile {
         }
 
 
-        Ok(spill)
+        Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<i32, BCSError> {
-        let mut spill = 0;
+    fn store_to_bucket(&mut self, bucket: u64, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -232,7 +228,7 @@ impl KeyFile {
             }
         }
         self.write_page(bucket_page)?;
-        Ok(spill)
+        Ok(())
     }
 
     pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
