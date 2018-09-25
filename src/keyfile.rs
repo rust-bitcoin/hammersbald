@@ -73,7 +73,8 @@ impl KeyFile {
             info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
         else {
-            let mut fp = Page::new(Offset::new(0)?);
+            let page = Page::new(Offset::new(0)?);
+            let mut fp = LoggedPage { preimage: page.clone(), page};
             fp.write_offset(0, Offset::new(self.buckets)?)?;
             fp.write_offset(6, Offset::new(self.step)?)?;
             fp.write_u64(12, self.sip0)?;
@@ -106,13 +107,14 @@ impl KeyFile {
         self.buckets += 1;
         if self.buckets % BUCKETS_PER_PAGE == 0 {
             let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
-            self.write_page(page)?;
+            let lp = LoggedPage { preimage: page.clone(), page };
+            self.write_page(lp)?;
         }
 
-        if let Ok(mut first_page) = self.async_file.read_page(Offset::new(0).unwrap()) {
+        if let Ok(mut first_page) = self.read_page(Offset::new(0).unwrap()) {
             first_page.write_offset(0, Offset::new(self.buckets)?)?;
             first_page.write_offset(6, Offset::new(self.step)?)?;
-            self.async_file.write_page(first_page)?;
+            self.write_page(first_page)?;
         }
 
 
@@ -362,33 +364,55 @@ impl KeyFile {
     }
 }
 
-impl PageFile for KeyFile {
-    fn flush(&mut self) -> Result<(), BCSError> {
+impl KeyFile {
+    pub fn flush(&mut self) -> Result<(), BCSError> {
         self.async_file.flush()
     }
 
-    fn len(&self) -> Result<u64, BCSError> {
+    pub fn len(&self) -> Result<u64, BCSError> {
         self.async_file.len()
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+    pub fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
         self.async_file.truncate(len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
+    pub fn sync(&self) -> Result<(), BCSError> {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
-        self.async_file.read_page(offset)
+    fn read_page(&self, offset: Offset) -> Result<LoggedPage, BCSError> {
+        let page = self.async_file.read_page(offset)?;
+        Ok(LoggedPage { preimage: page.clone(), page })
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), BCSError> {
-        unimplemented!()
+    fn write_page(&mut self, page: LoggedPage) -> Result<(), BCSError> {
+        self.async_file.inner.log.lock().unwrap().preimage(page.preimage);
+        self.async_file.write_page(page.page)
+    }
+}
+
+struct LoggedPage {
+    preimage: Page,
+    page: Page
+}
+
+impl LoggedPage {
+
+    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCSError> {
+        self.page.write_offset(pos, offset)
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
-        self.async_file.write_page(page)
+    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCSError> {
+        self.page.read_offset(pos)
+    }
+
+    pub fn read_u64(&self, pos: usize) -> Result<u64, BCSError> {
+        self.page.read_u64(pos)
+    }
+
+    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCSError> {
+        self.page.write_u64(pos, n)
     }
 }
 
@@ -409,10 +433,6 @@ impl KeyPageFileInner {
     pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> KeyPageFileInner {
         KeyPageFileInner { file: Mutex::new(file), log,
             cache: Mutex::new(Cache::default()), flushed: Condvar::new(), work: Condvar::new(), run: Mutex::new(Cell::new(true)) }
-    }
-
-    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
-        self.file.lock().unwrap().read_page(offset)
     }
 }
 
@@ -457,24 +477,14 @@ impl KeyPageFile {
             }
             last_loop = Instant::now();
             if !writes.is_empty() {
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
-                let mut log = inner.log.lock().expect("log lock poisoned");
-                let mut log_write = false;
-                for page in &writes {
-                    if page.offset.as_u64() < log.tbl_len && !log.has_page(page.offset) {
-                        if let Ok(prev) = inner.read_page_from_store(page.offset) {
-                            log.append_page(prev).expect("can not write log");
-                            log_write = true;
-                        }
-                    }
-                }
-                if log_write {
+                {
+                    let mut log = inner.log.lock().expect("log lock poisoned");
                     log.flush().expect("can not flush log");
                     log.sync().expect("can not sync log");
                 }
 
                 use std::ops::Deref;
-
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
                 for page in &writes {
                     file.write_page(page.deref().clone()).expect("can not write key file");
@@ -559,5 +569,6 @@ impl PageFile for KeyPageFile {
         self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())
+
     }
 }
