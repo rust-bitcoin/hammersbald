@@ -159,13 +159,13 @@ impl BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<(Offset, i32), BCSError> {
+    pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
         let offset = self.data.append(DataEntry::new_data(key, data))?;
-        let spill = self.table.put(key, offset, &mut self.data)?;
-        Ok((offset, spill))
+        self.table.put(key, offset, &mut self.data)?;
+        Ok(offset)
     }
 
     /// retrieve data by key
@@ -195,7 +195,7 @@ impl BCDB {
         let number_of_transactions = [0u8;3];
         serialized_header.append(&mut number_of_transactions.to_vec());
 
-        Ok(self.put(key.as_slice(), serialized_header.as_slice())?.0)
+        self.put(key.as_slice(), serialized_header.as_slice())
     }
 
     /// Fetch a header by its id
@@ -249,13 +249,13 @@ impl BCDB {
 
         for t in &block.txdata {
             let offset = self.put(
-                &encode(&t.txid())?.as_slice(), &encode(t)?.as_slice())?.0;
+                &encode(&t.txid())?.as_slice(), &encode(t)?.as_slice())?;
             let mut did = [0u8;6];
             offset.serialize(&mut did);
             serialized_block.append(&mut did.to_vec());
         }
 
-        let offset = self.put(key.as_slice(),serialized_block.as_slice())?.0;
+        let offset = self.put(key.as_slice(),serialized_block.as_slice())?;
         Ok(offset)
     }
 
@@ -369,7 +369,7 @@ mod test {
 
     #[test]
     fn test () {
-        simple_logger::init_with_level(log::Level::Info).unwrap();
+        simple_logger::init_with_level(log::Level::Debug).unwrap();
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
@@ -379,16 +379,14 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        let mut spill = 0;
         for _ in 1 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
-            spill += db.put(&key, &data).unwrap().1;
+            db.put(&key, &data).unwrap();
             assert_eq!(db.get(&key).unwrap().unwrap(), data.to_owned());
         }
         db.batch().unwrap();
-        debug!("spillovers: {}", spill);
 
         for (k, v) in check.iter() {
             assert_eq!(db.get(k).unwrap(), Some(v.to_vec()));
