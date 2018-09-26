@@ -121,7 +121,6 @@ impl BCDB {
         self.data.flush()?;
         self.data.sync()?;
         self.data.clear_cache();
-        self.table.write_state()?;
         self.table.flush()?;
         self.table.sync()?;
         self.table.clear_cache();
