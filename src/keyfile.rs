@@ -106,8 +106,8 @@ impl KeyFile {
         self.buckets += 1;
         if self.buckets % BUCKETS_PER_PAGE == 0 {
             let page = Page::new(Offset::new((self.buckets /BUCKETS_PER_PAGE)*PAGE_SIZE as u64)?);
-            let lp = LoggedPage { preimage: page.clone(), page };
-            self.write_page(lp)?;
+            // no need of pre-image here
+            self.async_file.write_page(page)?;
         }
 
         if let Ok(mut first_page) = self.read_page(Offset::new(0).unwrap()) {
@@ -317,8 +317,13 @@ impl KeyFile {
     }
 
     fn write_page(&mut self, page: LoggedPage) -> Result<(), BCSError> {
-        self.async_file.inner.log.lock().unwrap().preimage(page.preimage);
-        self.async_file.write_page(page.page)
+        if page.preimage.payload[..] != page.page.payload[..] {
+            self.async_file.inner.log.lock().unwrap().preimage(page.preimage);
+            self.async_file.write_page(page.page)
+        }
+        else {
+            Ok(())
+        }
     }
 }
 
@@ -410,7 +415,6 @@ impl KeyPageFile {
                 {
                     let mut log = inner.log.lock().expect("log lock poisoned");
                     log.flush().expect("can not flush log");
-                    log.sync().expect("can not sync log");
                 }
                 let mut file = inner.file.lock().expect("file lock poisoned");
                 file.write_batch(writes).expect("batch write failed");

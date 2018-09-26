@@ -30,9 +30,9 @@ use rolled::RolledFile;
 
 use std::sync::{Mutex,Arc};
 
-const KEY_CHUNK_SIZE: u64 = 8*1024*1024;
-const DATA_CHUNK_SIZE: u64 = 64*1024*1024;
-const LOG_CHUNK_SIZE: u64 = 64*1024*1024;
+const KEY_CHUNK_SIZE: u64 = 16*1024*1024;
+const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
+const LOG_CHUNK_SIZE: u64 = 16*1024*1024;
 
 /// Implements persistent storage
 pub struct InFile {

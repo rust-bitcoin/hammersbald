@@ -113,16 +113,8 @@ impl RolledFile {
 
 impl PageFile for RolledFile {
     fn flush(&mut self) -> Result<(), BCSError> {
-        if self.append_only {
-            let lc = (self.len / self.chunk_size) as u16;
-            if let Some (file) = self.files.get_mut(&lc) {
-                file.lock().unwrap().flush()?;
-            }
-        }
-        else {
-            for file in &mut self.files.values_mut() {
-                file.lock().unwrap().flush()?;
-            }
+        for file in &mut self.files.values_mut() {
+            file.lock().unwrap().flush()?;
         }
         Ok(())
     }
@@ -146,16 +138,8 @@ impl PageFile for RolledFile {
     }
 
     fn sync(&self) -> Result<(), BCSError> {
-        if self.append_only {
-            let lc = (self.len / self.chunk_size) as u16;
-            if let Some (file) = self.files.get(&lc) {
-                file.lock().unwrap().sync()?;
-            }
-        }
-        else {
-            for file in self.files.values() {
-                file.lock().unwrap().sync()?;
-            }
+        for file in self.files.values() {
+            file.lock().unwrap().sync()?;
         }
         Ok(())
     }
@@ -175,12 +159,6 @@ impl PageFile for RolledFile {
             let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
                 + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
             self.files.insert(chunk, Arc::new(Mutex::new(SingleFile::new(file, self.len, self.chunk_size)?)));
-            if chunk > 0 {
-                if let Some(prev) = self.files.get(&(chunk - 1)) {
-                    prev.lock().unwrap().flush()?;
-                    prev.lock().unwrap().sync()?;
-                }
-            }
         }
 
         if let Some (file) = self.files.get(&chunk) {
