@@ -106,7 +106,9 @@ impl PageFile for InMemory {
     }
 
     fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
-        for page in &writes {
+        let mut list = writes.clone();
+        list.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+        for page in &list {
             use std::ops::Deref;
             self.write_page(page.deref().clone())?;
         }
