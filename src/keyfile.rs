@@ -95,7 +95,9 @@ impl KeyFile {
         }
 
         self.store_to_bucket(bucket, key, offset, data_file)?;
-        self.rehash_bucket(step, data_file)?;
+        if step < (1 << self.log_mod) {
+            self.rehash_bucket(step, data_file)?;
+        }
 
         self.step +=1;
         if self.step == (1 << (self.log_mod + 1))  {
