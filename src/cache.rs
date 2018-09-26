@@ -84,9 +84,12 @@ impl Cache {
     }
 
     pub fn move_writes_to_wrote(&mut self) -> Vec<Arc<Page>> {
-        self.wrote = self.writes.clone();
+        let writes = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
         self.writes.clear();
-        self.wrote.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>()
+        for page in &writes {
+            self.wrote.insert(page.offset, page.clone());
+        }
+        writes
     }
 
     pub fn clear (&mut self) {
