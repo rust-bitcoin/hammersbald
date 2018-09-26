@@ -110,14 +110,18 @@ impl KeyFile {
             self.async_file.write_page(page)?;
         }
 
+        Ok(())
+    }
+
+    pub fn write_state(&mut self) -> Result<(), BCSError> {
         if let Ok(mut first_page) = self.read_page(Offset::new(0).unwrap()) {
             first_page.write_offset(0, Offset::new(self.buckets)?)?;
             first_page.write_offset(6, Offset::new(self.step)?)?;
-            self.write_page(first_page)?;
+            self.write_page(first_page)
         }
-
-
-        Ok(())
+        else {
+            Ok(())
+        }
     }
 
     fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCSError> {
