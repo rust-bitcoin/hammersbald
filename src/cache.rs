@@ -54,11 +54,6 @@ impl Cache {
 
     pub fn write (&mut self, page: Page) {
         let offset = page.offset;
-        if self.reads.remove(&page.offset).is_some() {
-            if let Some(prev) = self.fifo.iter().position(move |o| *o == offset) {
-                self.fifo.remove(prev);
-            }
-        }
         let page = Arc::new(page);
         if self.wrote.insert(offset, page.clone()).is_none() {
             self.new_writes += 1;
