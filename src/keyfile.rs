@@ -395,7 +395,7 @@ impl KeyPageFile {
                     inner.flushed.notify_all();
                 }
                 else {
-                    if cache.writes_len() > 1000 {
+                    if cache.new_writes > 1000 {
                         writes = cache.move_writes_to_wrote();
                         break;
                     }
@@ -419,6 +419,7 @@ impl KeyPageFile {
                 {
                     let mut log = inner.log.lock().expect("log lock poisoned");
                     log.flush().expect("can not flush log");
+                    log.sync().expect("can not sync log");
                 }
                 let mut file = inner.file.lock().expect("file lock poisoned");
                 file.write_batch(writes).expect("batch write failed");

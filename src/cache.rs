@@ -32,7 +32,8 @@ pub struct Cache {
     writes: HashMap<Offset, Arc<Page>>,
     wrote: HashMap<Offset, Arc<Page>>,
     reads: HashMap<Offset, Arc<Page>>,
-    fifo: VecDeque<Offset>
+    fifo: VecDeque<Offset>,
+    pub new_writes: usize
 }
 
 impl Cache {
@@ -58,16 +59,15 @@ impl Cache {
                 self.fifo.remove(prev);
             }
         }
-        self.wrote.remove(&offset);
-        self.writes.insert(offset, Arc::new(page));
+        let page = Arc::new(page);
+        if self.wrote.insert(offset, page.clone()).is_none() {
+            self.new_writes += 1;
+        }
+        self.writes.insert(offset, page);
     }
 
     pub fn is_empty (&self) -> bool {
         self.writes.is_empty()
-    }
-
-    pub fn writes_len(&self) -> usize {
-        self.writes.len()
     }
 
     pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
@@ -86,13 +86,12 @@ impl Cache {
     pub fn move_writes_to_wrote(&mut self) -> Vec<Arc<Page>> {
         let writes = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
         self.writes.clear();
-        for page in &writes {
-            self.wrote.insert(page.offset, page.clone());
-        }
+        self.new_writes = 0;
         writes
     }
 
     pub fn clear (&mut self) {
+        self.new_writes = 0;
         self.writes.clear();
         self.wrote.clear();
         self.reads.clear();
