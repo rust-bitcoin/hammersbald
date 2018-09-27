@@ -16,8 +16,7 @@
 //!
 //! # a page in the blockchain store
 //!
-//! The page is the unit of read and expansion. A page consists of
-//! a payload and a used length less or equal to 4088 it also stores its offset
+//! The page is the unit of read and write.
 //!
 //! <pre>
 //! +------------------------------------+
