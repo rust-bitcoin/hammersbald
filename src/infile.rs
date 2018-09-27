@@ -32,7 +32,7 @@ use std::sync::{Mutex,Arc};
 
 const KEY_CHUNK_SIZE: u64 = 16*1024*1024;
 const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
-const LOG_CHUNK_SIZE: u64 = 16*1024*1024;
+const LOG_CHUNK_SIZE: u64 = 1024*1024*1024;
 
 /// Implements persistent storage
 pub struct InFile {
@@ -53,9 +53,10 @@ impl BCDBFactory for InFile {
         let table = KeyFile::new(Box::new(InFile::new(
             RolledFile::new(name.to_string(), "tb".to_string(), false, KEY_CHUNK_SIZE)?
         )), log);
+        let bucket = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bu".to_string(), true, DATA_CHUNK_SIZE)?))?;
         let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?;
 
-        BCDB::new(table, data)
+        BCDB::new(table, data, bucket)
     }
 }
 

@@ -1,7 +1,8 @@
 extern crate blockchain_store;
 extern crate bitcoin;
 extern crate rand;
-
+extern crate simple_logger;
+extern crate log;
 
 use blockchain_store::infile::InFile;
 use blockchain_store::bcdb::BCDBFactory;
@@ -14,16 +15,17 @@ use std::time::{Instant};
 use std::mem::transmute;
 
 pub fn main () {
+    simple_logger::init_with_level(log::Level::Info).unwrap();
     let mut db = InFile::new_db("testdb").unwrap();
     db.init().unwrap();
 
     // transaction size assumed 300 bytes
-    let data = [0x0u8;300];
+    let data = [0x0u8;30];
 
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 10000000;
+    let ntx = 2000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)
@@ -68,7 +70,6 @@ pub fn main () {
     }
     elapsed = now.elapsed().as_secs();
     println!("Read {} million transactions in {} seconds, {} read/second ", ntx/1000000, elapsed, ntx/elapsed);
-
 
     db.shutdown();
 }

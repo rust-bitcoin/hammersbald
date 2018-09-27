@@ -68,15 +68,16 @@ pub trait PageFile : Send + Sync {
 /// The blockchain db
 pub struct BCDB {
     table: KeyFile,
+    bucket: DataFile,
     data: DataFile,
     log: Arc<Mutex<LogFile>>
 }
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new (table: KeyFile, data: DataFile) -> Result<BCDB, BCSError> {
+    pub fn new (table: KeyFile, data: DataFile, bucket: DataFile) -> Result<BCDB, BCSError> {
         let log = table.log_file();
-        let mut db = BCDB {table, data, log};
+        let mut db = BCDB {table, bucket, data, log};
         db.recover()?;
         db.batch()?;
         Ok(db)
@@ -86,6 +87,7 @@ impl BCDB {
     pub fn init (&mut self) -> Result<(), BCSError> {
         self.table.init()?;
         self.data.init()?;
+        self.bucket.init()?;
         self.log.lock().unwrap().init()?;
         Ok(())
     }
@@ -108,6 +110,10 @@ impl BCDB {
                 page.read(8, &mut size)?;
                 let table_len = Offset::from_slice(&size)?.as_u64();
                 self.table.truncate(table_len)?;
+
+                page.read(14, &mut size)?;
+                let bucket_len = Offset::from_slice(&size)?.as_u64();
+                self.bucket.truncate(bucket_len)?;
                 first = false;
                 debug!("recover BCDB: set lengths to table: {} data: {}", table_len, data_len);
             }
@@ -121,11 +127,15 @@ impl BCDB {
         self.data.flush()?;
         self.data.sync()?;
         self.data.clear_cache();
+        self.bucket.flush()?;
+        self.bucket.sync()?;
+        self.bucket.clear_cache();
         self.table.flush()?;
         self.table.sync()?;
         self.table.clear_cache();
         let data_len = self.data.len()?;
         let table_len = self.table.len()?;
+        let bucket_len = self.bucket.len()?;
 
         let mut log = self.log.lock().unwrap();
         log.clear_cache();
@@ -139,7 +149,8 @@ impl BCDB {
         Offset::new(table_len)?.serialize(&mut size);
         first.write(8, &size).unwrap();
         log.tbl_len = table_len;
-
+        Offset::new(bucket_len)?.serialize(&mut size);
+        first.write(14, &size).unwrap();
 
         log.append_page(first)?;
         log.flush()?;
@@ -153,6 +164,7 @@ impl BCDB {
     /// stop background writer
     pub fn shutdown (&mut self) {
         self.data.shutdown();
+        self.bucket.shutdown();
         self.table.shutdown();
     }
 
@@ -163,7 +175,7 @@ impl BCDB {
             return Err(BCSError::DoesNotFit);
         }
         let offset = self.data.append(DataEntry::new_data(key, data))?;
-        self.table.put(key, offset, &mut self.data)?;
+        self.table.put(key, offset, &mut self.data, &mut self.bucket)?;
         Ok(offset)
     }
 
@@ -172,7 +184,18 @@ impl BCDB {
         if key.len() != KEY_LEN {
             return Err(BCSError::DoesNotFit);
         }
-        self.table.get(key, &self.data)
+        self.table.get(key, &self.data, &self.bucket)
+    }
+
+    /// append some content without key
+    /// only the returned offset can be used to retrieve
+    pub fn put_content(&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
+        self.data.append(DataEntry::new_data_extension(entry.data.as_slice()))
+    }
+
+    /// get some content at a known offset
+    pub fn get_content(&self, offset: Offset) -> Result<Content, BCSError> {
+        self.data.get_content(offset)
     }
 
     /// Insert a block header
@@ -185,7 +208,7 @@ impl BCDB {
         serialized_header.append(&mut number_of_data.to_vec());
 
         for d in extension {
-            let offset = self.data.append(DataEntry::new_data_extension(d.as_slice()))?;
+            let offset = self.put_content(DataEntry::new_data_extension(d.as_slice()))?;
             let mut did = [0u8;6];
             offset.serialize(&mut did);
             serialized_header.append(&mut did.to_vec());
@@ -206,7 +229,7 @@ impl BCDB {
             let n_extensions = U24::from_slice(&stored.as_slice()[80..83])?.as_usize();
             for i in 0 .. n_extensions {
                 let offset = Offset::from_slice(&stored.as_slice()[83+i*6 .. 83+(i+1)*6])?;
-                if let Content::Extension(data) = self.data.get_content(offset)? {
+                if let Content::Extension(data) = self.get_content(offset)? {
                     extension.push(data);
                 }
                 else {
@@ -231,7 +254,7 @@ impl BCDB {
         serialized_block.append(&mut number_of_data.to_vec());
 
         for d in extension {
-            let offset = self.data.append(DataEntry::new_data_extension(d.as_slice()))?;
+            let offset = self.put_content(DataEntry::new_data_extension(d.as_slice()))?;
             let mut did = [0u8;6];
             offset.serialize(&mut did);
             serialized_block.append(&mut did.to_vec());
@@ -274,7 +297,7 @@ impl BCDB {
             let mut txdata: Vec<Transaction> = Vec::new();
             for i in 0 .. n_transactions {
                 let offset = Offset::from_slice(&stored.as_slice()[83+n_extensions*6+3+i*6 .. 83+n_extensions*6+3+(i+1)*6])?;
-                if let Content::Data (_, tx) = self.data.get_content(offset)? {
+                if let Content::Data (_, tx) = self.get_content(offset)? {
                     txdata.push(decode(tx)?);
                 }
                 else {

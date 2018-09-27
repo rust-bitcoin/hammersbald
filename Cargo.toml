@@ -20,7 +20,7 @@ bitcoin="0.13"
 rand="0.5"
 siphasher = "0.2"
 threadpool = "1.7.1"
+simple_logger = "0.5.0"
 
 [dev-dependencies]
-simple_logger = "0.5.0"
 hex = "0.3"

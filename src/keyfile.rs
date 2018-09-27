@@ -87,7 +87,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError>{
+    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile, bucket_file: &mut DataFile) -> Result<(), BCSError>{
         let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -215,7 +215,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn get (&self, key: &[u8], data_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
