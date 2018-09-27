@@ -22,10 +22,12 @@ use error::BCDBError;
 use page::PAGE_SIZE;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
+/// Pointer to persistent data. Limited to 2^48
 pub struct Offset(u64);
 
 impl Offset {
 
+    /// create a new offset from a number
     pub fn new (value: u64) ->Result<Offset, BCDBError> {
         if value > 1 << 47 {
             return Err(BCDBError::InvalidOffset);
@@ -33,6 +35,7 @@ impl Offset {
         Ok(Offset(value))
     }
 
+    /// create an offset from its stored form
     pub fn from_slice (slice: &[u8]) -> Result<Offset, BCDBError> {
         if slice.len() != 6 {
             return Err(BCDBError::InvalidOffset);
@@ -45,10 +48,12 @@ impl Offset {
         Ok(Offset(size))
     }
 
+    /// convert to a number
     pub fn as_u64 (&self) -> u64 {
         return self.0;
     }
 
+    /// serialize for storage
     pub fn serialize (&self, into: &mut [u8]) {
         use std::mem::transmute;
 
@@ -56,25 +61,29 @@ impl Offset {
         into.copy_from_slice(&bytes[2 .. 8]);
     }
 
+    /// offset of the page of this offset
     pub fn this_page(&self) -> Offset {
         Offset::new((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64).unwrap()
     }
 
+    /// page offset after this offset
     pub fn next_page(&self) -> Result<Offset, BCDBError> {
         Offset::new((self.0/ PAGE_SIZE as u64 + 1)* PAGE_SIZE as u64)
     }
 
+    /// compute page number of an offset
     pub fn page_number(&self) -> u64 {
         self.0/PAGE_SIZE as u64
     }
 
+    /// position within the offset's page
     pub fn in_page_pos(&self) -> usize {
         (self.0 - (self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64) as usize
     }
 }
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
-pub struct U24 (usize);
+pub(crate) struct U24 (usize);
 
 impl U24 {
 

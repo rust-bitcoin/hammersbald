@@ -35,9 +35,6 @@ extern crate rand;
 extern crate threadpool;
 
 mod page;
-mod types;
-pub mod inmemory;
-pub mod infile;
 mod logfile;
 mod keyfile;
 mod datafile;
@@ -45,3 +42,6 @@ mod cache;
 mod rolled;
 pub mod bcdb;
 pub mod error;
+pub mod types;
+pub mod inmemory;
+pub mod infile;
