@@ -19,13 +19,12 @@
 //! Implements in-memory Read and Write for tests
 
 use error::BCSError;
-use bcdb::PageFile;
 use logfile::LogFile;
 use bcdb::{BCDBFactory, BCDB};
 use keyfile::KeyFile;
 use datafile::DataFile;
 use types::Offset;
-use page::{Page,PAGE_SIZE};
+use page::{PageFile,Page,PAGE_SIZE};
 
 use std::io::Read;
 use std::io::Write;

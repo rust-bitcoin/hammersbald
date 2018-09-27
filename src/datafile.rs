@@ -18,8 +18,8 @@
 //! Specific implementation details to data file
 //!
 
-use bcdb::{PageIterator, PageFile, KEY_LEN};
-use page::{Page, PAYLOAD_MAX};
+use bcdb::{ KEY_LEN};
+use page::{Page, PageIterator, PageFile, PAYLOAD_MAX};
 use error::BCSError;
 use types::{Offset, U24};
 use cache::Cache;

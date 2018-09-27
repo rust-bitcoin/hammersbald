@@ -16,13 +16,12 @@
 //!
 //! # The blockchain db
 //!
-use page::{Page, PAGE_SIZE};
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::{DataFile, DataEntry, Content};
+use page::{Page, PageFile};
 use error::BCSError;
-use types::U24;
 
 #[cfg(feature="bitcoin_support")]
 use bitcoin::blockdata::block::{BlockHeader, Block};
@@ -39,7 +38,6 @@ use bitcoin::network::serialize::serialize;
 #[cfg(feature="bitcoin_support")]
 use bitcoin::util::hash::Sha256dHash;
 
-use std::io::Cursor;
 use std::sync::{Mutex,Arc};
 
 /// fixed key length of 256 bits
@@ -49,27 +47,6 @@ pub const KEY_LEN : usize = 32;
 pub trait BCDBFactory {
     /// create a new db
     fn new_db (name: &str) -> Result<BCDB, BCSError>;
-}
-
-/// a read-write-seak-able storage with added methods
-/// synchronized in its implementation
-pub trait PageFile : Send + Sync {
-    /// flush buffered writes
-    fn flush(&mut self) -> Result<(), BCSError>;
-    /// length of the storage
-    fn len (&self) -> Result<u64, BCSError>;
-    /// truncate storage
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError>;
-    /// tell OS to flush buffers to disk
-    fn sync (&self) -> Result<(), BCSError>;
-    /// read a page at given offset
-    fn read_page (&self, offset: Offset) -> Result<Page, BCSError>;
-    /// append a page (ignore offset in the Page)
-    fn append_page (&mut self, page: Page) -> Result<(), BCSError>;
-    /// write a page at its position as specified in page.offset
-    fn write_page (&mut self, page: Page) -> Result<(), BCSError>;
-    /// write a batch of pages in parallel (if possible)
-    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError>;
 }
 
 /// The blockchain db
@@ -350,36 +327,6 @@ fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCSError>
     serialize(data).map_err(|e| { BCSError::Util(e) })
 }
 
-
-/// iterate through pages of a paged file
-pub struct PageIterator<'file> {
-    /// the current page of the iterator
-    pub pagenumber: u64,
-    file: &'file PageFile
-}
-
-/// page iterator
-impl<'file> PageIterator<'file> {
-    /// create a new iterator starting at given page
-    pub fn new (file: &'file PageFile, pagenumber: u64) -> PageIterator {
-        PageIterator{pagenumber, file}
-    }
-}
-
-impl<'file> Iterator for PageIterator<'file> {
-    type Item = Page;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
-            let offset = Offset::new((self.pagenumber)* PAGE_SIZE as u64).unwrap();
-            if let Ok(page) = self.file.read_page(offset) {
-                self.pagenumber += 1;
-                return Some(page);
-            }
-        }
-        None
-    }
-}
 
 #[cfg(test)]
 mod test {

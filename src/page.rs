@@ -30,6 +30,8 @@
 use error::BCSError;
 use types::Offset;
 
+use std::sync::Arc;
+
 pub const PAGE_SIZE: usize = 4096;
 pub const PAYLOAD_MAX: usize = 4090;
 
@@ -116,6 +118,59 @@ impl Page {
         page
     }
 }
+
+
+/// a read-write-seak-able storage with added methods
+/// synchronized in its implementation
+pub trait PageFile : Send + Sync {
+    /// flush buffered writes
+    fn flush(&mut self) -> Result<(), BCSError>;
+    /// length of the storage
+    fn len (&self) -> Result<u64, BCSError>;
+    /// truncate storage
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError>;
+    /// tell OS to flush buffers to disk
+    fn sync (&self) -> Result<(), BCSError>;
+    /// read a page at given offset
+    fn read_page (&self, offset: Offset) -> Result<Page, BCSError>;
+    /// append a page (ignore offset in the Page)
+    fn append_page (&mut self, page: Page) -> Result<(), BCSError>;
+    /// write a page at its position as specified in page.offset
+    fn write_page (&mut self, page: Page) -> Result<(), BCSError>;
+    /// write a batch of pages in parallel (if possible)
+    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError>;
+}
+
+/// iterate through pages of a paged file
+pub struct PageIterator<'file> {
+    /// the current page of the iterator
+    pub pagenumber: u64,
+    file: &'file PageFile
+}
+
+/// page iterator
+impl<'file> PageIterator<'file> {
+    /// create a new iterator starting at given page
+    pub fn new (file: &'file PageFile, pagenumber: u64) -> PageIterator {
+        PageIterator{pagenumber, file}
+    }
+}
+
+impl<'file> Iterator for PageIterator<'file> {
+    type Item = Page;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
+            let offset = Offset::new((self.pagenumber)* PAGE_SIZE as u64).unwrap();
+            if let Ok(page) = self.file.read_page(offset) {
+                self.pagenumber += 1;
+                return Some(page);
+            }
+        }
+        None
+    }
+}
+
 
 #[cfg(test)]
 mod test {

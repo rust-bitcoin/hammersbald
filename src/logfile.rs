@@ -20,8 +20,7 @@
 //! this set.
 //!
 
-use bcdb::{PageIterator, PageFile};
-use page::Page;
+use page::{Page, PageFile, PageIterator};
 use error::BCSError;
 use types::Offset;
 

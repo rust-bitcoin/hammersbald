@@ -20,8 +20,7 @@
 
 use logfile::LogFile;
 use datafile::{DataFile, DataEntry, Content};
-use bcdb::PageFile;
-use page::{Page, PAGE_SIZE};
+use page::{Page, PageFile, PAGE_SIZE};
 use error::BCSError;
 use types::Offset;
 use cache::Cache;

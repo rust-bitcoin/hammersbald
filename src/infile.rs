@@ -19,13 +19,12 @@
 //! Implements persistent store
 
 use error::BCSError;
-use bcdb::PageFile;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
 use bcdb::{BCDBFactory, BCDB};
 use types::Offset;
-use page::Page;
+use page::{PageFile,Page};
 use rolled::RolledFile;
 
 use std::sync::{Mutex,Arc};

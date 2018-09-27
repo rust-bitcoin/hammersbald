@@ -18,10 +18,9 @@
 //!
 //! A file that is split into chunks
 //!
-use bcdb::PageFile;
 use error::BCSError;
 use types::Offset;
-use page::{Page, PAGE_SIZE};
+use page::{PageFile, Page, PAGE_SIZE};
 use threadpool::ThreadPool;
 
 use std::collections::HashMap;
