@@ -87,7 +87,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
+    pub fn put (&mut self, key: &[u8], offset: Offset, bucket_file: &mut DataFile, data_file: &DataFile) -> Result<(), BCDBError>{
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -101,7 +101,7 @@ impl KeyFile {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
-                self.rehash_bucket(step, bucket_file)?;
+                self.rehash_bucket(step, bucket_file, data_file)?;
             }
 
             self.step += 1;
@@ -127,7 +127,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut DataFile, data_file: &DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
@@ -160,8 +160,18 @@ impl KeyFile {
         if any_change {
             let mut next = Offset::new(0)?;
             for spill in remaining_spillovers {
-                for sl in spill.1.chunks(255) {
-                    let so = bucket_file.append_content(Content::Spillover(spill.0, sl.to_vec(), next))?;
+                let hash = spill.0;
+                let mut for_same_hash = spill.1.clone();
+                if for_same_hash.len () > 1 {
+                    for_same_hash.dedup_by_key(move |offset| {
+                        if let Ok(Content::Data(key, _)) = data_file.get_content(*offset) {
+                            return key;
+                        }
+                        return Vec::new();
+                    });
+                }
+                for sl in for_same_hash.chunks(255) {
+                    let so = bucket_file.append_content(Content::Spillover(hash, sl.to_vec(), next))?;
                     next = so;
                 }
             }

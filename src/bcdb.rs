@@ -159,7 +159,7 @@ impl BCDB {
             return Err(BCDBError::DoesNotFit);
         }
         let offset = self.data.append_content(Content::Data(key.to_vec(), data.to_vec()))?;
-        self.table.put(key, offset, &mut self.bucket)?;
+        self.table.put(key, offset, &mut self.bucket, &self.data)?;
         Ok(offset)
     }
 
