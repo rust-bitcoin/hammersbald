@@ -19,11 +19,11 @@ bitcoin_support=["bitcoin"]
 
 [dependencies]
 log = "0.4"
-bitcoin={version="0.13", optional=true}
 rand="0.5"
 siphasher = "0.2"
 threadpool = "1.7.1"
 simple_logger = "0.5.0"
+bitcoin={version="0.13", optional=true}
 
 [dev-dependencies]
 hex = "0.3"
