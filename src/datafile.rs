@@ -81,7 +81,16 @@ impl DataFile {
             else if entry.data_type == DataType::TableSpillOver {
                 let mut cursor = Cursor::new(entry.data);
                 let hash = cursor.read_u32::<BigEndian>().unwrap();
-                return Ok(Content::Spillover(hash, Offset::from_slice(&cursor.get_ref()[4..10])?, Offset::from_slice(&cursor.get_ref()[10..16])?))
+                let n = cursor.read_u8().unwrap();
+                let mut spills = Vec::new();
+                for i in 0 .. n {
+                    let base = 5+i as usize * 6;
+                    let current = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
+                    spills.push(current)
+                }
+                let base = 5+n as usize * 6;
+                let next = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
+                return Ok(Content::Spillover(hash, spills, next));
             }
             return Ok(Content::Extension(entry.data))
         }
@@ -92,7 +101,7 @@ impl DataFile {
         match content {
             Content::Data(k, d) => self.append(DataEntry::new_data(k.as_slice(), d.as_slice())),
             Content::Extension(d) => self.append(DataEntry::new_data_extension(d.as_slice())),
-            Content::Spillover(hash, data, next) => self.append(DataEntry::new_spillover(hash, data, next))
+            Content::Spillover(hash, spills, next) => self.append(DataEntry::new_spillover(hash, spills, next))
         }
     }
 
@@ -101,7 +110,6 @@ impl DataFile {
         let mut data_type = [0u8;1];
         data_type[0] = entry.data_type.to_u8();
         self.append_slice(&data_type)?;
-
 
         let mut len = [0u8; 3];
         U24::new(entry.data.len())?.serialize(&mut len);
@@ -328,7 +336,7 @@ impl PageFile for DataFile {
 /// content of the db
 pub enum Content {
     /// spillover
-    Spillover(u32, Offset, Offset),
+    Spillover(u32, Vec<Offset>, Offset),
     /// regular data referred in index
     Data(Vec<u8>, Vec<u8>),
     /// data referred by data, not in index
@@ -384,13 +392,16 @@ impl DataEntry {
         DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
-    pub fn new_spillover (hash: u32, offset: Offset, next: Offset) -> DataEntry {
+    pub fn new_spillover (hash: u32, spills: Vec<Offset>, next: Offset) -> DataEntry {
         let mut sp = Vec::new();
         sp.write_u32::<BigEndian>(hash).unwrap();
-        let mut o = [0u8;6];
-        offset.serialize(&mut o);
-        sp.extend(o.iter());
-        let mut n = [0u8;6];
+        sp.write_u8(spills.len() as u8).unwrap();
+        for spill in spills {
+            let mut o = [0u8; 6];
+            spill.serialize(&mut o);
+            sp.extend(o.iter());
+        }
+        let mut n = [0u8; 6];
         next.serialize(&mut n);
         sp.extend(n.iter());
         DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
@@ -491,15 +502,22 @@ impl<'file> Iterator for DataIterator<'file> {
                 else if data_type == DataType::TableSpillOver {
                     let mut size = [0u8; 3];
                     if self.read_slice(&mut size) {
-                        let mut hash = [0u8;4];
-                        let mut data = [0u8; 6];
-                        let mut next = [0u8; 6];
-                        if self.read_slice(&mut hash) && self.read_slice(&mut data) && self.read_slice(&mut next) {
-                            let mut c = Cursor::new(hash);
-                            let h = c.read_u32::<BigEndian>().unwrap();
+                        let len = U24::from_slice(&size).unwrap();
+                        let mut buf = vec!(0u8; len.as_usize());
+                        if self.read_slice(buf.as_mut_slice()) {
+                            let mut cursor = Cursor::new(buf);
+                            let hash = cursor.read_u32::<BigEndian>().unwrap();
+                            let n = cursor.read_u8().unwrap();
+                            let mut spills = Vec::new();
+                            for i in 0 .. n {
+                                let base = 5+i as usize * 6;
+                                let current = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
+                                spills.push(current)
+                            }
+                            let base = 5+n as usize * 6;
+                            let next = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
                             return Some(
-                                DataEntry::new_spillover(h, Offset::from_slice(&data[..]).unwrap(),
-                                                         Offset::from_slice(&next[..]).unwrap()));
+                                DataEntry::new_spillover(hash, spills, next));
                         }
                     }
                 }

@@ -34,6 +34,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::hash::Hasher;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 const FIRST_PAGE_HEAD:u64 = 28;
 const INIT_BUCKETS: u64 = 512;
@@ -93,7 +94,7 @@ impl KeyFile {
             bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
 
-        self.store_to_bucket(bucket, hash, offset, bucket_file)?;
+        self.store_to_bucket(bucket, hash, vec![offset], bucket_file)?;
 
         // heuristic: number of buckets grows only 1/2 on input
         if hash & 1 == 0 && self.step < <u32>::max_value() {
@@ -132,22 +133,23 @@ impl KeyFile {
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
 
-        let mut remaining_spillovers = Vec::new();
+        let mut remaining_spillovers = HashMap::new();
         let mut any_change = false;
         loop {
             if spill_offset.as_u64() == 0 {
                 break;
             }
             match bucket_file.get_content(spill_offset)? {
-                Content::Spillover(hash, current, next) => {
+                Content::Spillover(hash, spills, next) => {
                     let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
                         // store to new bucket
-                        self.store_to_bucket(new_bucket, hash,current, bucket_file)?;
+                        self.store_to_bucket(new_bucket, hash, spills, bucket_file)?;
                         bucket_page = self.read_page(bucket_offset.this_page())?;
                         any_change = true;
                     } else {
-                        remaining_spillovers.push((current, hash));
+                        // merge spillovers of same hash
+                        remaining_spillovers.entry(hash).or_insert(Vec::new()).extend(spills.iter());
                     }
                     spill_offset = next;
                 },
@@ -156,11 +158,12 @@ impl KeyFile {
         }
 
         if any_change {
-            // ensure same traversal order so key overwrites still work
             let mut next = Offset::new(0)?;
-            for spill in remaining_spillovers.iter().rev() {
-                let so = bucket_file.append_content(Content::Spillover(spill.1, spill.0, next))?;
-                next = so;
+            for spill in remaining_spillovers {
+                for sl in spill.1.chunks(255) {
+                    let so = bucket_file.append_content(Content::Spillover(spill.0, sl.to_vec(), next))?;
+                    next = so;
+                }
             }
             bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             self.write_page(bucket_page)?;
@@ -169,7 +172,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Vec<Offset>, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -196,18 +199,17 @@ impl KeyFile {
                 return Ok(None);
             }
             match bucket_file.get_content(spill_offset)? {
-                Content::Spillover(h, current, next) => {
-                    if current.as_u64() == 0 {
-                        return Ok(None);
-                    }
+                Content::Spillover(h, spills, next) => {
                     if h == hash {
-                        match data_file.get_content(current)? {
-                            Content::Data(data_key, data) => {
-                                if data_key == key {
-                                    return Ok(Some(data));
-                                }
-                            },
-                            _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                        for current in spills {
+                            match data_file.get_content(current)? {
+                                Content::Data(data_key, data) => {
+                                    if data_key == key {
+                                        return Ok(Some(data));
+                                    }
+                                },
+                                _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                            }
                         }
                     }
                     spill_offset = next;
