@@ -19,7 +19,7 @@
 //!
 
 use logfile::LogFile;
-use datafile::{DataFile, DataEntry, Content};
+use datafile::{DataFile, Content};
 use page::{Page, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
@@ -153,7 +153,7 @@ impl KeyFile {
                     }
                     break;
                 },
-                Content::Spillover(current, next) => {
+                Content::Spillover(_, current, next) => {
                     match data_file.get_content(current)? {
                         Content::Data(data_key, _) => {
                             let hash = self.hash(data_key.as_slice());
@@ -185,7 +185,7 @@ impl KeyFile {
                 remaining_spillovers.reverse();
                 let mut next = *remaining_spillovers.first().unwrap();
                 for offset in remaining_spillovers.iter().skip(1) {
-                    let so = data_file.append(DataEntry::new_spillover(*offset, next))?;
+                    let so = data_file.append_content(Content::Spillover(0, *offset, next))?;
                     next = so;
                 }
                 bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
@@ -207,7 +207,7 @@ impl KeyFile {
             // prepend spillover chain
             // this logically overwrites previous key association in the spillover chain
             // since search stops at first key match
-            let so = data_file.append(DataEntry::new_spillover(offset, data_offset))?;
+            let so = data_file.append_content(Content::Spillover(0, offset, data_offset))?;
             bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
         }
         self.write_page(bucket_page)?;
@@ -235,7 +235,7 @@ impl KeyFile {
                         return Ok(None);
                     }
                 },
-                Content::Spillover(current, next) => {
+                Content::Spillover(_, current, next) => {
                     if current.as_u64() == 0 {
                         return Ok(None);
                     }

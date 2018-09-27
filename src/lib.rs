@@ -33,6 +33,7 @@ extern crate bitcoin;
 extern crate siphasher;
 extern crate rand;
 extern crate threadpool;
+extern crate byteorder;
 
 mod page;
 mod logfile;

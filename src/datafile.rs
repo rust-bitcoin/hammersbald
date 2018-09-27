@@ -24,12 +24,15 @@ use error::BCDBError;
 use types::{Offset, U24};
 use cache::Cache;
 
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+
 use std::cmp::min;
 use std::sync::{Arc, Condvar, Mutex};
 use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
+use std::io::Cursor;
 
 
 /// The key file
@@ -59,14 +62,6 @@ impl DataFile {
         self.async_file.shutdown()
     }
 
-    fn page_iter (&self, pagenumber: u64) -> PageIterator {
-        PageIterator::new(self, pagenumber)
-    }
-
-    pub fn data_iter (&self) -> DataIterator {
-        DataIterator::new(self.page_iter(0), 2)
-    }
-
     pub fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
         let page = {
             if self.page.offset == offset.this_page() {
@@ -84,14 +79,24 @@ impl DataFile {
                 return Ok(Content::Data(k.to_vec(), d.to_vec()));
             }
             else if entry.data_type == DataType::TableSpillOver {
-                return Ok(Content::Spillover(Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?))
+                let mut cursor = Cursor::new(entry.data);
+                let hash = cursor.read_u32::<BigEndian>().unwrap() as u64;
+                return Ok(Content::Spillover(hash, Offset::from_slice(&cursor.get_ref()[4..10])?, Offset::from_slice(&cursor.get_ref()[10..16])?))
             }
             return Ok(Content::Extension(entry.data))
         }
         return Err(BCDBError::Corrupted(format!("expected content at {}", offset.as_u64())));
     }
 
-    pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
+    pub fn append_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
+        match content {
+            Content::Data(k, d) => self.append(DataEntry::new_data(k.as_slice(), d.as_slice())),
+            Content::Extension(d) => self.append(DataEntry::new_data_extension(d.as_slice())),
+            Content::Spillover(hash, data, next) => self.append(DataEntry::new_spillover(hash, data, next))
+        }
+    }
+
+    fn append (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
         let start = self.append_pos;
         let mut data_type = [0u8;1];
         data_type[0] = entry.data_type.to_u8();
@@ -323,7 +328,7 @@ impl PageFile for DataFile {
 /// content of the db
 pub enum Content {
     /// spillover
-    Spillover(Offset, Offset),
+    Spillover(u64, Offset, Offset),
     /// regular data referred in index
     Data(Vec<u8>, Vec<u8>),
     /// data referred by data, not in index
@@ -364,7 +369,7 @@ impl DataType {
 }
 
 #[derive(Eq, PartialEq,Debug,Clone)]
-pub struct DataEntry {
+struct DataEntry {
     pub data_type: DataType,
     pub data: Vec<u8>
 }
@@ -379,25 +384,23 @@ impl DataEntry {
         DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
-    pub fn new_spillover (offset: Offset, next: Offset) -> DataEntry {
-        let mut sp = [0u8; 12];
-        offset.serialize(&mut sp[..6]);
-        next.serialize(&mut sp[6..]);
+    pub fn new_spillover (hash: u64, offset: Offset, next: Offset) -> DataEntry {
+        let mut buf = vec![0u8;16];
+        buf.write_u32::<BigEndian>(hash as u32).unwrap();
+        let sp = buf.as_mut_slice();
+        offset.serialize(&mut sp[4..10]);
+        next.serialize(&mut sp[10..16]);
         DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
     }
 }
 
-pub struct DataIterator<'file> {
+struct DataIterator<'file> {
     page_iterator: PageIterator<'file>,
     current: Option<Page>,
     pos: usize
 }
 
 impl<'file> DataIterator<'file> {
-    pub fn new (page_iterator: PageIterator<'file>, pos: usize) -> DataIterator {
-        DataIterator{page_iterator, pos, current: None}
-    }
-
     pub fn new_fetch (page_iterator: PageIterator<'file>, pos: usize, page: Page) -> DataIterator {
         DataIterator{page_iterator, pos, current: Some(page)}
     }
@@ -485,11 +488,14 @@ impl<'file> Iterator for DataIterator<'file> {
                 else if data_type == DataType::TableSpillOver {
                     let mut size = [0u8; 3];
                     if self.read_slice(&mut size) {
+                        let mut hash = [0u8;4];
                         let mut data = [0u8; 6];
                         let mut next = [0u8; 6];
-                        if self.read_slice(&mut data) && self.read_slice(&mut next) {
+                        if self.read_slice(&mut hash) && self.read_slice(&mut data) && self.read_slice(&mut next) {
+                            let mut c = Cursor::new(hash);
+                            let h = c.read_u32::<BigEndian>().unwrap();
                             return Some(
-                                DataEntry::new_spillover(Offset::from_slice(&data[..]).unwrap(),
+                                DataEntry::new_spillover(h as u64, Offset::from_slice(&data[..]).unwrap(),
                                                          Offset::from_slice(&next[..]).unwrap()));
                         }
                     }

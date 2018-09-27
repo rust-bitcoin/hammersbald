@@ -19,7 +19,7 @@
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
-use datafile::{DataFile, DataEntry, Content};
+use datafile::{DataFile, Content};
 use page::{Page, PageFile};
 use error::BCDBError;
 
@@ -158,7 +158,7 @@ impl BCDB {
         if key.len() != KEY_LEN {
             return Err(BCDBError::DoesNotFit);
         }
-        let offset = self.data.append(DataEntry::new_data(key, data))?;
+        let offset = self.data.append_content(Content::Data(key.to_vec(), data.to_vec()))?;
         self.table.put(key, offset, &mut self.data, &mut self.bucket)?;
         Ok(offset)
     }
@@ -175,7 +175,7 @@ impl BCDB {
     /// only the returned offset can be used to retrieve
     pub fn put_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
         if let Content::Extension(data) = content {
-            return self.data.append(DataEntry::new_data_extension(data.as_slice()));
+            return self.data.append_content(Content::Extension(data));
         }
         return Err(BCDBError::DoesNotFit)
     }
