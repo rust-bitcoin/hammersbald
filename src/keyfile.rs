@@ -36,10 +36,11 @@ use std::time::{Duration, Instant};
 use std::hash::Hasher;
 use std::cmp::Ordering;
 
-const PAGE_HEAD :u64 = 28;
+const FIRST_PAGE_HEAD:u64 = 28;
 const INIT_BUCKETS: u64 = 512;
 const INIT_LOGMOD :u64 = 8;
-const BUCKETS_PER_PAGE :u64 = 677;
+const FIRST_BUCKETS_PER_PAGE:u64 = 677;
+const BUCKETS_PER_PAGE:u64 = 681;
 const BUCKET_SIZE: u64 = 6;
 
 /// The key file
@@ -110,8 +111,8 @@ impl KeyFile {
             }
 
             self.buckets += 1;
-            if self.buckets % BUCKETS_PER_PAGE == 0 {
-                let page = Page::new(Offset::new((self.buckets / BUCKETS_PER_PAGE) * PAGE_SIZE as u64)?);
+            if self.buckets >= FIRST_BUCKETS_PER_PAGE && (self.buckets - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
+                let page = Page::new(Offset::new(((self.buckets - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64)?);
                 // no need of pre-image here
                 self.async_file.write_page(page)?;
             }
@@ -272,8 +273,14 @@ impl KeyFile {
     }
 
     fn bucket_offset (bucket: u64) -> Result<Offset, BCSError> {
-        Offset::new ((bucket / BUCKETS_PER_PAGE) * PAGE_SIZE as u64
-                         + (bucket % BUCKETS_PER_PAGE) * BUCKET_SIZE + PAGE_HEAD)
+        if bucket < FIRST_BUCKETS_PER_PAGE {
+            Offset::new((bucket / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
+                + (bucket % FIRST_BUCKETS_PER_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
+        }
+        else {
+            Offset::new((((bucket - FIRST_BUCKETS_PER_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
+                + (bucket % BUCKETS_PER_PAGE) * BUCKET_SIZE)
+        }
     }
 
     fn hash (&self, key: &[u8]) -> u64 {
