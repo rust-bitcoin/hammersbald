@@ -25,7 +25,7 @@ use types::Offset;
 use std::collections::{HashMap,VecDeque};
 use std::sync::Arc;
 // read cache size
-pub const READ_CACHE_PAGES: usize = 1000;
+pub const READ_CACHE_PAGES: usize = 100000;
 
 #[derive(Default)]
 pub struct Cache {

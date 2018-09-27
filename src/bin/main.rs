@@ -21,28 +21,27 @@ pub fn main () {
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 50000000;
+    let ntx = 500000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)
     let bat = 1000;
 
-    // generate unique keys
-    println!("Generate keys ...");
-    let mut keys = Vec::with_capacity(ntx as usize);
-    for _ in 1 .. ntx {
-        let mut key = [0u8;32];
-        thread_rng().fill(&mut key);
-        keys.push (key);
-    }
+    // check keys
+    let mut check = Vec::with_capacity((ntx as usize)/100);
 
 
     println!("Inserting data ...");
     let mut n = 0;
     let mut now = Instant::now();
     let mut elapsed;
-    for key in &keys {
-        db.put(key, &data).unwrap();
+    let mut key = [0u8;32];
+    for i in 0 .. ntx {
+        thread_rng().fill(&mut key);
+        if i % 100 == 0 {
+            check.push (key.clone());
+        }
+        db.put(&key, &data).unwrap();
         n += 1;
 
         if n % (bat*tb) == 0 {
@@ -57,14 +56,16 @@ pub fn main () {
     println!("Stored {} million transactions in {} seconds, {} inserts/second ", ntx/1000000, elapsed, ntx/elapsed);
 
     println!("Shuffle keys...");
-    thread_rng().shuffle(&mut keys);
+    thread_rng().shuffle(&mut check);
     println!("Reading data in random order...");
     now = Instant::now();
-    for key in &keys {
+    for key in &check {
         db.get(key).unwrap();
     }
     elapsed = now.elapsed().as_secs();
-    println!("Read {} million transactions in {} seconds, {} read/second ", ntx/1000000, elapsed, ntx/elapsed);
+    if elapsed > 0 {
+        println!("Read {} million transactions in {} seconds, {} read/second ", ntx / 1000000, elapsed, ntx / elapsed);
+    }
 
     db.shutdown();
 }
