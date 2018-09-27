@@ -80,7 +80,8 @@ impl DataFile {
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
             if entry.data_type == DataType::AppData {
-                return Ok(Content::Data(entry.data_key, entry.data));
+                let (k, d) = entry.data.split_at(KEY_LEN);
+                return Ok(Content::Data(k.to_vec(), d.to_vec()));
             }
             else if entry.data_type == DataType::TableSpillOver {
                 return Ok(Content::Spillover(Offset::from_slice(&entry.data[..6])?, Offset::from_slice(&entry.data[6..])?))
@@ -91,10 +92,6 @@ impl DataFile {
     }
 
     pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
-        if entry.data_type == DataType::AppData && entry.data_key.len() != KEY_LEN {
-            return Err(BCDBError::DoesNotFit);
-        }
-
         let start = self.append_pos;
         let mut data_type = [0u8;1];
         data_type[0] = entry.data_type.to_u8();
@@ -102,14 +99,8 @@ impl DataFile {
 
 
         let mut len = [0u8; 3];
-        if entry.data_type == DataType::AppData {
-            U24::new(KEY_LEN + entry.data.len())?.serialize(&mut len);
-        }
-        else {
-            U24::new(entry.data.len())?.serialize(&mut len);
-        }
+        U24::new(entry.data.len())?.serialize(&mut len);
         self.append_slice(&len)?;
-        self.append_slice(entry.data_key.as_slice())?;
         self.append_slice(entry.data.as_slice())?;
         return Ok(start);
     }
@@ -375,23 +366,24 @@ impl DataType {
 #[derive(Eq, PartialEq,Debug,Clone)]
 pub struct DataEntry {
     pub data_type: DataType,
-    pub data_key: Vec<u8>,
     pub data: Vec<u8>
 }
 
 impl DataEntry {
     pub fn new_data (data_key: &[u8], data: &[u8]) -> DataEntry {
-        DataEntry{data_type: DataType::AppData, data_key: data_key.to_vec(), data: data.to_vec()}
+        let mut d = data.to_vec();
+        d.extend(data_key.to_vec().iter());
+        DataEntry{data_type: DataType::AppData, data: d}
     }
     pub fn new_data_extension (data: &[u8]) -> DataEntry {
-        DataEntry{data_type: DataType::AppDataExtension, data_key: Vec::new(), data: data.to_vec()}
+        DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
     pub fn new_spillover (offset: Offset, next: Offset) -> DataEntry {
         let mut sp = [0u8; 12];
         offset.serialize(&mut sp[..6]);
         next.serialize(&mut sp[6..]);
-        DataEntry{data_type: DataType::TableSpillOver, data_key: Vec::new(), data: sp.to_vec()}
+        DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
     }
 }
 
