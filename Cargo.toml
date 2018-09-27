@@ -14,9 +14,12 @@ readme = "README.md"
 name = "blockchain_store"
 path = "src/lib.rs"
 
+[features]
+bitcoin_support=["bitcoin"]
+
 [dependencies]
 log = "0.4"
-bitcoin="0.13"
+bitcoin={version="0.13", optional=true}
 rand="0.5"
 siphasher = "0.2"
 threadpool = "1.7.1"

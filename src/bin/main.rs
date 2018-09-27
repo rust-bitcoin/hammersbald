@@ -1,5 +1,4 @@
 extern crate blockchain_store;
-extern crate bitcoin;
 extern crate rand;
 extern crate simple_logger;
 extern crate log;
@@ -7,12 +6,9 @@ extern crate log;
 use blockchain_store::infile::InFile;
 use blockchain_store::bcdb::BCDBFactory;
 
-use bitcoin::util::hash::Sha256dHash;
-
 use rand::{thread_rng, Rng};
 
 use std::time::{Instant};
-use std::mem::transmute;
 
 pub fn main () {
     simple_logger::init_with_level(log::Level::Info).unwrap();
@@ -34,10 +30,9 @@ pub fn main () {
     // generate unique keys
     println!("Generate keys ...");
     let mut keys = Vec::with_capacity(ntx as usize);
-    for i in 1 .. ntx {
-        let bytes: [u8; 8] = unsafe { transmute(i) };
-        let hash = Sha256dHash::from_data(&bytes);
-        let key = hash.data();
+    for _ in 1 .. ntx {
+        let mut key = [0u8;32];
+        thread_rng().fill(&mut key);
         keys.push (key);
     }
 

@@ -17,6 +17,7 @@
 //! # Error type
 //!
 //!
+#[cfg(feature="bitcoin_support")]
 use bitcoin::util;
 
 use std::convert;
@@ -36,6 +37,7 @@ pub enum BCSError {
     /// wrapped IO error
     IO(io::Error),
     /// Wrapped bitcoin util error
+    #[cfg(feature="bitcoin_support")]
     Util(util::Error),
     /// Lock poisoned
     Poisoned(String)
@@ -48,6 +50,7 @@ impl Error for BCSError {
             BCSError::DoesNotFit => "data does not fit into the block",
             BCSError::Corrupted (ref s) => s.as_str(),
             BCSError::IO(_) => "IO Error",
+            #[cfg(feature="bitcoin_support")]
             BCSError::Util(_) => "Bitcoin Util Error",
             BCSError::Poisoned(ref s) => s.as_str()
         }
@@ -59,6 +62,7 @@ impl Error for BCSError {
             BCSError::DoesNotFit => None,
             BCSError::Corrupted (_) => None,
             BCSError::IO(ref e) => Some(e),
+            #[cfg(feature="bitcoin_support")]
             BCSError::Util(ref e) => Some(e),
             BCSError::Poisoned(_) => None
         }
