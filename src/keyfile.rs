@@ -134,7 +134,7 @@ impl KeyFile {
         let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
 
         let mut remaining_spillovers = HashMap::new();
-        let mut any_change = false;
+        let mut rewrite = false;
         loop {
             if spill_offset.as_u64() == 0 {
                 break;
@@ -149,19 +149,22 @@ impl KeyFile {
                             // store to new bucket
                             self.store_to_bucket(new_bucket, vec![(hash, spills)], bucket_file)?;
                             bucket_page = self.read_page(bucket_offset.this_page())?;
-                            any_change = true;
+                            rewrite = true;
                         } else {
                             // merge spillovers of same hash
                             remaining_spillovers.entry(hash).or_insert(Vec::new()).extend(spills.iter());
                         }
                     }
                     spill_offset = next;
+                    if spill_offset.as_u64() != 0 {
+                        rewrite = true;
+                    }
                 },
                 _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
             };
         }
 
-        if any_change {
+        if rewrite {
             let mut next = Offset::new(0)?;
             let spills:Vec<(u32, Vec<Offset>)> = remaining_spillovers.iter().map(|(h, s)| (*h, s.clone())).collect();
             for spill in spills.chunks(255) {
