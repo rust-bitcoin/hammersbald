@@ -96,8 +96,8 @@ impl KeyFile {
 
         self.store_to_bucket(bucket, vec![(hash, vec![offset])], bucket_file)?;
 
-        // heuristic: number of buckets grows only 1/4 on input
-        if hash & 3 == 0 && self.step < <u32>::max_value() {
+        // heuristic: number of buckets grows only 1/2 on input
+        if hash & 1 == 0 && self.step < <u32>::max_value() {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
@@ -163,13 +163,10 @@ impl KeyFile {
 
         if any_change {
             let mut next = Offset::new(0)?;
-            for spill in remaining_spillovers {
-                let hash = spill.0;
-                let mut for_same_hash = spill.1.clone();
-                for sl in for_same_hash.chunks(255) {
-                    let so = bucket_file.append_content(Content::Spillover(vec![(hash, sl.to_vec())], next))?;
-                    next = so;
-                }
+            let spills:Vec<(u32, Vec<Offset>)> = remaining_spillovers.iter().map(|(h, s)| (*h, s.clone())).collect();
+            for spill in spills.chunks(255) {
+                let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
+                next = so;
             }
             bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             self.write_page(bucket_page)?;
@@ -178,28 +175,15 @@ impl KeyFile {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u32, mut spill: Vec<(u32, Vec<Offset>)>, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: u32, spill: Vec<(u32, Vec<Offset>)>, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
-        if spill_offset.as_u64() != 0 {
-            // aggregate with previous spills
-            // this logically overwrites previous key association in the spillover chain
-            // since search stops at first key match
-            while let Content::Spillover(spills, next) = bucket_file.get_content(spill_offset)? {
-                spill.extend(spills.iter().map(|a| a.clone()));
-                if next.as_u64() == 0 {
-                    break;
-                }
-                spill_offset = next;
-            }
-        }
-        let mut next = Offset::new(0).unwrap();
-        for chunk in spill.chunks(255) {
-            let so = bucket_file.append_content(Content::Spillover(chunk.to_vec(), next))?;
-            next = so;
-        }
-        bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
+        let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        // prepend spillover chain
+        // this logically overwrites previous key association in the spillover chain
+        // since search stops at first key match
+        let so = bucket_file.append_content(Content::Spillover(spill, spill_offset))?;
+        bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
         self.write_page(bucket_page)?;
         Ok(())
     }
