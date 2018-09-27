@@ -27,7 +27,7 @@ use std::io;
 use std::sync;
 
 /// Errors returned by this library
-pub enum BCSError {
+pub enum BCDBError {
     /// offset is invalid (> 2^48)
     InvalidOffset,
     /// corrupted data
@@ -43,52 +43,52 @@ pub enum BCSError {
     Poisoned(String)
 }
 
-impl Error for BCSError {
+impl Error for BCDBError {
     fn description(&self) -> &str {
         match *self {
-            BCSError::InvalidOffset => "invalid offset",
-            BCSError::DoesNotFit => "data does not fit into the block",
-            BCSError::Corrupted (ref s) => s.as_str(),
-            BCSError::IO(_) => "IO Error",
+            BCDBError::InvalidOffset => "invalid offset",
+            BCDBError::DoesNotFit => "data does not fit into the block",
+            BCDBError::Corrupted (ref s) => s.as_str(),
+            BCDBError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
-            BCSError::Util(_) => "Bitcoin Util Error",
-            BCSError::Poisoned(ref s) => s.as_str()
+            BCDBError::Util(_) => "Bitcoin Util Error",
+            BCDBError::Poisoned(ref s) => s.as_str()
         }
     }
 
     fn cause(&self) -> Option<&Error> {
         match *self {
-            BCSError::InvalidOffset => None,
-            BCSError::DoesNotFit => None,
-            BCSError::Corrupted (_) => None,
-            BCSError::IO(ref e) => Some(e),
+            BCDBError::InvalidOffset => None,
+            BCDBError::DoesNotFit => None,
+            BCDBError::Corrupted (_) => None,
+            BCDBError::IO(ref e) => Some(e),
             #[cfg(feature="bitcoin_support")]
-            BCSError::Util(ref e) => Some(e),
-            BCSError::Poisoned(_) => None
+            BCDBError::Util(ref e) => Some(e),
+            BCDBError::Poisoned(_) => None
         }
     }
 }
 
-impl fmt::Display for BCSError {
+impl fmt::Display for BCDBError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BCSError: {} cause: {:?}", self.description(), self.cause())
     }
 }
 
-impl fmt::Debug for BCSError {
+impl fmt::Debug for BCDBError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         (self as &fmt::Display).fmt(f)
     }
 }
 
-impl convert::From<io::Error> for BCSError {
-    fn from(err: io::Error) -> BCSError {
-        BCSError::IO(err)
+impl convert::From<io::Error> for BCDBError {
+    fn from(err: io::Error) -> BCDBError {
+        BCDBError::IO(err)
     }
 }
 
-impl<T> convert::From<sync::PoisonError<T>> for BCSError {
-    fn from(err: sync::PoisonError<T>) -> BCSError {
-        BCSError::Poisoned(err.to_string())
+impl<T> convert::From<sync::PoisonError<T>> for BCDBError {
+    fn from(err: sync::PoisonError<T>) -> BCDBError {
+        BCDBError::Poisoned(err.to_string())
     }
 }

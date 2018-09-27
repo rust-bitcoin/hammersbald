@@ -21,7 +21,7 @@
 use logfile::LogFile;
 use datafile::{DataFile, DataEntry, Content};
 use page::{Page, PageFile, PAGE_SIZE};
-use error::BCSError;
+use error::BCDBError;
 use types::Offset;
 use cache::Cache;
 
@@ -60,7 +60,7 @@ impl KeyFile {
         sip0: rng.next_u64(), sip1: rng.next_u64() }
     }
 
-    pub fn init (&mut self) -> Result<(), BCSError> {
+    pub fn init (&mut self) -> Result<(), BCDBError> {
         if let Ok(first_page) = self.read_page(Offset::new(0).unwrap()) {
             let buckets = first_page.read_offset(0).unwrap().as_u64();
             if buckets > 0 {
@@ -86,7 +86,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile, bucket_file: &mut DataFile) -> Result<(), BCSError>{
+    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
         let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -126,7 +126,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCSError> {
+    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
@@ -167,11 +167,11 @@ impl KeyFile {
                                 remaining_spillovers.push(current);
                             }
                         },
-                        _ => return Err(BCSError::Corrupted("spillover should point to data".to_string()))
+                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
                     }
                     data_offset = next;
                 },
-                _ => return Err(BCSError::Corrupted("unknown content at rehash".to_string()))
+                _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
             };
         }
 
@@ -196,7 +196,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u64, offset: Offset, data_file: &mut DataFile) -> Result<(), BCSError> {
+    fn store_to_bucket(&mut self, bucket: u64, offset: Offset, data_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -214,7 +214,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -247,15 +247,15 @@ impl KeyFile {
                                 data_offset = next;
                             }
                         },
-                        _ => return Err(BCSError::Corrupted("spillover should point to data".to_string()))
+                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
                     }
                 },
-                _ => return Err(BCSError::Corrupted("unexpected content".to_string()))
+                _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
             }
         }
     }
 
-    pub fn patch_page(&mut self, page: Page) -> Result<(), BCSError> {
+    pub fn patch_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.async_file.patch_page(page)
     }
 
@@ -271,7 +271,7 @@ impl KeyFile {
         self.async_file.shutdown()
     }
 
-    fn bucket_offset (bucket: u64) -> Result<Offset, BCSError> {
+    fn bucket_offset (bucket: u64) -> Result<Offset, BCDBError> {
         if bucket < FIRST_BUCKETS_PER_PAGE {
             Offset::new((bucket / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
                 + (bucket % FIRST_BUCKETS_PER_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
@@ -290,28 +290,28 @@ impl KeyFile {
 }
 
 impl KeyFile {
-    pub fn flush(&mut self) -> Result<(), BCSError> {
+    pub fn flush(&mut self) -> Result<(), BCDBError> {
         self.async_file.flush()
     }
 
-    pub fn len(&self) -> Result<u64, BCSError> {
+    pub fn len(&self) -> Result<u64, BCDBError> {
         self.async_file.len()
     }
 
-    pub fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+    pub fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         self.async_file.truncate(len)
     }
 
-    pub fn sync(&self) -> Result<(), BCSError> {
+    pub fn sync(&self) -> Result<(), BCDBError> {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<LoggedPage, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<LoggedPage, BCDBError> {
         let page = self.async_file.read_page(offset)?;
         Ok(LoggedPage { preimage: page.clone(), page })
     }
 
-    fn write_page(&mut self, page: LoggedPage) -> Result<(), BCSError> {
+    fn write_page(&mut self, page: LoggedPage) -> Result<(), BCDBError> {
         if page.preimage.payload[..] != page.page.payload[..] {
             self.async_file.inner.log.lock().unwrap().preimage(page.preimage);
             self.async_file.write_page(page.page)
@@ -329,19 +329,19 @@ struct LoggedPage {
 
 impl LoggedPage {
 
-    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCSError> {
+    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
         self.page.write_offset(pos, offset)
     }
 
-    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCSError> {
+    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
         self.page.read_offset(pos)
     }
 
-    pub fn read_u64(&self, pos: usize) -> Result<u64, BCSError> {
+    pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
         self.page.read_u64(pos)
     }
 
-    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCSError> {
+    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
         self.page.write_u64(pos, n)
     }
 }
@@ -418,11 +418,11 @@ impl KeyPageFile {
         }
     }
 
-    pub fn patch_page(&mut self, page: Page) -> Result<(), BCSError> {
+    pub fn patch_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().write_page(page)
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCDBError> {
         self.inner.file.lock().unwrap().read_page(offset)
     }
 
@@ -442,7 +442,7 @@ impl KeyPageFile {
 
 impl PageFile for KeyPageFile {
     #[allow(unused_assignments)]
-    fn flush(&mut self) -> Result<(), BCSError> {
+    fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if !cache.is_empty() {
             self.inner.work.notify_one();
@@ -451,19 +451,19 @@ impl PageFile for KeyPageFile {
         self.inner.file.lock().unwrap().flush()
     }
 
-    fn len(&self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCDBError> {
         self.inner.file.lock().unwrap().len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
+    fn sync(&self) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
 
         use std::ops::Deref;
 
@@ -486,18 +486,18 @@ impl PageFile for KeyPageFile {
         Ok(page)
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())
 
     }
 
-    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
+    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().write_batch(writes)
     }
 }

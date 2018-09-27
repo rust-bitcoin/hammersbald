@@ -21,7 +21,7 @@ use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::{DataFile, DataEntry, Content};
 use page::{Page, PageFile};
-use error::BCSError;
+use error::BCDBError;
 
 #[cfg(feature="bitcoin_support")]
 use bitcoin::blockdata::block::{BlockHeader, Block};
@@ -46,7 +46,7 @@ pub const KEY_LEN : usize = 32;
 /// a trait to create a new db
 pub trait BCDBFactory {
     /// create a new db
-    fn new_db (name: &str) -> Result<BCDB, BCSError>;
+    fn new_db (name: &str) -> Result<BCDB, BCDBError>;
 }
 
 /// The blockchain db
@@ -59,7 +59,7 @@ pub struct BCDB {
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new (table: KeyFile, data: DataFile, bucket: DataFile) -> Result<BCDB, BCSError> {
+    pub fn new (table: KeyFile, data: DataFile, bucket: DataFile) -> Result<BCDB, BCDBError> {
         let log = table.log_file();
         let mut db = BCDB {table, bucket, data, log};
         db.recover()?;
@@ -68,7 +68,7 @@ impl BCDB {
     }
 
     /// initialize an empty db
-    pub fn init (&mut self) -> Result<(), BCSError> {
+    pub fn init (&mut self) -> Result<(), BCDBError> {
         self.table.init()?;
         self.data.init()?;
         self.bucket.init()?;
@@ -76,7 +76,7 @@ impl BCDB {
         Ok(())
     }
 
-    fn recover(&mut self) -> Result<(), BCSError> {
+    fn recover(&mut self) -> Result<(), BCDBError> {
         let log = self.log.lock().unwrap();
         let mut first = true;
         debug!("recover");
@@ -106,7 +106,7 @@ impl BCDB {
     }
 
     /// end current batch and start a new batch
-    pub fn batch (&mut self)  -> Result<(), BCSError> {
+    pub fn batch (&mut self)  -> Result<(), BCDBError> {
         debug!("batch end");
         self.data.flush()?;
         self.data.sync()?;
@@ -154,9 +154,9 @@ impl BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCSError> {
+    pub fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
         if key.len() != KEY_LEN {
-            return Err(BCSError::DoesNotFit);
+            return Err(BCDBError::DoesNotFit);
         }
         let offset = self.data.append(DataEntry::new_data(key, data))?;
         self.table.put(key, offset, &mut self.data, &mut self.bucket)?;
@@ -164,30 +164,30 @@ impl BCDB {
     }
 
     /// retrieve data by key
-    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCSError> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
         if key.len() != KEY_LEN {
-            return Err(BCSError::DoesNotFit);
+            return Err(BCDBError::DoesNotFit);
         }
         self.table.get(key, &self.data, &self.bucket)
     }
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
-    pub fn put_content(&mut self, content: Content) -> Result<Offset, BCSError> {
+    pub fn put_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
         if let Content::Extension(data) = content {
             return self.data.append(DataEntry::new_data_extension(data.as_slice()));
         }
-        return Err(BCSError::DoesNotFit)
+        return Err(BCDBError::DoesNotFit)
     }
 
     /// get some content at a known offset
-    pub fn get_content(&self, offset: Offset) -> Result<Content, BCSError> {
+    pub fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
         self.data.get_content(offset)
     }
 
     /// Insert a block header
     #[cfg(feature="bitcoin_support")]
-    pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<Offset, BCSError> {
+    pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<Offset, BCDBError> {
         let key = encode(&header.bitcoin_hash())?;
         let mut serialized_header = encode(header)?;
 
@@ -210,7 +210,7 @@ impl BCDB {
 
     /// Fetch a header by its id
     #[cfg(feature="bitcoin_support")]
-    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCSError> {
+    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCDBError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
@@ -222,7 +222,7 @@ impl BCDB {
                     extension.push(data);
                 }
                 else {
-                    return Err(BCSError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
+                    return Err(BCDBError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
                 }
             }
 
@@ -235,7 +235,7 @@ impl BCDB {
 
     /// insert a block
     #[cfg(feature="bitcoin_support")]
-    pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<Offset, BCSError> {
+    pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<Offset, BCDBError> {
         let key = encode(&block.bitcoin_hash())?;
         let mut serialized_block = encode(&block.header)?;
 
@@ -268,7 +268,7 @@ impl BCDB {
 
     /// Fetch a block by its id
     #[cfg(feature="bitcoin_support")]
-    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCSError> {
+    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCDBError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(&key.as_slice())? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
@@ -280,7 +280,7 @@ impl BCDB {
                     extension.push(data);
                 }
                 else {
-                    return Err(BCSError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
+                    return Err(BCDBError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
                 }
             }
 
@@ -292,7 +292,7 @@ impl BCDB {
                     txdata.push(decode(tx)?);
                 }
                 else {
-                    return Err(BCSError::Corrupted(format!("can not find transaction of a block {}", offset.as_u64())));
+                    return Err(BCDBError::Corrupted(format!("can not find transaction of a block {}", offset.as_u64())));
                 }
             }
 
@@ -305,7 +305,7 @@ impl BCDB {
 
     /// fetch a transaction stored with a block
     #[cfg(feature="bitcoin_support")]
-    pub fn fetch_transaction (&self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCSError> {
+    pub fn fetch_transaction (&self, id: &Sha256dHash)  -> Result<Option<Transaction>, BCDBError> {
         let key = encode(id)?;
         if let Some(stored) = self.get(&key)? {
             return Ok(Some(decode(stored)?));
@@ -315,16 +315,16 @@ impl BCDB {
 }
 
 #[cfg(feature="bitcoin_support")]
-fn decode<T: ? Sized>(data: Vec<u8>) -> Result<T, BCSError>
+fn decode<T: ? Sized>(data: Vec<u8>) -> Result<T, BCDBError>
     where T: ConsensusDecodable<RawDecoder<Cursor<Vec<u8>>>> {
     let mut decoder: RawDecoder<Cursor<Vec<u8>>> = RawDecoder::new(Cursor::new(data));
-    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { BCSError::Util(e) })
+    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { BCDBError::Util(e) })
 }
 
 #[cfg(feature="bitcoin_support")]
-fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCSError>
+fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCDBError>
     where T: ConsensusEncodable<RawEncoder<Cursor<Vec<u8>>>> {
-    serialize(data).map_err(|e| { BCSError::Util(e) })
+    serialize(data).map_err(|e| { BCDBError::Util(e) })
 }
 
 

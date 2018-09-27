@@ -18,7 +18,7 @@
 //!
 //! Implements in-memory Read and Write for tests
 
-use error::BCSError;
+use error::BCDBError;
 use logfile::LogFile;
 use bcdb::{BCDBFactory, BCDB};
 use keyfile::KeyFile;
@@ -53,7 +53,7 @@ impl InMemory {
 }
 
 impl BCDBFactory for InMemory {
-    fn new_db (_name: &str) -> Result<BCDB, BCSError> {
+    fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = KeyFile::new(Box::new(InMemory::new(false)), log);
         let data = DataFile::new(Box::new(InMemory::new(true)))?;
@@ -64,27 +64,27 @@ impl BCDBFactory for InMemory {
 }
 
 impl PageFile for InMemory {
-    fn flush(&mut self) -> Result<(), BCSError> {Ok(())}
+    fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
 
-    fn len(&self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCDBError> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.data.len() as u64)
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+    fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.data.truncate(len as usize);
         Ok(())
     }
 
-    fn sync(&self) -> Result<(), BCSError> { Ok(()) }
+    fn sync(&self) -> Result<(), BCDBError> { Ok(()) }
 
-    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page (&self, offset: Offset) -> Result<Page, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
         let len = inner.seek(SeekFrom::End(0))?;
         if offset.as_u64() >= len {
-            return Err(BCSError::InvalidOffset);
+            return Err(BCDBError::InvalidOffset);
         }
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.read(&mut buffer)?;
@@ -92,20 +92,20 @@ impl PageFile for InMemory {
         Ok(page)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.finish()[..])?;
         Ok(())
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(page.offset.as_u64()))?;
         inner.write(&page.finish()[..])?;
         Ok(())
     }
 
-    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
+    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         let mut list = writes.clone();
         list.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
         for page in &list {

@@ -20,7 +20,7 @@
 
 use bcdb::{ KEY_LEN};
 use page::{Page, PageIterator, PageFile, PAYLOAD_MAX};
-use error::BCSError;
+use error::BCDBError;
 use types::{Offset, U24};
 use cache::Cache;
 
@@ -40,7 +40,7 @@ pub struct DataFile {
 }
 
 impl DataFile {
-    pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCSError> {
+    pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCDBError> {
         let file = DataPageFile::new(rw);
         let append_pos = Offset::new(file.len()?)?;
         Ok(DataFile{async_file: file,
@@ -48,7 +48,7 @@ impl DataFile {
             page: Page::new(append_pos) })
     }
 
-    pub fn init(&mut self) -> Result<(), BCSError> {
+    pub fn init(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.as_u64() == 0 {
             self.append_slice(&[0xBC,0xDA])?;
         }
@@ -67,7 +67,7 @@ impl DataFile {
         DataIterator::new(self.page_iter(0), 2)
     }
 
-    pub fn get_content(&self, offset: Offset) -> Result<Content, BCSError> {
+    pub fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
         let page = {
             if self.page.offset == offset.this_page() {
                 self.page.clone()
@@ -87,12 +87,12 @@ impl DataFile {
             }
             return Ok(Content::Extension(entry.data))
         }
-        return Err(BCSError::Corrupted(format!("expected content at {}", offset.as_u64())));
+        return Err(BCDBError::Corrupted(format!("expected content at {}", offset.as_u64())));
     }
 
-    pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCSError> {
+    pub fn append (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
         if entry.data_type == DataType::AppData && entry.data_key.len() != KEY_LEN {
-            return Err(BCSError::DoesNotFit);
+            return Err(BCDBError::DoesNotFit);
         }
 
         let start = self.append_pos;
@@ -114,7 +114,7 @@ impl DataFile {
         return Ok(start);
     }
 
-    fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCSError> {
+    fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCDBError> {
         let mut wrote = 0;
         let mut wrote_on_this_page = 0;
         let mut pos = self.append_pos.in_page_pos();
@@ -208,7 +208,7 @@ impl DataPageFile {
         }
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCDBError> {
         self.inner.file.lock().unwrap().read_page(offset)
     }
 
@@ -224,7 +224,7 @@ impl DataPageFile {
 
 impl PageFile for DataPageFile {
     #[allow(unused_assignments)]
-    fn flush(&mut self) -> Result<(), BCSError> {
+    fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if !cache.is_empty() {
             self.inner.work.notify_one();
@@ -233,19 +233,19 @@ impl PageFile for DataPageFile {
         self.inner.file.lock().unwrap().flush()
     }
 
-    fn len(&self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCDBError> {
         self.inner.file.lock().unwrap().len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
+    fn sync(&self) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
 
         use std::ops::Deref;
 
@@ -267,23 +267,23 @@ impl PageFile for DataPageFile {
         Ok(page)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())
     }
 
-    fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }
 
 impl PageFile for DataFile {
-    fn flush(&mut self) -> Result<(), BCSError> {
+    fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             self.async_file.append_page(self.page.clone())?;
             self.append_pos = self.append_pos.next_page()?;
@@ -292,39 +292,39 @@ impl PageFile for DataFile {
         self.async_file.flush()
     }
 
-    fn len(&self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCDBError> {
         self.async_file.len()
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+    fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         self.append_pos = Offset::new(len)?;
         self.page.offset = self.append_pos;
         self.async_file.truncate(len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
+    fn sync(&self) -> Result<(), BCDBError> {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
         if offset == self.page.offset {
             return Ok(self.page.clone())
         }
         if offset.as_u64() >= self.page.offset.as_u64() {
-            return Err(BCSError::Corrupted(format!("Read past EOF on data {}", offset.as_u64())));
+            return Err(BCDBError::Corrupted(format!("Read past EOF on data {}", offset.as_u64())));
         }
         self.async_file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.async_file.append_page(page)
     }
 
-    fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

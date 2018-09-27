@@ -21,7 +21,7 @@
 //!
 
 use page::{Page, PageFile, PageIterator};
-use error::BCSError;
+use error::BCDBError;
 use types::Offset;
 
 use std::collections::HashSet;
@@ -40,7 +40,7 @@ impl LogFile {
         LogFile { rw, to_log: Vec::new(), logged: HashSet::new(), tbl_len: 0 }
     }
 
-    pub fn init (&mut self) -> Result<(), BCSError> {
+    pub fn init (&mut self) -> Result<(), BCDBError> {
         Ok(())
     }
 
@@ -63,38 +63,38 @@ impl LogFile {
 }
 
 impl PageFile for LogFile {
-    fn flush(&mut self) -> Result<(), BCSError> {
+    fn flush(&mut self) -> Result<(), BCDBError> {
         for page in self.to_log.drain(..) {
             self.rw.append_page(page)?;
         }
         Ok(self.rw.flush()?)
     }
 
-    fn len(&self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCDBError> {
         self.rw.len()
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), BCSError> {
+    fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         self.rw.truncate(len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
+    fn sync(&self) -> Result<(), BCDBError> {
         self.rw.sync()
     }
 
-    fn read_page (&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page (&self, offset: Offset) -> Result<Page, BCDBError> {
         self.rw.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.rw.append_page(page)
     }
 
-    fn write_page(&mut self, _: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCSError> {
+    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

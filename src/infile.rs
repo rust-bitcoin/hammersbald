@@ -18,7 +18,7 @@
 //!
 //! Implements persistent store
 
-use error::BCSError;
+use error::BCDBError;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::DataFile;
@@ -46,7 +46,7 @@ impl InFile {
 }
 
 impl BCDBFactory for InFile {
-    fn new_db (name: &str) -> Result<BCDB, BCSError> {
+    fn new_db (name: &str) -> Result<BCDB, BCDBError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(
             RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))));
         let table = KeyFile::new(Box::new(InFile::new(
@@ -60,35 +60,35 @@ impl BCDBFactory for InFile {
 }
 
 impl PageFile for InFile {
-    fn flush(&mut self) -> Result<(), BCSError> {
+    fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }
 
-    fn len(&self) -> Result<u64, BCSError> {
+    fn len(&self) -> Result<u64, BCDBError> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCSError> {
+    fn sync(&self) -> Result<(), BCDBError> {
         self.file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCSError> {
+    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
         self.file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.append_page(page)
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCSError> {
+    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.write_page(page)
     }
 
-    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError> {
+    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         self.file.write_batch(writes)
     }
 }

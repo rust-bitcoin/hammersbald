@@ -27,7 +27,7 @@
 //! </pre>
 //!
 
-use error::BCSError;
+use error::BCDBError;
 use types::Offset;
 
 use std::sync::Arc;
@@ -57,18 +57,18 @@ impl Page {
 
     /// append some data
     /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCSError> {
+    pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCDBError> {
         if pos + data.len() > PAYLOAD_MAX {
-            return Err (BCSError::DoesNotFit);
+            return Err (BCDBError::DoesNotFit);
         }
         self.payload [pos .. pos + data.len()].copy_from_slice(&data[..]);
         Ok(())
     }
 
     /// write an offset
-    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCSError> {
+    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
         if pos + 6 > PAYLOAD_MAX {
-            return Err (BCSError::DoesNotFit);
+            return Err (BCDBError::DoesNotFit);
         }
         offset.serialize(&mut self.payload[pos .. pos + 6]);
         Ok(())
@@ -76,9 +76,9 @@ impl Page {
 
     /// read some data
     /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCSError> {
+    pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCDBError> {
         if pos + data.len() > PAYLOAD_MAX {
-            return Err (BCSError::DoesNotFit);
+            return Err (BCDBError::DoesNotFit);
         }
         let len = data.len();
         data[..].copy_from_slice(&self.payload [pos .. pos + len]);
@@ -86,13 +86,13 @@ impl Page {
     }
 
     /// read a stored offset
-    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCSError> {
+    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
         let mut buf = [0u8;6];
         self.read(pos, &mut buf)?;
         Offset::from_slice(&buf)
     }
 
-    pub fn read_u64(&self, pos: usize) -> Result<u64, BCSError> {
+    pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
         let mut buf = [0u8;8];
         self.read(pos, &mut buf)?;
         let mut size= 0u64;
@@ -103,7 +103,7 @@ impl Page {
         Ok(size)
     }
 
-    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCSError> {
+    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
         use std::mem::transmute;
 
         let bytes: [u8; 8] = unsafe { transmute(n.to_be()) };
@@ -124,21 +124,21 @@ impl Page {
 /// synchronized in its implementation
 pub trait PageFile : Send + Sync {
     /// flush buffered writes
-    fn flush(&mut self) -> Result<(), BCSError>;
+    fn flush(&mut self) -> Result<(), BCDBError>;
     /// length of the storage
-    fn len (&self) -> Result<u64, BCSError>;
+    fn len (&self) -> Result<u64, BCDBError>;
     /// truncate storage
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCSError>;
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError>;
     /// tell OS to flush buffers to disk
-    fn sync (&self) -> Result<(), BCSError>;
+    fn sync (&self) -> Result<(), BCDBError>;
     /// read a page at given offset
-    fn read_page (&self, offset: Offset) -> Result<Page, BCSError>;
+    fn read_page (&self, offset: Offset) -> Result<Page, BCDBError>;
     /// append a page (ignore offset in the Page)
-    fn append_page (&mut self, page: Page) -> Result<(), BCSError>;
+    fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
     /// write a page at its position as specified in page.offset
-    fn write_page (&mut self, page: Page) -> Result<(), BCSError>;
+    fn write_page (&mut self, page: Page) -> Result<(), BCDBError>;
     /// write a batch of pages in parallel (if possible)
-    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCSError>;
+    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError>;
 }
 
 /// iterate through pages of a paged file
