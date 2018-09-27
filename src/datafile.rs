@@ -80,7 +80,7 @@ impl DataFile {
             }
             else if entry.data_type == DataType::TableSpillOver {
                 let mut cursor = Cursor::new(entry.data);
-                let hash = cursor.read_u32::<BigEndian>().unwrap() as u64;
+                let hash = cursor.read_u32::<BigEndian>().unwrap();
                 return Ok(Content::Spillover(hash, Offset::from_slice(&cursor.get_ref()[4..10])?, Offset::from_slice(&cursor.get_ref()[10..16])?))
             }
             return Ok(Content::Extension(entry.data))
@@ -328,7 +328,7 @@ impl PageFile for DataFile {
 /// content of the db
 pub enum Content {
     /// spillover
-    Spillover(u64, Offset, Offset),
+    Spillover(u32, Offset, Offset),
     /// regular data referred in index
     Data(Vec<u8>, Vec<u8>),
     /// data referred by data, not in index
@@ -384,9 +384,9 @@ impl DataEntry {
         DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
-    pub fn new_spillover (hash: u64, offset: Offset, next: Offset) -> DataEntry {
+    pub fn new_spillover (hash: u32, offset: Offset, next: Offset) -> DataEntry {
         let mut buf = vec![0u8;16];
-        buf.write_u32::<BigEndian>(hash as u32).unwrap();
+        buf.write_u32::<BigEndian>(hash).unwrap();
         let sp = buf.as_mut_slice();
         offset.serialize(&mut sp[4..10]);
         next.serialize(&mut sp[10..16]);
@@ -495,7 +495,7 @@ impl<'file> Iterator for DataIterator<'file> {
                             let mut c = Cursor::new(hash);
                             let h = c.read_u32::<BigEndian>().unwrap();
                             return Some(
-                                DataEntry::new_spillover(h as u64, Offset::from_slice(&data[..]).unwrap(),
+                                DataEntry::new_spillover(h, Offset::from_slice(&data[..]).unwrap(),
                                                          Offset::from_slice(&next[..]).unwrap()));
                         }
                     }

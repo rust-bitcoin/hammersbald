@@ -45,9 +45,9 @@ const BUCKET_SIZE: u64 = 6;
 /// The key file
 pub struct KeyFile {
     async_file: KeyPageFile,
-    step: u64,
-    buckets: u64,
-    log_mod: u64,
+    step: u32,
+    buckets: u32,
+    log_mod: u32,
     sip0: u64,
     sip1: u64
 }
@@ -56,17 +56,17 @@ impl KeyFile {
     pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
         let mut rng = thread_rng();
         KeyFile{async_file: KeyPageFile::new(rw, log_file), step: 0,
-            buckets: INIT_BUCKETS, log_mod: INIT_LOGMOD,
+            buckets: INIT_BUCKETS as u32, log_mod: INIT_LOGMOD as u32,
         sip0: rng.next_u64(), sip1: rng.next_u64() }
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
         if let Ok(first_page) = self.read_page(Offset::new(0).unwrap()) {
-            let buckets = first_page.read_offset(0).unwrap().as_u64();
+            let buckets = first_page.read_offset(0).unwrap().as_u64() as u32;
             if buckets > 0 {
                 self.buckets = buckets;
-                self.step = first_page.read_offset(6).unwrap().as_u64();
-                self.log_mod = (63 - buckets.leading_zeros()) as u64 - 1;
+                self.step = first_page.read_offset(6).unwrap().as_u64() as u32;
+                self.log_mod = (32 - buckets.leading_zeros()) as u32 - 1;
                 self.sip0 = first_page.read_u64(12).unwrap();
                 self.sip1 = first_page.read_u64(20).unwrap();
             }
@@ -75,8 +75,8 @@ impl KeyFile {
         else {
             let page = Page::new(Offset::new(0)?);
             let mut fp = LoggedPage { preimage: page.clone(), page};
-            fp.write_offset(0, Offset::new(self.buckets)?)?;
-            fp.write_offset(6, Offset::new(self.step)?)?;
+            fp.write_offset(0, Offset::new(self.buckets as u64)?)?;
+            fp.write_offset(6, Offset::new(self.step as u64)?)?;
             fp.write_u64(12, self.sip0)?;
             fp.write_u64(20, self.sip1)?;
             self.write_page(fp)?;
@@ -88,15 +88,15 @@ impl KeyFile {
 
     pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
         let hash = self.hash(key);
-        let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
+        let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
-            bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+            bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
 
         self.store_to_bucket(bucket, offset, data_file)?;
 
         // heuristic: number of buckets grows only 1/2 on input
-        if hash & 1 == 0 {
+        if hash & 1 == 0 && self.step < <u32>::max_value() {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
@@ -110,15 +110,15 @@ impl KeyFile {
             }
 
             self.buckets += 1;
-            if self.buckets >= FIRST_BUCKETS_PER_PAGE && (self.buckets - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
-                let page = Page::new(Offset::new(((self.buckets - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64)?);
+            if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
+                let page = Page::new(Offset::new(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64)?);
                 // no need of pre-image here
                 self.async_file.write_page(page)?;
             }
 
             if let Ok(mut first_page) = self.read_page(Offset::new(0).unwrap()) {
-                first_page.write_offset(0, Offset::new(self.buckets)?)?;
-                first_page.write_offset(6, Offset::new(self.step)?)?;
+                first_page.write_offset(0, Offset::new(self.buckets as u64)?)?;
+                first_page.write_offset(6, Offset::new(self.step as u64)?)?;
                 self.write_page(first_page)?;
             }
         }
@@ -126,7 +126,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u64, data_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn rehash_bucket(&mut self, bucket: u32, data_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
@@ -141,7 +141,7 @@ impl KeyFile {
             match data_file.get_content(data_offset)? {
                 Content::Data(data_key, _) => {
                     let hash = self.hash(data_key.as_slice());
-                    let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                    let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
                         // store to new bucket
                         self.store_to_bucket(new_bucket, data_offset, data_file)?;
@@ -157,7 +157,7 @@ impl KeyFile {
                     match data_file.get_content(current)? {
                         Content::Data(data_key, _) => {
                             let hash = self.hash(data_key.as_slice());
-                            let new_bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                            let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                             if new_bucket != bucket {
                                 // store to new bucket
                                 self.store_to_bucket(new_bucket, current, data_file)?;
@@ -196,7 +196,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u64, offset: Offset, data_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: u32, offset: Offset, data_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -216,9 +216,9 @@ impl KeyFile {
 
     pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
         let hash = self.hash(key);
-        let mut bucket = hash & (!0u64 >> (64 - self.log_mod)); // hash % 2^(log_mod)
+        let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
-            bucket = hash & (!0u64 >> (64 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+            bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
         let bucket_offset = Self::bucket_offset(bucket)?;
         let bucket_page = self.read_page(bucket_offset.this_page())?;
@@ -271,21 +271,21 @@ impl KeyFile {
         self.async_file.shutdown()
     }
 
-    fn bucket_offset (bucket: u64) -> Result<Offset, BCDBError> {
-        if bucket < FIRST_BUCKETS_PER_PAGE {
-            Offset::new((bucket / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
-                + (bucket % FIRST_BUCKETS_PER_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
+    fn bucket_offset (bucket: u32) -> Result<Offset, BCDBError> {
+        if (bucket as u64) < FIRST_BUCKETS_PER_PAGE {
+            Offset::new((bucket as u64 / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
+                + (bucket as u64 % FIRST_BUCKETS_PER_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
         }
         else {
-            Offset::new((((bucket - FIRST_BUCKETS_PER_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
-                + (bucket % BUCKETS_PER_PAGE) * BUCKET_SIZE)
+            Offset::new((((bucket as u64 - FIRST_BUCKETS_PER_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
+                + (bucket as u64 % BUCKETS_PER_PAGE) * BUCKET_SIZE)
         }
     }
 
-    fn hash (&self, key: &[u8]) -> u64 {
+    fn hash (&self, key: &[u8]) -> u32 {
         let mut hasher = SipHasher::new_with_keys(self.sip0, self.sip1);
         hasher.write(key);
-        hasher.finish()
+        hasher.finish() as u32
     }
 }
 
