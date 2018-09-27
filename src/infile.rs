@@ -52,7 +52,7 @@ impl BCDBFactory for InFile {
         let table = KeyFile::new(Box::new(InFile::new(
             RolledFile::new(name.to_string(), "tb".to_string(), false, KEY_CHUNK_SIZE)?
         )), log);
-        let bucket = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bu".to_string(), true, DATA_CHUNK_SIZE)?))?;
+        let bucket = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
         let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?;
 
         BCDB::new(table, data, bucket)

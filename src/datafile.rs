@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
-use std::io::Cursor;
+use std::io::{Read, Cursor};
 
 
 /// The key file
@@ -80,17 +80,24 @@ impl DataFile {
             }
             else if entry.data_type == DataType::TableSpillOver {
                 let mut cursor = Cursor::new(entry.data);
-                let hash = cursor.read_u32::<BigEndian>().unwrap();
-                let n = cursor.read_u8().unwrap();
+                let m = cursor.read_u8().unwrap() as usize;
                 let mut spills = Vec::new();
-                for i in 0 .. n {
-                    let base = 5+i as usize * 6;
-                    let current = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
-                    spills.push(current)
+                for _ in 0 .. m {
+                    let hash = cursor.read_u32::<BigEndian>().unwrap();
+                    let n = cursor.read_u8().unwrap() as usize;
+                    let mut offsets = Vec::new();
+                    for _ in 0..n {
+                        let mut o = [0u8; 6];
+                        cursor.read(&mut o).unwrap();
+                        let current = Offset::from_slice(&o).unwrap();
+                        offsets.push(current)
+                    }
+                    spills.push((hash, offsets));
                 }
-                let base = 5+n as usize * 6;
-                let next = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
-                return Ok(Content::Spillover(hash, spills, next));
+                let mut o = [0u8; 6];
+                cursor.read(&mut o).unwrap();
+                let next = Offset::from_slice(&o).unwrap();
+                return Ok(Content::Spillover(spills, next));
             }
             return Ok(Content::Extension(entry.data))
         }
@@ -101,7 +108,7 @@ impl DataFile {
         match content {
             Content::Data(k, d) => self.append(DataEntry::new_data(k.as_slice(), d.as_slice())),
             Content::Extension(d) => self.append(DataEntry::new_data_extension(d.as_slice())),
-            Content::Spillover(hash, spills, next) => self.append(DataEntry::new_spillover(hash, spills, next))
+            Content::Spillover(spills, next) => self.append(DataEntry::new_spillover(spills, next))
         }
     }
 
@@ -336,7 +343,7 @@ impl PageFile for DataFile {
 /// content of the db
 pub enum Content {
     /// spillover
-    Spillover(u32, Vec<Offset>, Offset),
+    Spillover(Vec<(u32, Vec<Offset>)>, Offset),
     /// regular data referred in index
     Data(Vec<u8>, Vec<u8>),
     /// data referred by data, not in index
@@ -392,14 +399,19 @@ impl DataEntry {
         DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
-    pub fn new_spillover (hash: u32, spills: Vec<Offset>, next: Offset) -> DataEntry {
+    pub fn new_spillover (spills: Vec<(u32, Vec<Offset>)>, next: Offset) -> DataEntry {
         let mut sp = Vec::new();
-        sp.write_u32::<BigEndian>(hash).unwrap();
         sp.write_u8(spills.len() as u8).unwrap();
-        for spill in spills {
-            let mut o = [0u8; 6];
-            spill.serialize(&mut o);
-            sp.extend(o.iter());
+        for s in &spills {
+            let hash = s.0;
+            let spill = s.1.clone();
+            sp.write_u32::<BigEndian>(hash).unwrap();
+            sp.write_u8(spill.len() as u8).unwrap();
+            for offset in spill {
+                let mut o = [0u8; 6];
+                offset.serialize(&mut o);
+                sp.extend(o.iter());
+            }
         }
         let mut n = [0u8; 6];
         next.serialize(&mut n);
@@ -506,18 +518,25 @@ impl<'file> Iterator for DataIterator<'file> {
                         let mut buf = vec!(0u8; len.as_usize());
                         if self.read_slice(buf.as_mut_slice()) {
                             let mut cursor = Cursor::new(buf);
-                            let hash = cursor.read_u32::<BigEndian>().unwrap();
-                            let n = cursor.read_u8().unwrap();
+                            let m = cursor.read_u8().unwrap() as usize;
                             let mut spills = Vec::new();
-                            for i in 0 .. n {
-                                let base = 5+i as usize * 6;
-                                let current = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
-                                spills.push(current)
+                            for _ in 0 .. m {
+                                let hash = cursor.read_u32::<BigEndian>().unwrap();
+                                let n = cursor.read_u8().unwrap() as usize;
+                                let mut offsets = Vec::new();
+                                for _ in 0..n {
+                                    let mut o = [0u8; 6];
+                                    cursor.read(&mut o).unwrap();
+                                    let current = Offset::from_slice(&o).unwrap();
+                                    offsets.push(current)
+                                }
+                                spills.push((hash, offsets));
                             }
-                            let base = 5+n as usize * 6;
-                            let next = Offset::from_slice(&cursor.get_ref()[base .. base+6]).unwrap();
+                            let mut o = [0u8; 6];
+                            cursor.read(&mut o).unwrap();
+                            let next = Offset::from_slice(&o).unwrap();
                             return Some(
-                                DataEntry::new_spillover(hash, spills, next));
+                                DataEntry::new_spillover(spills, next));
                         }
                     }
                 }
