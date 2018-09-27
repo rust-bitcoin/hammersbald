@@ -86,21 +86,21 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, data_file: &mut DataFile, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
+    pub fn put (&mut self, key: &[u8], offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
             bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
 
-        self.store_to_bucket(bucket, offset, data_file)?;
+        self.store_to_bucket(bucket, hash, offset, bucket_file)?;
 
         // heuristic: number of buckets grows only 1/2 on input
         if hash & 1 == 0 && self.step < <u32>::max_value() {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
-                self.rehash_bucket(step, data_file)?;
+                self.rehash_bucket(step, bucket_file)?;
             }
 
             self.step += 1;
@@ -126,90 +126,58 @@ impl KeyFile {
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u32, data_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
 
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
 
         let mut remaining_spillovers = Vec::new();
         let mut any_change = false;
         loop {
-            if data_offset.as_u64() == 0 {
+            if spill_offset.as_u64() == 0 {
                 break;
             }
-            match data_file.get_content(data_offset)? {
-                Content::Data(data_key, _) => {
-                    let hash = self.hash(data_key.as_slice());
+            match bucket_file.get_content(spill_offset)? {
+                Content::Spillover(hash, current, next) => {
                     let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                     if new_bucket != bucket {
                         // store to new bucket
-                        self.store_to_bucket(new_bucket, data_offset, data_file)?;
+                        self.store_to_bucket(new_bucket, hash,current, bucket_file)?;
                         bucket_page = self.read_page(bucket_offset.this_page())?;
                         any_change = true;
+                    } else {
+                        remaining_spillovers.push((current, hash));
                     }
-                    else {
-                        remaining_spillovers.push(data_offset);
-                    }
-                    break;
-                },
-                Content::Spillover(_, current, next) => {
-                    match data_file.get_content(current)? {
-                        Content::Data(data_key, _) => {
-                            let hash = self.hash(data_key.as_slice());
-                            let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-                            if new_bucket != bucket {
-                                // store to new bucket
-                                self.store_to_bucket(new_bucket, current, data_file)?;
-                                bucket_page = self.read_page(bucket_offset.this_page())?;
-                                any_change = true;
-                            } else {
-                                remaining_spillovers.push(current);
-                            }
-                        },
-                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
-                    }
-                    data_offset = next;
+                    spill_offset = next;
                 },
                 _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
             };
         }
 
         if any_change {
-            if remaining_spillovers.is_empty() {
-                // nothing left in the bucket
-                bucket_page.write_offset(bucket_offset.in_page_pos(), Offset::new(0)?)?;
+            // ensure same traversal order so key overwrites still work
+            let mut next = Offset::new(0)?;
+            for spill in remaining_spillovers.iter().rev() {
+                let so = bucket_file.append_content(Content::Spillover(spill.1, spill.0, next))?;
+                next = so;
             }
-            else {
-                // ensure same traversal order so key overwrites still work
-                remaining_spillovers.reverse();
-                let mut next = *remaining_spillovers.first().unwrap();
-                for offset in remaining_spillovers.iter().skip(1) {
-                    let so = data_file.append_content(Content::Spillover(0, *offset, next))?;
-                    next = so;
-                }
-                bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
-            }
+            bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             self.write_page(bucket_page)?;
         }
 
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u32, offset: Offset, data_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket)?;
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
-        if data_offset.as_u64() == 0 {
-            // empty slot, just store data
-            bucket_page.write_offset(bucket_offset.in_page_pos(), offset)?;
-        } else {
-            // prepend spillover chain
-            // this logically overwrites previous key association in the spillover chain
-            // since search stops at first key match
-            let so = data_file.append_content(Content::Spillover(0, offset, data_offset))?;
-            bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
-        }
+        let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        // prepend spillover chain
+        // this logically overwrites previous key association in the spillover chain
+        // since search stops at first key match
+        let so = bucket_file.append_content(Content::Spillover(hash, offset, spill_offset))?;
+        bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
         self.write_page(bucket_page)?;
         Ok(())
     }
@@ -222,33 +190,27 @@ impl KeyFile {
         }
         let bucket_offset = Self::bucket_offset(bucket)?;
         let bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut data_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         loop {
-            if data_offset.as_u64() == 0 {
+            if spill_offset.as_u64() == 0 {
                 return Ok(None);
             }
-            match data_file.get_content(data_offset)? {
-                Content::Data(data_key, data) => {
-                    if data_key == key {
-                        return Ok(Some(data));
-                    } else {
-                        return Ok(None);
-                    }
-                },
-                Content::Spillover(_, current, next) => {
+            match bucket_file.get_content(spill_offset)? {
+                Content::Spillover(h, current, next) => {
                     if current.as_u64() == 0 {
                         return Ok(None);
                     }
-                    match data_file.get_content(current)? {
-                        Content::Data(data_key, data) => {
-                            if data_key == key {
-                                return Ok(Some(data));
-                            } else {
-                                data_offset = next;
-                            }
-                        },
-                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                    if h == hash {
+                        match data_file.get_content(current)? {
+                            Content::Data(data_key, data) => {
+                                if data_key == key {
+                                    return Ok(Some(data));
+                                }
+                            },
+                            _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                        }
                     }
+                    spill_offset = next;
                 },
                 _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
             }

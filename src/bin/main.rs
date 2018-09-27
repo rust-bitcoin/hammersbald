@@ -16,12 +16,12 @@ pub fn main () {
     db.init().unwrap();
 
     // transaction size assumed 300 bytes
-    let data = [0x0u8;30];
+    let data = [0x0u8;300];
 
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 2000000;
+    let ntx = 50000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)

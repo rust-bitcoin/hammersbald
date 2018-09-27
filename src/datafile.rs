@@ -385,11 +385,14 @@ impl DataEntry {
     }
 
     pub fn new_spillover (hash: u32, offset: Offset, next: Offset) -> DataEntry {
-        let mut buf = vec![0u8;16];
-        buf.write_u32::<BigEndian>(hash).unwrap();
-        let sp = buf.as_mut_slice();
-        offset.serialize(&mut sp[4..10]);
-        next.serialize(&mut sp[10..16]);
+        let mut sp = Vec::new();
+        sp.write_u32::<BigEndian>(hash).unwrap();
+        let mut o = [0u8;6];
+        offset.serialize(&mut o);
+        sp.extend(o.iter());
+        let mut n = [0u8;6];
+        next.serialize(&mut n);
+        sp.extend(n.iter());
         DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
     }
 }

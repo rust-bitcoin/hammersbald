@@ -159,7 +159,7 @@ impl BCDB {
             return Err(BCDBError::DoesNotFit);
         }
         let offset = self.data.append_content(Content::Data(key.to_vec(), data.to_vec()))?;
-        self.table.put(key, offset, &mut self.data, &mut self.bucket)?;
+        self.table.put(key, offset, &mut self.bucket)?;
         Ok(offset)
     }
 
@@ -355,7 +355,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;32];
 
-        for _ in 1 .. 100000 {
+        for _ in 0 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
