@@ -21,7 +21,7 @@
 use bcdb::{ KEY_LEN};
 use page::{Page, PageIterator, PageFile, PAYLOAD_MAX};
 use error::BCDBError;
-use types::{Offset, U24};
+use types::{Offset, U24, OffsetReader};
 use cache::Cache;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
@@ -87,11 +87,11 @@ impl DataFile {
                     let n = cursor.read_u8().unwrap() as usize;
                     let mut offsets = Vec::new();
                     for _ in 0..n {
-                        offsets.push(Offset::read_vec(&mut cursor).unwrap())
+                        offsets.push(cursor.read_offset())
                     }
                     spills.push((hash, offsets));
                 }
-                let next = Offset::read_vec(&mut cursor).unwrap();
+                let next = cursor.read_offset();
                 return Ok(Content::Spillover(spills, next));
             }
             return Ok(Content::Extension(entry.data))
@@ -114,7 +114,7 @@ impl DataFile {
         self.append_slice(&data_type)?;
 
         let mut len = [0u8; 3];
-        U24::new(entry.data.len())?.serialize(&mut len);
+        U24::from(entry.data.len()).serialize(&mut len);
         self.append_slice(&len)?;
         self.append_slice(entry.data.as_slice())?;
         return Ok(start);
@@ -483,7 +483,7 @@ impl<'file> Iterator for DataIterator<'file> {
                 if data_type == DataType::AppData {
                     let mut size = [0u8; 3];
                     if self.read_slice(&mut size) {
-                        let len = U24::from_slice(&size).unwrap();
+                        let len = U24::from(&size[..]);
                         let mut buf = vec!(0u8; len.as_usize());
                         if self.read_slice(buf.as_mut_slice()) {
                             return Some(
@@ -494,7 +494,7 @@ impl<'file> Iterator for DataIterator<'file> {
                 if data_type == DataType::AppDataExtension {
                     let mut size = [0u8; 3];
                     if self.read_slice(&mut size) {
-                        let len = U24::from_slice(&size).unwrap();
+                        let len = U24::from(&size[..]);
                         let mut buf = vec!(0u8; len.as_usize());
                         if self.read_slice(buf.as_mut_slice()) {
                             return Some(
@@ -505,7 +505,7 @@ impl<'file> Iterator for DataIterator<'file> {
                 else if data_type == DataType::TableSpillOver {
                     let mut size = [0u8; 3];
                     if self.read_slice(&mut size) {
-                        let len = U24::from_slice(&size).unwrap();
+                        let len = U24::from(&size[..]);
                         let mut buf = vec!(0u8; len.as_usize());
                         if self.read_slice(buf.as_mut_slice()) {
                             let mut cursor = Cursor::new(buf);
@@ -516,11 +516,11 @@ impl<'file> Iterator for DataIterator<'file> {
                                 let n = cursor.read_u8().unwrap() as usize;
                                 let mut offsets = Vec::new();
                                 for _ in 0..n {
-                                    offsets.push(Offset::read_vec(&mut cursor).unwrap())
+                                    offsets.push(cursor.read_offset())
                                 }
                                 spills.push((hash, offsets));
                             }
-                            let next = Offset::read_vec(&mut cursor).unwrap();
+                            let next = cursor.read_offset();
                             return Some(
                                 DataEntry::new_spillover(spills, next));
                         }

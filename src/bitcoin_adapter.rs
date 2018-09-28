@@ -18,7 +18,7 @@
 //!
 
 use bcdb::{BCDB, BCDBAPI};
-use types::Offset;
+use types::{Offset. OffsetReader};
 use datafile::Content;
 use error::BCDBError;
 
@@ -63,12 +63,12 @@ impl BitcoinAdapter {
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             let ntx = data.read_u32::<BigEndian>()?;
             for _ in 0 .. ntx {
-                Offset::read_vec(&mut data)?;
+                data.read_offset();
             }
             let next = data.read_u32::<BigEndian>()?;
             let mut extension = Vec::new();
             for _ in 0 .. next {
-                let offset = Offset::read_vec(&mut data)?;
+                let offset = data.read_offset();
                 if let Content::Extension(data) = self.bcdb.get_content(offset)? {
                     extension.push(data);
                 } else {
@@ -107,7 +107,7 @@ impl BitcoinAdapter {
             let ntx = data.read_u32::<BigEndian>()?;
             let mut txdata = Vec::new();
             for _ in 0 .. ntx {
-                let offset = Offset::read_vec(&mut data)?;
+                let offset = data.read_offset()?;
                 if let Content::Extension(tx) = self.bcdb.get_content(offset)? {
                     txdata.push(decode(tx)?);
                 }
@@ -118,7 +118,7 @@ impl BitcoinAdapter {
             let next = data.read_u32::<BigEndian>()?;
             let mut extension = Vec::new();
             for _ in 0 .. next {
-                let offset = Offset::read_vec(&mut data)?;
+                let offset = data.read_offset();
                 if let Content::Extension(data) = self.bcdb.get_content(offset)? {
                     extension.push(data);
                 } else {

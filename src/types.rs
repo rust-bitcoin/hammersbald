@@ -18,7 +18,6 @@
 //! Offset an unsigned 48 bit integer used as file offset
 //! U24 an unsigned 24 bit integer for data element sizes
 
-use error::BCDBError;
 use page::PAGE_SIZE;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
@@ -41,13 +40,19 @@ impl<'a> From<&'a [u8]> for Offset {
     }
 }
 
-impl Offset {
+/// can read offsets from this
+pub trait OffsetReader {
+    /// read offset
+    fn read_offset (&mut self) -> Offset;
+}
 
-    /// read from serialized bytes
-    pub fn read_vec(cursor: &mut Cursor<Vec<u8>>) -> Result<Offset, BCDBError> {
-        Ok(Offset(cursor.read_u48::<BigEndian>()?))
+impl OffsetReader for Cursor<Vec<u8>> {
+    fn read_offset(&mut self) -> Offset {
+        Offset(self.read_u48::<BigEndian>().unwrap())
     }
+}
 
+impl Offset {
     /// serialize to a vector of bytes
     pub fn to_vec(&self) -> Vec<u8> {
         let mut v = Vec::new();
@@ -98,21 +103,6 @@ impl<'a> From<&'a [u8]> for U24 {
 }
 
 impl U24 {
-
-    pub fn new (value: usize) ->Result<U24, BCDBError> {
-        if value > 1 << 23 {
-            return Err(BCDBError::InvalidOffset);
-        }
-        Ok(U24(value))
-    }
-
-    pub fn from_slice (slice: &[u8]) -> Result<U24, BCDBError> {
-        if slice.len() != 3 {
-            return Err(BCDBError::InvalidOffset);
-        }
-        Ok(U24(Cursor::new(slice).read_u24::<BigEndian>()? as usize))
-    }
-
     pub fn as_usize (&self) -> usize {
         return self.0;
     }
