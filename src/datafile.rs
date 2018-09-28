@@ -386,8 +386,8 @@ struct DataEntry {
 
 impl DataEntry {
     pub fn new_data (data_key: &[u8], data: &[u8]) -> DataEntry {
-        let mut d = data.to_vec();
-        d.extend(data_key.to_vec().iter());
+        let mut d = data_key.to_vec();
+        d.extend(data.to_vec().iter());
         DataEntry{data_type: DataType::AppData, data: d}
     }
     pub fn new_data_extension (data: &[u8]) -> DataEntry {
