@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
-use std::io::{Read, Cursor};
+use std::io::Cursor;
 
 
 /// The key file
@@ -87,16 +87,11 @@ impl DataFile {
                     let n = cursor.read_u8().unwrap() as usize;
                     let mut offsets = Vec::new();
                     for _ in 0..n {
-                        let mut o = [0u8; 6];
-                        cursor.read(&mut o).unwrap();
-                        let current = Offset::from_slice(&o).unwrap();
-                        offsets.push(current)
+                        offsets.push(Offset::read_vec(&mut cursor).unwrap())
                     }
                     spills.push((hash, offsets));
                 }
-                let mut o = [0u8; 6];
-                cursor.read(&mut o).unwrap();
-                let next = Offset::from_slice(&o).unwrap();
+                let next = Offset::read_vec(&mut cursor).unwrap();
                 return Ok(Content::Spillover(spills, next));
             }
             return Ok(Content::Extension(entry.data))
@@ -525,16 +520,11 @@ impl<'file> Iterator for DataIterator<'file> {
                                 let n = cursor.read_u8().unwrap() as usize;
                                 let mut offsets = Vec::new();
                                 for _ in 0..n {
-                                    let mut o = [0u8; 6];
-                                    cursor.read(&mut o).unwrap();
-                                    let current = Offset::from_slice(&o).unwrap();
-                                    offsets.push(current)
+                                    offsets.push(Offset::read_vec(&mut cursor).unwrap())
                                 }
                                 spills.push((hash, offsets));
                             }
-                            let mut o = [0u8; 6];
-                            cursor.read(&mut o).unwrap();
-                            let next = Offset::from_slice(&o).unwrap();
+                            let next = Offset::read_vec(&mut cursor).unwrap();
                             return Some(
                                 DataEntry::new_spillover(spills, next));
                         }

@@ -30,7 +30,10 @@
 use error::BCDBError;
 use types::Offset;
 
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+
 use std::sync::Arc;
+use std::io::Cursor;
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAYLOAD_MAX: usize = 4090;
@@ -95,19 +98,13 @@ impl Page {
     pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
         let mut buf = [0u8;8];
         self.read(pos, &mut buf)?;
-        let mut size= 0u64;
-        for i in 0 .. 8 {
-            size <<= 8;
-            size += buf[i] as u64;
-        }
-        Ok(size)
+        Ok(Cursor::new(buf).read_u64::<BigEndian>()?)
     }
 
     pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
-        use std::mem::transmute;
-
-        let bytes: [u8; 8] = unsafe { transmute(n.to_be()) };
-        self.write(pos, &bytes)
+        let mut bytes = Vec::new();
+        bytes.write_u64::<BigEndian>(n)?;
+        self.write(pos, &bytes.as_slice())
     }
 
     /// finish a page after appends to write out

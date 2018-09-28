@@ -21,6 +21,10 @@
 use error::BCDBError;
 use page::PAGE_SIZE;
 
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+
+use std::io::Cursor;
+
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 /// Pointer to persistent data. Limited to 2^48
 pub struct Offset(u64);
@@ -35,17 +39,34 @@ impl Offset {
         Ok(Offset(value))
     }
 
+    /// read from serialized bytes
+    pub fn read_slice(cursor: &mut Cursor<&[u8]>) -> Result<Offset, BCDBError> {
+        Ok(Offset(cursor.read_u48::<BigEndian>()?))
+    }
+
+    /// read from serialized bytes
+    pub fn read_vec(cursor: &mut Cursor<Vec<u8>>) -> Result<Offset, BCDBError> {
+        Ok(Offset(cursor.read_u48::<BigEndian>()?))
+    }
+
+    /// append a serialized offset t a vec of bytes
+    pub fn append (&self, vec: &mut Vec<u8>) {
+        let mut bytes = [0u8; 6];
+        self.serialize(&mut bytes);
+        vec.extend(bytes.iter());
+    }
+
+    /// serialize for storage
+    pub fn serialize (&self, mut into: &mut [u8]) {
+        into.write_u48::<BigEndian>(self.0).unwrap();
+    }
+
     /// create an offset from its stored form
     pub fn from_slice (slice: &[u8]) -> Result<Offset, BCDBError> {
         if slice.len() != 6 {
             return Err(BCDBError::InvalidOffset);
         }
-        let mut size = 0u64;
-        for i in 0 .. 6 {
-            size <<= 8;
-            size += slice[i] as u64;
-        }
-        Ok(Offset(size))
+        Self::read_slice(&mut Cursor::new(slice))
     }
 
     /// convert to a number
@@ -53,13 +74,6 @@ impl Offset {
         return self.0;
     }
 
-    /// serialize for storage
-    pub fn serialize (&self, into: &mut [u8]) {
-        use std::mem::transmute;
-
-        let bytes: [u8; 8] = unsafe { transmute(self.0.to_be()) };
-        into.copy_from_slice(&bytes[2 .. 8]);
-    }
 
     /// offset of the page of this offset
     pub fn this_page(&self) -> Offset {
@@ -98,23 +112,15 @@ impl U24 {
         if slice.len() != 3 {
             return Err(BCDBError::InvalidOffset);
         }
-        let mut size = 0usize;
-        for i in 0 .. 3 {
-            size <<= 8;
-            size += slice[i] as usize;
-        }
-        Ok(U24(size))
+        Ok(U24(Cursor::new(slice).read_u24::<BigEndian>()? as usize))
     }
 
     pub fn as_usize (&self) -> usize {
         return self.0;
     }
 
-    pub fn serialize (&self, into: &mut [u8]) {
-        use std::mem::transmute;
-
-        let bytes: [u8; 8] = unsafe { transmute(self.0.to_be()) };
-        into.copy_from_slice(&bytes[5 .. 8]);
+    pub fn serialize (&self, mut into: &mut [u8]) {
+        into.write_u24::<BigEndian>(self.0 as u32).unwrap();
     }
 }
 
