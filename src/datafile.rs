@@ -45,7 +45,7 @@ pub struct DataFile {
 impl DataFile {
     pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCDBError> {
         let file = DataPageFile::new(rw);
-        let append_pos = Offset::new(file.len()?)?;
+        let append_pos = Offset::from(file.len()?);
         Ok(DataFile{async_file: file,
             append_pos,
             page: Page::new(append_pos) })
@@ -132,13 +132,13 @@ impl DataFile {
             wrote_on_this_page += have;
             if pos == PAYLOAD_MAX {
                 self.async_file.append_page(self.page.clone())?;
-                self.append_pos = self.append_pos.next_page()?;
+                self.append_pos = self.append_pos.next_page();
                 self.page.offset = self.append_pos;
                 pos = 0;
                 wrote_on_this_page = 0;
             }
         }
-        self.append_pos = Offset::new(self.append_pos.as_u64() + wrote_on_this_page as u64)?;
+        self.append_pos = Offset::from(self.append_pos.as_u64() + wrote_on_this_page as u64);
         Ok(())
     }
 
@@ -292,7 +292,7 @@ impl PageFile for DataFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             self.async_file.append_page(self.page.clone())?;
-            self.append_pos = self.append_pos.next_page()?;
+            self.append_pos = self.append_pos.next_page();
             self.page.offset = self.append_pos;
         }
         self.async_file.flush()
@@ -303,7 +303,7 @@ impl PageFile for DataFile {
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
-        self.append_pos = Offset::new(len)?;
+        self.append_pos = Offset::from(len);
         self.page.offset = self.append_pos;
         self.async_file.truncate(len)
     }
@@ -403,14 +403,10 @@ impl DataEntry {
             sp.write_u32::<BigEndian>(hash).unwrap();
             sp.write_u8(spill.len() as u8).unwrap();
             for offset in spill {
-                let mut o = [0u8; 6];
-                offset.serialize(&mut o);
-                sp.extend(o.iter());
+                sp.extend(offset.to_vec());
             }
         }
-        let mut n = [0u8; 6];
-        next.serialize(&mut n);
-        sp.extend(n.iter());
+        sp.extend(next.to_vec());
         DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
     }
 }

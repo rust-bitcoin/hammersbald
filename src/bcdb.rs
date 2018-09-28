@@ -89,15 +89,15 @@ impl BCDB {
                 else {
                     let mut size = [0u8; 6];
                     page.read(2, &mut size)?;
-                    let data_len = Offset::from_slice(&size)?.as_u64();
+                    let data_len = Offset::from(&size[..]).as_u64();
                     self.data.truncate(data_len)?;
 
                     page.read(8, &mut size)?;
-                    let table_len = Offset::from_slice(&size)?.as_u64();
+                    let table_len = Offset::from(&size[..]).as_u64();
                     self.table.truncate(table_len)?;
 
                     page.read(14, &mut size)?;
-                    let bucket_len = Offset::from_slice(&size)?.as_u64();
+                    let bucket_len = Offset::from(&size[..]).as_u64();
                     self.bucket.truncate(bucket_len)?;
                     first = false;
                     debug!("recover BCDB: set lengths to table: {} data: {}", table_len, data_len);
@@ -138,16 +138,11 @@ impl BCDBAPI for BCDB {
         log.clear_cache();
         log.truncate(0)?;
 
-        let mut first = Page::new(Offset::new(0).unwrap());
+        let mut first = Page::new(Offset::from(0));
         first.write(0, &[0xBC, 0x00]).unwrap();
-        let mut size = [0u8; 6];
-        Offset::new(data_len)?.serialize(&mut size);
-        first.write(2, &size).unwrap();
-        Offset::new(table_len)?.serialize(&mut size);
-        first.write(8, &size).unwrap();
-        log.tbl_len = table_len;
-        Offset::new(bucket_len)?.serialize(&mut size);
-        first.write(14, &size).unwrap();
+        first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
+        first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
+        first.write(14, Offset::from(bucket_len).to_vec().as_slice()).unwrap();
 
         log.append_page(first)?;
         log.flush()?;

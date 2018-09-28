@@ -62,7 +62,7 @@ impl KeyFile {
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
-        if let Ok(first_page) = self.read_page(Offset::new(0).unwrap()) {
+        if let Ok(first_page) = self.read_page(Offset::from(0)) {
             let buckets = first_page.read_offset(0).unwrap().as_u64() as u32;
             if buckets > 0 {
                 self.buckets = buckets;
@@ -74,10 +74,10 @@ impl KeyFile {
             info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
         else {
-            let page = Page::new(Offset::new(0)?);
+            let page = Page::new(Offset::from(0));
             let mut fp = LoggedPage { preimage: page.clone(), page};
-            fp.write_offset(0, Offset::new(self.buckets as u64)?)?;
-            fp.write_offset(6, Offset::new(self.step as u64)?)?;
+            fp.write_offset(0, Offset::from(self.buckets as u64))?;
+            fp.write_offset(6, Offset::from(self.step as u64))?;
             fp.write_u64(12, self.sip0)?;
             fp.write_u64(20, self.sip1)?;
             self.write_page(fp)?;
@@ -112,14 +112,14 @@ impl KeyFile {
 
             self.buckets += 1;
             if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
-                let page = Page::new(Offset::new(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64)?);
+                let page = Page::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
                 // no need of pre-image here
                 self.async_file.write_page(page)?;
             }
 
-            if let Ok(mut first_page) = self.read_page(Offset::new(0).unwrap()) {
-                first_page.write_offset(0, Offset::new(self.buckets as u64)?)?;
-                first_page.write_offset(6, Offset::new(self.step as u64)?)?;
+            if let Ok(mut first_page) = self.read_page(Offset::from(0)) {
+                first_page.write_offset(0, Offset::from(self.buckets as u64))?;
+                first_page.write_offset(6, Offset::from(self.step as u64))?;
                 self.write_page(first_page)?;
             }
         }
@@ -128,7 +128,7 @@ impl KeyFile {
     }
 
     fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
-        let bucket_offset = Self::bucket_offset(bucket)?;
+        let bucket_offset = Self::bucket_offset(bucket);
 
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
@@ -165,7 +165,7 @@ impl KeyFile {
         }
 
         if rewrite {
-            let mut next = Offset::new(0)?;
+            let mut next = Offset::from(0);
             let spills:Vec<(u32, Vec<Offset>)> = remaining_spillovers.iter().map(|(h, s)| (*h, s.clone())).collect();
             for spill in spills.chunks(255) {
                 let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
@@ -179,7 +179,7 @@ impl KeyFile {
     }
 
     fn store_to_bucket(&mut self, bucket: u32, spill: Vec<(u32, Vec<Offset>)>, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
-        let bucket_offset = Self::bucket_offset(bucket)?;
+        let bucket_offset = Self::bucket_offset(bucket);
         let mut bucket_page = self.read_page(bucket_offset.this_page())?;
         let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         // prepend spillover chain
@@ -197,7 +197,7 @@ impl KeyFile {
         if bucket < self.step {
             bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
-        let bucket_offset = Self::bucket_offset(bucket)?;
+        let bucket_offset = Self::bucket_offset(bucket);
         let bucket_page = self.read_page(bucket_offset.this_page())?;
         let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
         loop {
@@ -245,13 +245,13 @@ impl KeyFile {
         self.async_file.shutdown()
     }
 
-    fn bucket_offset (bucket: u32) -> Result<Offset, BCDBError> {
+    fn bucket_offset (bucket: u32) -> Offset {
         if (bucket as u64) < FIRST_BUCKETS_PER_PAGE {
-            Offset::new((bucket as u64 / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
+            Offset::from((bucket as u64 / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
                 + (bucket as u64 % FIRST_BUCKETS_PER_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
         }
         else {
-            Offset::new((((bucket as u64 - FIRST_BUCKETS_PER_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
+            Offset::from((((bucket as u64 - FIRST_BUCKETS_PER_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
                 + (bucket as u64 % BUCKETS_PER_PAGE) * BUCKET_SIZE)
         }
     }

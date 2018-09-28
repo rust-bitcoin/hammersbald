@@ -55,7 +55,7 @@ impl Page {
     pub fn from_buf (buf: [u8; PAGE_SIZE as usize]) -> Page {
         let mut payload = [0u8; PAYLOAD_MAX];
         payload.copy_from_slice(&buf[0..PAYLOAD_MAX]);
-        Page {payload, offset: Offset::from_slice(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]).unwrap() }
+        Page {payload, offset: Offset::from(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]) }
     }
 
     /// append some data
@@ -73,7 +73,7 @@ impl Page {
         if pos + 6 > PAYLOAD_MAX {
             return Err (BCDBError::DoesNotFit);
         }
-        offset.serialize(&mut self.payload[pos .. pos + 6]);
+        self.payload[pos .. pos + 6].copy_from_slice(offset.to_vec().as_slice());
         Ok(())
     }
 
@@ -92,7 +92,7 @@ impl Page {
     pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
         let mut buf = [0u8;6];
         self.read(pos, &mut buf)?;
-        Offset::from_slice(&buf)
+        Ok(Offset::from(&buf[..]))
     }
 
     pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
@@ -111,7 +111,7 @@ impl Page {
     pub fn finish (&self) -> [u8; PAGE_SIZE] {
         let mut page = [0u8; PAGE_SIZE];
         page[0 .. PAYLOAD_MAX].copy_from_slice (&self.payload[..]);
-        self.offset.serialize(&mut page[PAYLOAD_MAX ..]);
+        page[PAYLOAD_MAX..].copy_from_slice(self.offset.to_vec().as_slice());
         page
     }
 }
@@ -158,7 +158,7 @@ impl<'file> Iterator for PageIterator<'file> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
-            let offset = Offset::new((self.pagenumber)* PAGE_SIZE as u64).unwrap();
+            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
             if let Ok(page) = self.file.read_page(offset) {
                 self.pagenumber += 1;
                 return Some(page);
@@ -176,7 +176,7 @@ mod test {
     use super::*;
     #[test]
     fn form_test () {
-        let mut page = Page::new(Offset::new(4711).unwrap());
+        let mut page = Page::new(Offset::from(4711));
         let payload: &[u8] = "hello world".as_bytes();
         page.write(0,payload).unwrap();
         let result = page.finish();

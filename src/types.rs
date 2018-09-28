@@ -29,44 +29,30 @@ use std::io::Cursor;
 /// Pointer to persistent data. Limited to 2^48
 pub struct Offset(u64);
 
+impl From<u64> for Offset {
+    fn from(n: u64) -> Self {
+        Offset(n & 0xffffffffffffu64)
+    }
+}
+
+impl<'a> From<&'a [u8]> for Offset {
+    fn from(slice: &'a [u8]) -> Self {
+        Offset::from(Cursor::new(slice).read_u48::<BigEndian>().unwrap())
+    }
+}
+
 impl Offset {
-
-    /// create a new offset from a number
-    pub fn new (value: u64) ->Result<Offset, BCDBError> {
-        if value > 1 << 47 {
-            return Err(BCDBError::InvalidOffset);
-        }
-        Ok(Offset(value))
-    }
-
-    /// read from serialized bytes
-    pub fn read_slice(cursor: &mut Cursor<&[u8]>) -> Result<Offset, BCDBError> {
-        Ok(Offset(cursor.read_u48::<BigEndian>()?))
-    }
 
     /// read from serialized bytes
     pub fn read_vec(cursor: &mut Cursor<Vec<u8>>) -> Result<Offset, BCDBError> {
         Ok(Offset(cursor.read_u48::<BigEndian>()?))
     }
 
-    /// append a serialized offset t a vec of bytes
-    pub fn append (&self, vec: &mut Vec<u8>) {
-        let mut bytes = [0u8; 6];
-        self.serialize(&mut bytes);
-        vec.extend(bytes.iter());
-    }
-
-    /// serialize for storage
-    pub fn serialize (&self, mut into: &mut [u8]) {
-        into.write_u48::<BigEndian>(self.0).unwrap();
-    }
-
-    /// create an offset from its stored form
-    pub fn from_slice (slice: &[u8]) -> Result<Offset, BCDBError> {
-        if slice.len() != 6 {
-            return Err(BCDBError::InvalidOffset);
-        }
-        Self::read_slice(&mut Cursor::new(slice))
+    /// serialize to a vector of bytes
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.write_u48::<BigEndian>(self.0).unwrap();
+        v
     }
 
     /// convert to a number
@@ -77,12 +63,12 @@ impl Offset {
 
     /// offset of the page of this offset
     pub fn this_page(&self) -> Offset {
-        Offset::new((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64).unwrap()
+        Offset::from((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64)
     }
 
     /// page offset after this offset
-    pub fn next_page(&self) -> Result<Offset, BCDBError> {
-        Offset::new((self.0/ PAGE_SIZE as u64 + 1)* PAGE_SIZE as u64)
+    pub fn next_page(&self) -> Offset {
+        Offset::from((self.0/ PAGE_SIZE as u64 + 1)* PAGE_SIZE as u64)
     }
 
     /// compute page number of an offset
@@ -98,6 +84,18 @@ impl Offset {
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 pub(crate) struct U24 (usize);
+
+impl From<usize> for U24 {
+    fn from(n: usize) -> Self {
+        U24(n & 0xffffffusize)
+    }
+}
+
+impl<'a> From<&'a [u8]> for U24 {
+    fn from(slice: &'a [u8]) -> Self {
+        U24::from(Cursor::new(slice).read_u24::<BigEndian>().unwrap() as usize)
+    }
+}
 
 impl U24 {
 

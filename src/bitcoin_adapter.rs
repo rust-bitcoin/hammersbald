@@ -50,7 +50,7 @@ impl BitcoinAdapter {
         serialized_header.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
             let offset = self.bcdb.put_content(Content::Extension(d.clone()))?;
-            offset.append(&mut serialized_header);
+            serialized_header.extend(offset.to_vec());
         }
         self.bcdb.put(&key, serialized_header.as_slice())
     }
@@ -88,12 +88,12 @@ impl BitcoinAdapter {
         serialized_block.write_u32::<BigEndian>(block.txdata.len() as u32)?; // no transactions
         for t in &block.txdata {
             let offset = self.bcdb.put_content(Content::Extension(encode(t)?))?;
-            offset.append(&mut serialized_block);
+            serialized_block.extend(offset.to_vec());
         }
         serialized_block.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
             let offset = self.bcdb.put_content(Content::Extension(d.clone()))?;
-            offset.append(&mut serialized_block);
+            serialized_block.extend(offset.to_vec());
         }
         self.bcdb.put(&key, serialized_block.as_slice())
     }
