@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
-use std::io::Cursor;
+use std::io::{Write, Cursor};
 
 
 /// The key file
@@ -447,23 +447,35 @@ impl<'file> DataIterator<'file> {
         }
     }
 
-    fn read_slice (&mut self, slice: &mut [u8]) -> bool {
+    fn read_sized(&mut self) -> Option<Vec<u8>> {
+        if let Some(size) = self.read(3) {
+            let len = U24::from(&size[..]);
+            if let Some(buf) = self.read(len.as_usize()) {
+                return Some(buf);
+            }
+        }
+        None
+    }
+
+
+    fn read(&mut self, n: usize) -> Option<Vec<u8>> {
+        let mut v = Vec::with_capacity(n);
         let mut read = 0;
         loop {
-            let have = min(PAYLOAD_MAX - self.pos, slice.len() - read);
+            let have = min(PAYLOAD_MAX - self.pos, n - read);
             if let Some(ref mut current) = self.current {
-                slice[read .. read + have].copy_from_slice(&current.payload[self.pos .. self.pos + have]);
+                v.write(&current.payload[self.pos .. self.pos + have]).unwrap();
                 self.pos += have;
                 read += have;
 
-                if read == slice.len() {
-                    return true;
+                if read == n {
+                    return Some(v);
                 }
             }
             else {
-                return false;
+                return None;
             }
-            if read < slice.len() {
+            if read < n {
                 self.current = self.page_iterator.next();
                 self.pos = 0;
             }
@@ -481,49 +493,33 @@ impl<'file> Iterator for DataIterator<'file> {
         if self.current.is_some() {
             if let Some(data_type) = self.skip_non_data() {
                 if data_type == DataType::AppData {
-                    let mut size = [0u8; 3];
-                    if self.read_slice(&mut size) {
-                        let len = U24::from(&size[..]);
-                        let mut buf = vec!(0u8; len.as_usize());
-                        if self.read_slice(buf.as_mut_slice()) {
-                            return Some(
-                                DataEntry::new_data(&buf[0..KEY_LEN], &buf[KEY_LEN..]));
-                        }
+                    if let Some(buf) = self.read_sized() {
+                        return Some(
+                            DataEntry::new_data(&buf[0..KEY_LEN], &buf[KEY_LEN..]));
                     }
                 }
                 if data_type == DataType::AppDataExtension {
-                    let mut size = [0u8; 3];
-                    if self.read_slice(&mut size) {
-                        let len = U24::from(&size[..]);
-                        let mut buf = vec!(0u8; len.as_usize());
-                        if self.read_slice(buf.as_mut_slice()) {
-                            return Some(
-                                DataEntry::new_data_extension(&buf[..]));
-                        }
+                    if let Some(buf) = self.read_sized() {
+                        return Some(DataEntry::new_data_extension(&buf[..]));
                     }
                 }
                 else if data_type == DataType::TableSpillOver {
-                    let mut size = [0u8; 3];
-                    if self.read_slice(&mut size) {
-                        let len = U24::from(&size[..]);
-                        let mut buf = vec!(0u8; len.as_usize());
-                        if self.read_slice(buf.as_mut_slice()) {
-                            let mut cursor = Cursor::new(buf);
-                            let m = cursor.read_u8().unwrap() as usize;
-                            let mut spills = Vec::new();
-                            for _ in 0 .. m {
-                                let hash = cursor.read_u32::<BigEndian>().unwrap();
-                                let n = cursor.read_u8().unwrap() as usize;
-                                let mut offsets = Vec::new();
-                                for _ in 0..n {
-                                    offsets.push(cursor.read_offset())
-                                }
-                                spills.push((hash, offsets));
+                    if let Some(buf) = self.read_sized () {
+                        let mut cursor = Cursor::new(buf);
+                        let m = cursor.read_u8().unwrap() as usize;
+                        let mut spills = Vec::new();
+                        for _ in 0 .. m {
+                            let hash = cursor.read_u32::<BigEndian>().unwrap();
+                            let n = cursor.read_u8().unwrap() as usize;
+                            let mut offsets = Vec::new();
+                            for _ in 0..n {
+                                offsets.push(cursor.read_offset())
                             }
-                            let next = cursor.read_offset();
-                            return Some(
-                                DataEntry::new_spillover(spills, next));
+                            spills.push((hash, offsets));
                         }
+                        let next = cursor.read_offset();
+                        return Some(
+                            DataEntry::new_spillover(spills, next));
                     }
                 }
             }
