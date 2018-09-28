@@ -42,7 +42,7 @@ pub fn main () {
         if i % 100 == 0 {
             check.push (key.clone());
         }
-        db.put(&key, &data).unwrap();
+        db.put(vec!(key.to_vec()), &data).unwrap();
         n += 1;
 
         if n % (bat*tb) == 0 {

@@ -87,17 +87,18 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, key: &[u8], offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
-        let hash = self.hash(key);
-        let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
-        if bucket < self.step {
-            bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+    pub fn put (&mut self, keys: Vec<Vec<u8>>, offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
+        for key in keys {
+            let hash = self.hash(key.as_slice());
+            let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
+            if bucket < self.step {
+                bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+            }
+
+            self.store_to_bucket(bucket, vec![(hash, vec![offset])], bucket_file)?;
         }
 
-        self.store_to_bucket(bucket, vec![(hash, vec![offset])], bucket_file)?;
-
-        // heuristic: number of buckets grows only 1/2 on input
-        if hash & 1 == 0 && self.step < <u32>::max_value() {
+        if self.step < <u32>::max_value() {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
@@ -213,8 +214,10 @@ impl KeyFile {
                             for current in offsets {
                                 match data_file.get_content(current)? {
                                     Content::Data(data_key, data) => {
-                                        if data_key == key {
-                                            return Ok(Some(data));
+                                        for k in data_key {
+                                            if k == key {
+                                                return Ok(Some(data));
+                                            }
                                         }
                                     },
                                     _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))

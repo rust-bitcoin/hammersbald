@@ -31,7 +31,7 @@ use std::cell::Cell;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
-use std::io::{Write, Cursor};
+use std::io::{Write, Read, Cursor};
 
 
 /// The key file
@@ -74,9 +74,19 @@ impl DataFile {
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
             if entry.data_type == DataType::AppData {
-                let key_len = entry.data[0] as usize;
-                let (k, d) = entry.data[1..].split_at(key_len);
-                return Ok(Content::Data(k.to_vec(), d.to_vec()));
+                let mut cursor = Cursor::new(entry.data);
+                let n_keys = cursor.read_u8().unwrap();
+                let mut keys = Vec::new();
+                for _ in 0 .. n_keys {
+                    let key_len = cursor.read_u8().unwrap() as usize;
+                    let mut key = vec!(0u8;key_len);
+                    cursor.read(&mut key).unwrap();
+                    keys.push(key);
+                }
+                let pos = cursor.position() as usize;
+                let v = cursor.into_inner();
+                let (_, data) = v.split_at(pos);
+                return Ok(Content::Data(keys, data.to_vec()));
             }
             else if entry.data_type == DataType::TableSpillOver {
                 let mut cursor = Cursor::new(entry.data);
@@ -101,7 +111,7 @@ impl DataFile {
 
     pub fn append_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
         match content {
-            Content::Data(k, d) => self.append(DataEntry::new_data(k.as_slice(), d.as_slice())),
+            Content::Data(k, d) => self.append(DataEntry::new_data(k, d.as_slice())),
             Content::Extension(d) => self.append(DataEntry::new_data_extension(d.as_slice())),
             Content::Spillover(spills, next) => self.append(DataEntry::new_spillover(spills, next))
         }
@@ -340,7 +350,7 @@ pub enum Content {
     /// spillover
     Spillover(Vec<(u32, Vec<Offset>)>, Offset),
     /// regular data referred in index
-    Data(Vec<u8>, Vec<u8>),
+    Data(Vec<Vec<u8>>, Vec<u8>),
     /// data referred by data, not in index
     Extension(Vec<u8>)
 }
@@ -385,10 +395,13 @@ struct DataEntry {
 }
 
 impl DataEntry {
-    pub fn new_data (data_key: &[u8], data: &[u8]) -> DataEntry {
+    pub fn new_data (keys: Vec<Vec<u8>>, data: &[u8]) -> DataEntry {
         let mut d = Vec::new();
-        d.push(data_key.len() as u8);
-        d.extend(data_key.to_vec());
+        d.push(keys.len() as u8);
+        for key in keys {
+            d.push(key.len() as u8);
+            d.extend(key.to_vec());
+        }
         d.extend(data.to_vec());
         DataEntry{data_type: DataType::AppData, data: d}
     }
@@ -496,10 +509,21 @@ impl<'file> Iterator for DataIterator<'file> {
             if let Some(data_type) = self.skip_non_data() {
                 if data_type == DataType::AppData {
                     if let Some(buf) = self.read_sized() {
-                        let key_len = buf[0] as usize;
-                        let (k, v) = buf[1..].split_at(key_len);
+
+                        let mut cursor = Cursor::new(buf);
+                        let n_keys = cursor.read_u8().unwrap();
+                        let mut keys = Vec::new();
+                        for _ in 0 .. n_keys {
+                            let key_len = cursor.read_u8().unwrap() as usize;
+                            let mut key = vec!(0u8;key_len);
+                            cursor.read(&mut key).unwrap();
+                            keys.push(key);
+                        }
+                        let pos = cursor.position() as usize;
+                        let v = cursor.into_inner();
+                        let (_, data) = v.split_at(pos);
                         return Some(
-                            DataEntry::new_data(k, v));
+                            DataEntry::new_data(keys, data));
                     }
                 }
                 if data_type == DataType::AppDataExtension {

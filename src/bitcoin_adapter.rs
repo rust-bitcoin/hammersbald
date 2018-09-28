@@ -18,7 +18,7 @@
 //!
 
 use bcdb::{BCDB, BCDBAPI};
-use types::{Offset. OffsetReader};
+use types::{Offset, OffsetReader};
 use datafile::Content;
 use error::BCDBError;
 
@@ -52,7 +52,7 @@ impl BitcoinAdapter {
             let offset = self.bcdb.put_content(Content::Extension(d.clone()))?;
             serialized_header.extend(offset.to_vec());
         }
-        self.bcdb.put(&key, serialized_header.as_slice())
+        self.bcdb.put(vec!(key.to_vec()), serialized_header.as_slice())
     }
 
     /// Fetch a header by its id
@@ -95,7 +95,7 @@ impl BitcoinAdapter {
             let offset = self.bcdb.put_content(Content::Extension(d.clone()))?;
             serialized_block.extend(offset.to_vec());
         }
-        self.bcdb.put(&key, serialized_block.as_slice())
+        self.bcdb.put(vec!(key.to_vec()), serialized_block.as_slice())
     }
 
     /// Fetch a block by its id
@@ -107,7 +107,7 @@ impl BitcoinAdapter {
             let ntx = data.read_u32::<BigEndian>()?;
             let mut txdata = Vec::new();
             for _ in 0 .. ntx {
-                let offset = data.read_offset()?;
+                let offset = data.read_offset();
                 if let Content::Extension(tx) = self.bcdb.get_content(offset)? {
                     txdata.push(decode(tx)?);
                 }
@@ -145,7 +145,7 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
         self.bcdb.put(key, data)
     }
 
@@ -194,7 +194,8 @@ mod test {
     fn hashtest() {
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
-        db.put(encode(&Sha256dHash::default()).unwrap().as_slice(), encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap();
+        db.put(
+            vec!(encode(&Sha256dHash::default()).unwrap()), encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap();
         assert_eq!(Some(decode(db.get(encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap().unwrap()).unwrap()), Some(Sha256dHash::default()));
     }
 

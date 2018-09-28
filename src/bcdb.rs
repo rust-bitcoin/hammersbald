@@ -51,7 +51,7 @@ pub trait BCDBAPI {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError>;
+    fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError>;
 
     /// retrieve data by key
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError>;
@@ -160,9 +160,9 @@ impl BCDBAPI for BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
-        let offset = self.data.append_content(Content::Data(key.to_vec(), data.to_vec()))?;
-        self.table.put(key, offset, &mut self.bucket)?;
+    fn put(&mut self, keys: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
+        let offset = self.data.append_content(Content::Data(keys.clone(), data.to_vec()))?;
+        self.table.put(keys, offset, &mut self.bucket)?;
         Ok(offset)
     }
 
@@ -217,7 +217,9 @@ mod test {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
-            db.put(&key, &data).unwrap();
+            let mut k = Vec::new();
+            k.push(key.to_vec());
+            db.put(k, &data).unwrap();
             assert_eq!(db.get(&key).unwrap().unwrap(), data.to_vec());
         }
         db.batch().unwrap();
