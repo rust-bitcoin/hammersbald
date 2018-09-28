@@ -25,9 +25,6 @@ use error::BCDBError;
 
 use std::sync::{Mutex,Arc};
 
-/// fixed key length of 256 bits
-pub const KEY_LEN : usize = 32;
-
 /// a trait to create a new db
 pub trait BCDBFactory {
     /// create a new db
@@ -164,9 +161,6 @@ impl BCDBAPI for BCDB {
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
-        if key.len() != KEY_LEN {
-            return Err(BCDBError::DoesNotFit);
-        }
         let offset = self.data.append_content(Content::Data(key.to_vec(), data.to_vec()))?;
         self.table.put(key, offset, &mut self.bucket)?;
         Ok(offset)
@@ -174,9 +168,6 @@ impl BCDBAPI for BCDB {
 
     /// retrieve data by key
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
-        if key.len() != KEY_LEN {
-            return Err(BCDBError::DoesNotFit);
-        }
         self.table.get(key, &self.data, &self.bucket)
     }
 

@@ -18,7 +18,6 @@
 //! Specific implementation details to data file
 //!
 
-use bcdb::{ KEY_LEN};
 use page::{Page, PageIterator, PageFile, PAYLOAD_MAX};
 use error::BCDBError;
 use types::{Offset, U24, OffsetReader};
@@ -75,7 +74,8 @@ impl DataFile {
             PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
         if let Some(entry) = fetch_iterator.next() {
             if entry.data_type == DataType::AppData {
-                let (k, d) = entry.data.split_at(KEY_LEN);
+                let key_len = entry.data[0] as usize;
+                let (k, d) = entry.data[1..].split_at(key_len);
                 return Ok(Content::Data(k.to_vec(), d.to_vec()));
             }
             else if entry.data_type == DataType::TableSpillOver {
@@ -386,8 +386,10 @@ struct DataEntry {
 
 impl DataEntry {
     pub fn new_data (data_key: &[u8], data: &[u8]) -> DataEntry {
-        let mut d = data_key.to_vec();
-        d.extend(data.to_vec().iter());
+        let mut d = Vec::new();
+        d.push(data_key.len() as u8);
+        d.extend(data_key.to_vec());
+        d.extend(data.to_vec());
         DataEntry{data_type: DataType::AppData, data: d}
     }
     pub fn new_data_extension (data: &[u8]) -> DataEntry {
@@ -494,8 +496,10 @@ impl<'file> Iterator for DataIterator<'file> {
             if let Some(data_type) = self.skip_non_data() {
                 if data_type == DataType::AppData {
                     if let Some(buf) = self.read_sized() {
+                        let key_len = buf[0] as usize;
+                        let (k, v) = buf[1..].split_at(key_len);
                         return Some(
-                            DataEntry::new_data(&buf[0..KEY_LEN], &buf[KEY_LEN..]));
+                            DataEntry::new_data(k, v));
                     }
                 }
                 if data_type == DataType::AppDataExtension {
