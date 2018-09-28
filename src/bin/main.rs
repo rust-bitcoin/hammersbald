@@ -5,6 +5,7 @@ extern crate log;
 
 use blockchain_store::infile::InFile;
 use blockchain_store::bcdb::BCDBFactory;
+use blockchain_store::bcdb::BCDBAPI;
 
 use rand::{thread_rng, Rng};
 
