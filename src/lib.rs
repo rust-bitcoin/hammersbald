@@ -46,3 +46,5 @@ pub mod error;
 pub mod types;
 pub mod inmemory;
 pub mod infile;
+#[cfg(feature="bitcoin_support")]
+pub mod bitcoin_adapter;
