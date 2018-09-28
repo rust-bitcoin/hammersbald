@@ -144,6 +144,7 @@ impl BCDBAPI for BCDB {
         first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
         first.write(14, Offset::from(bucket_len).to_vec().as_slice()).unwrap();
 
+        log.tbl_len = table_len;
         log.append_page(first)?;
         log.flush()?;
         log.sync()?;
