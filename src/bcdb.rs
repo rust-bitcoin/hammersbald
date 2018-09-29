@@ -167,10 +167,14 @@ impl BCDBAPI for BCDB {
     /// store data with some keys
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, keys: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
-        if keys.len() > 255 || data.len() >= 1 << 23 ||
-            keys.iter().any(|k| k.len() > 255) {
-            return Err(BCDBError::DoesNotFit);
+        #[cfg(debug_assertions)]
+        {
+            if keys.len() > 255 || data.len() >= 1 << 23 ||
+                keys.iter().any(|k| k.len() > 255) {
+                return Err(BCDBError::DoesNotFit);
+            }
         }
+
         let offset = self.data.append_content(Content::Data(keys.clone(), data.to_vec()))?;
         self.table.put(keys, offset, &mut self.bucket)?;
         Ok(offset)
