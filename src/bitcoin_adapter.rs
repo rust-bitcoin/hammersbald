@@ -58,7 +58,7 @@ impl BitcoinAdapter {
     /// Fetch a header by its id
     pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCDBError> {
         let key = id.data();
-        if let Some(stored) = self.bcdb.get(&key)? {
+        if let Some(stored) = self.bcdb.get_unique(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             let ntx = data.read_u32::<BigEndian>()?;
@@ -101,7 +101,7 @@ impl BitcoinAdapter {
     /// Fetch a block by its id
     pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCDBError> {
         let key = id.data();
-        if let Some(stored) = self.bcdb.get(&key)? {
+        if let Some(stored) = self.bcdb.get_unique(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             let ntx = data.read_u32::<BigEndian>()?;
@@ -149,8 +149,12 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.put(key, data)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
+    fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
         self.bcdb.get(key)
+    }
+
+    fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
+        self.bcdb.get_unique(key)
     }
 
     fn put_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
@@ -196,7 +200,7 @@ mod test {
         db.init().unwrap();
         db.put(
             vec!(encode(&Sha256dHash::default()).unwrap()), encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap();
-        assert_eq!(Some(decode(db.get(encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap().unwrap()).unwrap()), Some(Sha256dHash::default()));
+        assert_eq!(Some(decode(db.get_unique(encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap().unwrap()).unwrap()), Some(Sha256dHash::default()));
     }
 
     #[test]

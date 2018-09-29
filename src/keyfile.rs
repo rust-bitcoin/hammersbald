@@ -192,7 +192,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
+    pub fn get_unique (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -217,6 +217,47 @@ impl KeyFile {
                                         for k in data_key {
                                             if k == key {
                                                 return Ok(Some(data));
+                                            }
+                                        }
+                                    },
+                                    _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                                }
+                            }
+                        }
+                    }
+                    spill_offset = next;
+                },
+                _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
+            }
+        }
+    }
+
+    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Vec<Offset>, BCDBError> {
+        let hash = self.hash(key);
+        let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
+        if bucket < self.step {
+            bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+        }
+        let bucket_offset = Self::bucket_offset(bucket);
+        let bucket_page = self.read_page(bucket_offset.this_page())?;
+        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        let mut result = Vec::new();
+        loop {
+            if spill_offset.as_u64() == 0 {
+                return Ok(result);
+            }
+            match bucket_file.get_content(spill_offset)? {
+                Content::Spillover(spills, next) => {
+                    for s in spills {
+                        let h = s.0;
+                        let offsets = s.1;
+                        if h == hash {
+                            for current in offsets {
+                                match data_file.get_content(current)? {
+                                    Content::Data(data_key, _) => {
+                                        for k in data_key {
+                                            if k == key {
+                                                result.push(current);
                                             }
                                         }
                                     },

@@ -53,8 +53,11 @@ pub trait BCDBAPI {
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError>;
 
-    /// retrieve data by key
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError>;
+    /// retrieve data offsets by key
+    fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError>;
+
+    /// retrieve single data by key
+    fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError>;
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
@@ -158,7 +161,7 @@ impl BCDBAPI for BCDB {
         self.table.shutdown();
     }
 
-    /// store data with a key
+    /// store data with some keys
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, keys: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
         let offset = self.data.append_content(Content::Data(keys.clone(), data.to_vec()))?;
@@ -167,8 +170,13 @@ impl BCDBAPI for BCDB {
     }
 
     /// retrieve data by key
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
+    fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
         self.table.get(key, &self.data, &self.bucket)
+    }
+
+    /// retreive the single data associated with this key
+    fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
+        self.table.get_unique(key, &self.data, &self.bucket)
     }
 
     /// append some content without key
@@ -219,13 +227,14 @@ mod test {
             check.insert(key, data);
             let mut k = Vec::new();
             k.push(key.to_vec());
-            db.put(k, &data).unwrap();
-            assert_eq!(db.get(&key).unwrap().unwrap(), data.to_vec());
+            db.put(k.clone(), &data).unwrap();
+
+            assert_eq!(db.get_unique(&key[..]).unwrap(), Some(data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, v) in check.iter() {
-            assert_eq!(db.get(k).unwrap(), Some(v.to_vec()));
+            assert_eq!(db.get_unique(k).unwrap(), Some(v.to_vec()));
         }
         db.shutdown();
     }
