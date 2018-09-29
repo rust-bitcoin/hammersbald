@@ -176,7 +176,7 @@ impl PageFile for RolledFile {
             self.len = max(self.len, offset + PAGE_SIZE as u64);
             return file.write_page(page);
         } else {
-            return Err(BCDBError::Corrupted("missing chunk in append".to_string()));
+            return Err(BCDBError::Corrupted("missing chunk in write page".to_string()));
         }
     }
 
