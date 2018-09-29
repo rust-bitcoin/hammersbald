@@ -19,11 +19,9 @@
 
 use bcdb::{BCDB, BCDBAPI};
 use types::{Offset, OffsetReader};
-use datafile::Content;
 use error::BCDBError;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
-use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::network::serialize::BitcoinHash;
 use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
 use bitcoin::network::serialize::{RawDecoder, RawEncoder};
@@ -49,7 +47,7 @@ impl BitcoinAdapter {
         serialized_header.write_u32::<BigEndian>(0)?; // no transactions
         serialized_header.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
-            let offset = self.bcdb.put_content(Content::Extension(d.clone()))?;
+            let offset = self.bcdb.put_content(d.clone())?;
             serialized_header.extend(offset.to_vec());
         }
         self.bcdb.put(vec!(key.to_vec()), serialized_header.as_slice())
@@ -69,11 +67,7 @@ impl BitcoinAdapter {
             let mut extension = Vec::new();
             for _ in 0 .. next {
                 let offset = data.read_offset();
-                if let Content::Extension(data) = self.bcdb.get_content(offset)? {
-                    extension.push(data);
-                } else {
-                    return Err(BCDBError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
-                }
+                extension.push(self.bcdb.get_content(offset)?);
             }
 
             return Ok(Some((header, extension)))
@@ -87,12 +81,12 @@ impl BitcoinAdapter {
         let mut serialized_block = encode(&block.header)?;
         serialized_block.write_u32::<BigEndian>(block.txdata.len() as u32)?; // no transactions
         for t in &block.txdata {
-            let offset = self.bcdb.put_content(Content::Extension(encode(t)?))?;
+            let offset = self.bcdb.put_content(encode(t)?)?;
             serialized_block.extend(offset.to_vec());
         }
         serialized_block.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
-            let offset = self.bcdb.put_content(Content::Extension(d.clone()))?;
+            let offset = self.bcdb.put_content(d.clone())?;
             serialized_block.extend(offset.to_vec());
         }
         self.bcdb.put(vec!(key.to_vec()), serialized_block.as_slice())
@@ -108,22 +102,13 @@ impl BitcoinAdapter {
             let mut txdata = Vec::new();
             for _ in 0 .. ntx {
                 let offset = data.read_offset();
-                if let Content::Extension(tx) = self.bcdb.get_content(offset)? {
-                    txdata.push(decode(tx)?);
-                }
-                else {
-                    return Err(BCDBError::Corrupted(format!("can not find transaction {}", offset.as_u64())));
-                }
+                txdata.push(decode(self.bcdb.get_content(offset)?)?);
             }
             let next = data.read_u32::<BigEndian>()?;
             let mut extension = Vec::new();
             for _ in 0 .. next {
                 let offset = data.read_offset();
-                if let Content::Extension(data) = self.bcdb.get_content(offset)? {
-                    extension.push(data);
-                } else {
-                    return Err(BCDBError::Corrupted(format!("can not find app data extension {}", offset.as_u64())));
-                }
+                extension.push(self.bcdb.get_content(offset)?);
             }
 
             return Ok(Some((Block{header, txdata}, extension)))
@@ -149,6 +134,10 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.put(key, data)
     }
 
+    fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
+        self.bcdb.dedup(key)
+    }
+
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
         self.bcdb.get(key)
     }
@@ -157,11 +146,11 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.get_unique(key)
     }
 
-    fn put_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
-        self.bcdb.put_content(content)
+    fn put_content(&mut self, data: Vec<u8>) -> Result<Offset, BCDBError> {
+        self.bcdb.put_content(data)
     }
 
-    fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
+    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
         self.bcdb.get_content(offset)
     }
 }
@@ -185,14 +174,10 @@ mod test {
     extern crate hex;
 
     use inmemory::InMemory;
-    use infile::InFile;
-    use log;
 
     use bcdb::BCDBFactory;
 
     use super::*;
-    use self::rand::thread_rng;
-    use std::collections::HashMap;
 
     #[test]
     fn hashtest() {

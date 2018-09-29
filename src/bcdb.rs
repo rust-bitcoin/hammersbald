@@ -53,6 +53,9 @@ pub trait BCDBAPI {
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError>;
 
+    /// leave only most recent data association with the key
+    fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError>;
+
     /// retrieve data offsets by key
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError>;
 
@@ -61,10 +64,10 @@ pub trait BCDBAPI {
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
-    fn put_content(&mut self, content: Content) -> Result<Offset, BCDBError>;
+    fn put_content(&mut self, content: Vec<u8>) -> Result<Offset, BCDBError>;
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<Content, BCDBError>;
+    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError>;
 }
 
 impl BCDB {
@@ -164,9 +167,17 @@ impl BCDBAPI for BCDB {
     /// store data with some keys
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, keys: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
+        if keys.len() > 255 || data.len() >= 1 << 23 ||
+            keys.iter().any(|k| k.len() > 255) {
+            return Err(BCDBError::DoesNotFit);
+        }
         let offset = self.data.append_content(Content::Data(keys.clone(), data.to_vec()))?;
         self.table.put(keys, offset, &mut self.bucket)?;
         Ok(offset)
+    }
+
+    fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
+        self.table.dedup(key, &mut self.bucket, &self.data)
     }
 
     /// retrieve data by key
@@ -181,28 +192,25 @@ impl BCDBAPI for BCDB {
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
-    fn put_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
-        if let Content::Extension(data) = content {
-            return self.data.append_content(Content::Extension(data));
-        }
-        return Err(BCDBError::DoesNotFit)
+    fn put_content(&mut self, data: Vec<u8>) -> Result<Offset, BCDBError> {
+        return self.data.append_content(Content::Extension(data));
     }
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
-        self.data.get_content(offset)
+    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
+        match self.data.get_content(offset)? {
+            Content::Extension(data) => return Ok(data),
+            _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset.as_u64())))
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    extern crate simple_logger;
     extern crate rand;
     extern crate hex;
 
     use inmemory::InMemory;
-    use infile::InFile;
-    use log;
 
     use super::*;
     use self::rand::thread_rng;
@@ -211,7 +219,6 @@ mod test {
 
     #[test]
     fn test () {
-        simple_logger::init_with_level(log::Level::Debug).unwrap();
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
@@ -228,13 +235,81 @@ mod test {
             let mut k = Vec::new();
             k.push(key.to_vec());
             db.put(k.clone(), &data).unwrap();
-
-            assert_eq!(db.get_unique(&key[..]).unwrap(), Some(data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, v) in check.iter() {
             assert_eq!(db.get_unique(k).unwrap(), Some(v.to_vec()));
+        }
+        db.shutdown();
+    }
+
+    #[test]
+    fn test_multiple_keys () {
+        let mut db = InMemory::new_db("first").unwrap();
+        db.init().unwrap();
+
+        let mut rng = thread_rng();
+
+        let mut check = HashMap::new();
+        let mut key1 = [0x0u8;32];
+        let mut key2 = [0x0u8;32];
+        let mut data = [0x0u8;40];
+
+        for _ in 0 .. 10000 {
+            rng.fill_bytes(&mut key1);
+            rng.fill_bytes(&mut key2);
+            rng.fill_bytes(&mut data);
+            check.insert((key1, key2), data);
+            db.put(vec!(key1.to_vec(),key2.to_vec()), &data).unwrap();
+        }
+        db.batch().unwrap();
+
+        for v2 in check.keys() {
+            assert_eq!(db.get(&v2.0).unwrap(), db.get(&v2.1).unwrap());
+        }
+        db.shutdown();
+    }
+
+    #[test]
+    fn test_non_unique_keys_dedup () {
+        let mut db = InMemory::new_db("first").unwrap();
+        db.init().unwrap();
+
+        let mut rng = thread_rng();
+
+        let mut check = HashMap::new();
+        let mut key = [0x0u8;32];
+        let mut data1 = [0x0u8;40];
+        let mut data2 = [0x0u8;40];
+
+        for _ in 0 .. 100000 {
+            rng.fill_bytes(&mut key);
+            rng.fill_bytes(&mut data1);
+            rng.fill_bytes(&mut data2);
+            let o1 = db.put(vec!(key.to_vec()), &data1).unwrap();
+            let o2 = db.put(vec!(key.to_vec()), &data2).unwrap();
+            let mut os = vec!(o1, o2);
+            os.sort_unstable();
+            check.insert(key, os);
+        }
+        db.batch().unwrap();
+        // check logical overwrite
+        for (k, _) in &check {
+            let mut os = db.get(k).unwrap();
+            assert!(os[0] > os[1]);
+        }
+        // check same result
+        for (k, v) in &check {
+            let mut os = db.get(k).unwrap();
+            os.sort_unstable();
+            assert_eq!(os, *v);
+        }
+        // check dedup leaves most recent in place
+        for (k, v) in &check {
+            db.dedup(k).unwrap();
+            let mut os = db.get(k).unwrap();
+            assert_eq!(os, vec!(v[1]));
         }
         db.shutdown();
     }

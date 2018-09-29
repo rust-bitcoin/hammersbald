@@ -23,10 +23,23 @@ use page::PAGE_SIZE;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::Cursor;
+use std::cmp::Ordering;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 /// Pointer to persistent data. Limited to 2^48
 pub struct Offset(u64);
+
+impl Ord for Offset {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialOrd for Offset {
+    fn partial_cmp(&self, other: &Offset) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
 
 impl From<u64> for Offset {
     fn from(n: u64) -> Self {
