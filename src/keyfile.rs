@@ -478,7 +478,7 @@ impl KeyPageFile {
         let mut last_loop= Instant::now();
         while run {
             run = inner.run.lock().expect("run lock poisoned").get();
-            let writes;
+            let mut writes;
             loop {
                 let mut cache = inner.cache.lock().expect("cache lock poisoned");
                 if cache.is_empty() {
@@ -512,6 +512,7 @@ impl KeyPageFile {
                     log.sync().expect("can not sync log");
                 }
                 let mut file = inner.file.lock().expect("file lock poisoned");
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
                 file.write_batch(writes).expect("batch write failed");
             }
         }
