@@ -257,7 +257,7 @@ impl PageFile for SingleFile {
         let mut file = self.file.lock().unwrap();
         file.seek(SeekFrom::Start(pos))?;
         file.write(&page.finish()[..])?;
-        self.len = max(self.len, self.base + PAGE_SIZE as u64);
+        self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(())
     }
 
