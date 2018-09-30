@@ -20,7 +20,7 @@
 //! this set.
 //!
 
-use page::{Page, PageFile, PageIterator};
+use page::{Page, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
 
@@ -52,8 +52,8 @@ impl LogFile {
         self.logged.clear();
     }
 
-    pub fn page_iter (&self) -> PageIterator {
-        PageIterator::new(self, 0)
+    pub fn page_iter (&self) -> LogPageIterator {
+        LogPageIterator::new(self, 0)
     }
 }
 
@@ -74,7 +74,7 @@ impl PageFile for LogFile {
         self.rw.sync()
     }
 
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         self.rw.read_page(offset)
     }
 
@@ -83,7 +83,37 @@ impl PageFile for LogFile {
         self.rw.append_page(page)
     }
 
-    fn write_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
+    }
+}
+
+/// iterate through pages of a paged file
+pub struct LogPageIterator<'file> {
+    /// the current page of the iterator
+    pub pagenumber: u64,
+    file: &'file LogFile
+}
+
+/// page iterator
+impl<'file> LogPageIterator<'file> {
+    /// create a new iterator starting at given page
+    pub fn new (file: &'file LogFile, pagenumber: u64) -> LogPageIterator {
+        LogPageIterator{pagenumber, file}
+    }
+}
+
+impl<'file> Iterator for LogPageIterator<'file> {
+    type Item = Page;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
+            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
+            if let Ok(Some(page)) = self.file.read_page(offset) {
+                self.pagenumber += 1;
+                return Some(page);
+            }
+        }
+        None
     }
 }

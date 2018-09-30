@@ -52,8 +52,8 @@ impl BCDBFactory for InFile {
         let table = KeyFile::new(Box::new(InFile::new(
             RolledFile::new(name.to_string(), "tb".to_string(), false, KEY_CHUNK_SIZE)?
         )), log);
-        let bucket = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
-        let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?;
+        let bucket = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?), "data")?;
+        let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?), "link")?;
 
         BCDB::new(table, data, bucket)
     }
@@ -76,7 +76,7 @@ impl PageFile for InFile {
         self.file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         self.file.read_page(offset)
     }
 
@@ -84,7 +84,7 @@ impl PageFile for InFile {
         self.file.append_page(page)
     }
 
-    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.file.write_page(page)
+    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+        self.file.write_page(offset, page)
     }
 }

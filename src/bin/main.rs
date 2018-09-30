@@ -12,7 +12,7 @@ use rand::{thread_rng, Rng};
 use std::time::{Instant};
 
 pub fn main () {
-    simple_logger::init_with_level(log::Level::Info).unwrap();
+    simple_logger::init_with_level(log::Level::Debug).unwrap();
     let mut db = InFile::new_db("testdb").unwrap();
     db.init().unwrap();
 

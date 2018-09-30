@@ -136,12 +136,12 @@ impl PageFile for RolledFile {
         Ok(())
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let chunk = (offset.as_u64() / self.chunk_size) as u16;
         if let Some(file) = self.files.get(&chunk) {
             return file.read_page(offset);
         }
-        Err(BCDBError::Corrupted("missing chunk in read".to_string()))
+        Ok(None)
     }
 
     fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
@@ -154,29 +154,31 @@ impl PageFile for RolledFile {
         }
 
         if let Some (file) = self.files.get_mut(&chunk) {
+            file.append_page(page)?;
             self.len += PAGE_SIZE as u64;
-            return file.append_page(page);
+            return Ok(())
         }
         else {
-            return Err(BCDBError::Corrupted("missing chunk in append".to_string()));
+            return Err(BCDBError::Corrupted(format!("missing chunk in append {}", chunk)));
         }
     }
 
-    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        let offset = page.offset.as_u64();
-        let chunk = (offset / self.chunk_size) as u16;
+    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+        let n_offset = offset.as_u64();
+        let chunk = (n_offset / self.chunk_size) as u16;
 
         if !self.files.contains_key(&chunk) {
             let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
                 + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new(file, (offset/self.chunk_size) * self.chunk_size, self.chunk_size)?);
+            self.files.insert(chunk, SingleFile::new(file, (n_offset/self.chunk_size) * self.chunk_size, self.chunk_size)?);
         }
 
         if let Some(file) = self.files.get_mut(&chunk) {
-            self.len = max(self.len, offset + PAGE_SIZE as u64);
-            return file.write_page(page);
+            file.write_page(offset, page)?;
+            self.len = max(self.len, n_offset + PAGE_SIZE as u64);
+            Ok(())
         } else {
-            return Err(BCDBError::Corrupted("missing chunk in write page".to_string()));
+            return Err(BCDBError::Corrupted(format!("missing chunk in write {}", chunk)));
         }
     }
 }
@@ -213,22 +215,21 @@ impl PageFile for SingleFile {
         Ok(self.file.lock().unwrap().sync_data()?)
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let o = offset.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("read from wrong file".to_string()));
         }
         let pos = o - self.base;
         if pos >= self.len {
-            return Err(BCDBError::InvalidOffset);
+            return Ok(None);
         }
 
         let mut file = self.file.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(pos))?;
         file.read(&mut buffer)?;
-        let page = Arc::new(Page::from_buf(buffer));
-        Ok(page)
+        Ok(Some(Page::from_buf(buffer)))
     }
 
     fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
@@ -238,8 +239,8 @@ impl PageFile for SingleFile {
         Ok(())
     }
 
-    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        let o = page.offset.as_u64();
+    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+        let o = offset.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("write to wrong file".to_string()));
         }

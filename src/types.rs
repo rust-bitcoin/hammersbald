@@ -73,6 +73,16 @@ impl Offset {
         v
     }
 
+    /// construct an invalid offset
+    pub fn invalid () -> Offset {
+        Offset::from(0)
+    }
+
+    /// is this a valid offset?
+    pub fn is_valid (&self) -> bool {
+        self.0 > 0 && self.0 < (1 << 47)
+    }
+
     /// convert to a number
     pub fn as_u64 (&self) -> u64 {
         return self.0;

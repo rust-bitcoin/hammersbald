@@ -18,13 +18,6 @@
 //!
 //! The page is the unit of read and write.
 //!
-//! <pre>
-//! +------------------------------------+
-//! |    | payload                       |
-//! +----+-------------------------------+
-//! |u48 | block offset                  |
-//! +----+-------------------------------+
-//! </pre>
 //!
 
 use error::BCDBError;
@@ -36,32 +29,31 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 pub const PAGE_SIZE: usize = 4096;
-pub const PAYLOAD_MAX: usize = 4090;
 
 /// A page of the persistent files
 #[derive(Clone)]
 pub struct Page {
-    pub payload: [u8; PAYLOAD_MAX],
+    pub payload: [u8; PAGE_SIZE],
     pub offset: Offset
 }
 
 impl Page {
     /// create a new empty page to be appended at given offset
     pub fn new (offset: Offset) -> Page {
-        Page {payload: [0u8; PAYLOAD_MAX], offset}
+        let mut content = [0u8; PAGE_SIZE];
+        content[PAGE_SIZE - 6 ..].copy_from_slice(offset.to_vec().as_slice());
+        Page {payload: content, offset}
     }
 
     /// create a Page from read buffer
-    pub fn from_buf (buf: [u8; PAGE_SIZE as usize]) -> Page {
-        let mut payload = [0u8; PAYLOAD_MAX];
-        payload.copy_from_slice(&buf[0..PAYLOAD_MAX]);
-        Page {payload, offset: Offset::from(&buf[PAYLOAD_MAX .. PAYLOAD_MAX + 6]) }
+    pub fn from_buf (payload: [u8; PAGE_SIZE]) -> Page {
+        Page {payload, offset: Offset::from(&payload[PAGE_SIZE - 6 ..]) }
     }
 
     /// append some data
     /// will return Error::DoesNotFit if data does not fit into the page
     pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCDBError> {
-        if pos + data.len() > PAYLOAD_MAX {
+        if pos + data.len() > PAGE_SIZE {
             return Err (BCDBError::DoesNotFit);
         }
         self.payload [pos .. pos + data.len()].copy_from_slice(&data[..]);
@@ -70,7 +62,7 @@ impl Page {
 
     /// write an offset
     pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
-        if pos + 6 > PAYLOAD_MAX {
+        if pos + 6 > PAGE_SIZE {
             return Err (BCDBError::DoesNotFit);
         }
         self.payload[pos .. pos + 6].copy_from_slice(offset.to_vec().as_slice());
@@ -80,7 +72,7 @@ impl Page {
     /// read some data
     /// will return Error::DoesNotFit if data does not fit into the page
     pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCDBError> {
-        if pos + data.len() > PAYLOAD_MAX {
+        if pos + data.len() > PAGE_SIZE {
             return Err (BCDBError::DoesNotFit);
         }
         let len = data.len();
@@ -109,10 +101,7 @@ impl Page {
 
     /// finish a page after appends to write out
     pub fn finish (&self) -> [u8; PAGE_SIZE] {
-        let mut page = [0u8; PAGE_SIZE];
-        page[0 .. PAYLOAD_MAX].copy_from_slice (&self.payload[..]);
-        page[PAYLOAD_MAX..].copy_from_slice(self.offset.to_vec().as_slice());
-        page
+        self.payload
     }
 }
 
@@ -129,43 +118,12 @@ pub trait PageFile : Send + Sync {
     /// tell OS to flush buffers to disk
     fn sync (&self) -> Result<(), BCDBError>;
     /// read a page at given offset
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCDBError>;
+    fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError>;
     /// append a page (ignore offset in the Page)
     fn append_page (&mut self, page: Arc<Page>) -> Result<(), BCDBError>;
     /// write a page at its position as specified in page.offset
-    fn write_page (&mut self, page: Arc<Page>) -> Result<(), BCDBError>;
+    fn write_page (&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError>;
 }
-
-/// iterate through pages of a paged file
-pub struct PageIterator<'file> {
-    /// the current page of the iterator
-    pub pagenumber: u64,
-    file: &'file PageFile
-}
-
-/// page iterator
-impl<'file> PageIterator<'file> {
-    /// create a new iterator starting at given page
-    pub fn new (file: &'file PageFile, pagenumber: u64) -> PageIterator {
-        PageIterator{pagenumber, file}
-    }
-}
-
-impl<'file> Iterator for PageIterator<'file> {
-    type Item = Arc<Page>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
-            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
-            if let Ok(page) = self.file.read_page(offset) {
-                self.pagenumber += 1;
-                return Some(page);
-            }
-        }
-        None
-    }
-}
-
 
 #[cfg(test)]
 mod test {

@@ -37,22 +37,21 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn cache (&mut self, page: Arc<Page>) {
-        if !self.writes.contains_key(&page.offset) && !self.wrote.contains_key(&page.offset) {
+    pub fn cache (&mut self, offset: Offset, page: Arc<Page>) {
+        if !self.writes.contains_key(&offset) && !self.wrote.contains_key(&offset) {
             if self.reads.len() >= READ_CACHE_PAGES {
                 if let Some(old) = self.fifo.pop_front() {
                     self.reads.remove(&old);
                 }
             }
 
-            if self.reads.insert(page.offset, page.clone()).is_none() {
-                self.fifo.push_back(page.offset);
+            if self.reads.insert(offset, page.clone()).is_none() {
+                self.fifo.push_back(offset);
             }
         }
     }
 
-    pub fn write (&mut self, page: Arc<Page>) {
-        let offset = page.offset;
+    pub fn write (&mut self, offset: Offset, page: Arc<Page>) {
         if self.wrote.insert(offset, page.clone()).is_none() {
             self.new_writes += 1;
         }
@@ -76,8 +75,8 @@ impl Cache {
         None
     }
 
-    pub fn move_writes_to_wrote(&mut self) -> Vec<Arc<Page>> {
-        let writes = self.writes.values().into_iter().map(|e| e.clone()).collect::<Vec<_>>();
+    pub fn move_writes_to_wrote(&mut self) -> Vec<(Offset, Arc<Page>)> {
+        let writes = self.writes.iter().map(|(o, p)| (*o, p.clone())).collect::<Vec<_>>();
         self.writes.clear();
         self.new_writes = 0;
         writes

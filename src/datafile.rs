@@ -18,7 +18,7 @@
 //! Specific implementation details to data file
 //!
 
-use page::{Page, PageIterator, PageFile, PAYLOAD_MAX};
+use page::{Page, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::{Offset, U24, OffsetReader};
 use cache::Cache;
@@ -38,22 +38,21 @@ use std::io::{Write, Read, Cursor};
 pub struct DataFile {
     async_file: DataPageFile,
     append_pos: Offset,
-    page: Page
+    page: Page,
+    role: String,
 }
 
 impl DataFile {
-    pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCDBError> {
+    pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFile, BCDBError> {
         let file = DataPageFile::new(rw);
         let append_pos = Offset::from(file.len()?);
         Ok(DataFile{async_file: file,
             append_pos,
-            page: Page::new(append_pos) })
+            page: Page::new(append_pos), role: role.to_string()})
     }
 
     pub fn init(&mut self) -> Result<(), BCDBError> {
-        if self.append_pos.as_u64() == 0 {
-            self.append_slice(&[0xBC,0xDA])?;
-        }
+        self.append_slice(&[0xBC, 0xDA])?;
         Ok(())
     }
 
@@ -62,24 +61,16 @@ impl DataFile {
     }
 
     pub fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
-        let page = {
-            if self.page.offset == offset.this_page() {
-                Arc::new(self.page.clone())
-            }
-            else {
-                self.read_page(offset.this_page())?
-            }
-        };
         let mut fetch_iterator = DataIterator::new_fetch(
-            PageIterator::new(self, offset.page_number()+1), offset.in_page_pos(), page);
+            DataPageIterator::new(&self, offset.page_number()), offset.in_page_pos());
         if let Some(entry) = fetch_iterator.next() {
             if entry.data_type == DataType::AppData {
                 let mut cursor = Cursor::new(entry.data);
                 let n_keys = cursor.read_u8().unwrap();
                 let mut keys = Vec::new();
-                for _ in 0 .. n_keys {
+                for _ in 0..n_keys {
                     let key_len = cursor.read_u8().unwrap() as usize;
-                    let mut key = vec!(0u8;key_len);
+                    let mut key = vec!(0u8; key_len);
                     cursor.read(&mut key).unwrap();
                     keys.push(key);
                 }
@@ -87,12 +78,11 @@ impl DataFile {
                 let v = cursor.into_inner();
                 let (_, data) = v.split_at(pos);
                 return Ok(Content::Data(keys, data.to_vec()));
-            }
-            else if entry.data_type == DataType::TableSpillOver {
+            } else if entry.data_type == DataType::TableSpillOver {
                 let mut cursor = Cursor::new(entry.data);
                 let m = cursor.read_u8().unwrap() as usize;
                 let mut spills = Vec::new();
-                for _ in 0 .. m {
+                for _ in 0..m {
                     let hash = cursor.read_u32::<BigEndian>().unwrap();
                     let n = cursor.read_u8().unwrap() as usize;
                     let mut offsets = Vec::new();
@@ -106,7 +96,7 @@ impl DataFile {
             }
             return Ok(Content::Extension(entry.data))
         }
-        return Err(BCDBError::Corrupted(format!("expected content at {}", offset.as_u64())));
+        return Err(BCDBError::Corrupted(format!("{} expected content at {}", self.role, offset.as_u64())));
     }
 
     pub fn append_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
@@ -135,15 +125,15 @@ impl DataFile {
         let mut wrote_on_this_page = 0;
         let mut pos = self.append_pos.in_page_pos();
         while wrote < slice.len() {
-            let have = min(slice.len() - wrote, PAYLOAD_MAX - pos);
+            let have = min(slice.len() - wrote, PAGE_SIZE - pos);
             self.page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
             pos += have;
             wrote += have;
             wrote_on_this_page += have;
-            if pos == PAYLOAD_MAX {
+            if pos == PAGE_SIZE {
                 self.async_file.append_page(Arc::new(self.page.clone()))?;
+                self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
                 self.append_pos = self.append_pos.next_page();
-                self.page.offset = self.append_pos;
                 pos = 0;
                 wrote_on_this_page = 0;
             }
@@ -192,8 +182,6 @@ impl DataPageFile {
             let mut cache = inner.cache.lock().expect("cache lock poisoned");
             if cache.is_empty() {
                 inner.flushed.notify_all();
-            } else {
-                writes = cache.move_writes_to_wrote();
             }
             let time_spent = Instant::now() - last_loop;
             if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
@@ -206,9 +194,9 @@ impl DataPageFile {
                 }
             }
             if !writes.is_empty() {
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
-                for page in &writes {
+                for (_, page) in &writes {
                     file.append_page(page.clone()).expect("can not extend data file");
                 }
             }
@@ -216,7 +204,10 @@ impl DataPageFile {
         }
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        if offset != offset.this_page () {
+            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset.as_u64())))
+        }
         self.inner.file.lock().unwrap().read_page(offset)
     }
 
@@ -253,23 +244,27 @@ impl PageFile for DataPageFile {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if let Some(page) = cache.get(offset) {
-            return Ok(page);
+            use std::ops::Deref;
+
+            return Ok(Some(page.deref().clone()));
         }
-        let page = self.read_page_from_store(offset)?;
-        cache.cache(page.clone());
-        Ok(page)
+        if let Some(page) = self.read_page_from_store(offset)? {
+            cache.cache(offset, Arc::new(page.clone()));
+            return Ok(Some(page));
+        }
+        Ok(None)
     }
 
     fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.inner.cache.lock().unwrap().write(page);
+        self.inner.cache.lock().unwrap().write(Offset::from(self.len()?), page);
         self.inner.work.notify_one();
         Ok(())
     }
 
-    fn write_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }
@@ -277,9 +272,10 @@ impl PageFile for DataPageFile {
 impl PageFile for DataFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
-            self.async_file.append_page(Arc::new(self.page.clone()))?;
+            let page = self.page.clone();
+            self.append_page(Arc::new(page))?;
+            self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
             self.append_pos = self.append_pos.next_page();
-            self.page.offset = self.append_pos;
         }
         self.async_file.flush()
     }
@@ -290,7 +286,6 @@ impl PageFile for DataFile {
 
     fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         self.append_pos = Offset::from(len);
-        self.page.offset = self.append_pos;
         self.async_file.truncate(len)
     }
 
@@ -298,12 +293,9 @@ impl PageFile for DataFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
-        if offset == self.page.offset {
-            return Ok(Arc::new(self.page.clone()))
-        }
-        if offset.as_u64() >= self.page.offset.as_u64() {
-            return Err(BCDBError::Corrupted(format!("Read past EOF on data {}", offset.as_u64())));
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        if offset == self.append_pos.this_page() {
+            return Ok(Some(self.page.clone()))
         }
         self.async_file.read_page(offset)
     }
@@ -312,8 +304,38 @@ impl PageFile for DataFile {
         self.async_file.append_page(page)
     }
 
-    fn write_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
+    }
+}
+
+/// iterate through pages of a paged file
+struct DataPageIterator<'file> {
+    /// the current page of the iterator
+    pub pagenumber: u64,
+    file: &'file DataFile
+}
+
+/// page iterator
+impl<'file> DataPageIterator<'file> {
+    /// create a new iterator starting at given page
+    pub fn new (file: &'file DataFile, pagenumber: u64) -> DataPageIterator {
+        DataPageIterator{pagenumber, file}
+    }
+}
+
+impl<'file> Iterator for DataPageIterator<'file> {
+    type Item = Page;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
+            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
+            if let Ok(Some(page)) = self.file.read_page(offset) {
+                self.pagenumber += 1;
+                return Some(page);
+            }
+        }
+        None
     }
 }
 
@@ -399,20 +421,24 @@ impl DataEntry {
 }
 
 struct DataIterator<'file> {
-    page_iterator: PageIterator<'file>,
-    current: Option<Arc<Page>>,
+    page_iterator: DataPageIterator<'file>,
+    current: Option<Page>,
     pos: usize
 }
 
 impl<'file> DataIterator<'file> {
-    pub fn new_fetch (page_iterator: PageIterator<'file>, pos: usize, page: Arc<Page>) -> DataIterator {
-        DataIterator{page_iterator, pos, current: Some(page)}
+    pub fn new_fetch (page_iterator: DataPageIterator<'file>, pos: usize) -> DataIterator {
+        DataIterator{page_iterator, pos, current: None}
     }
 
     fn skip_non_data(&mut self) -> Option<DataType> {
         loop {
+            if self.current.is_none() {
+                self.current = self.page_iterator.next();
+                self.pos = 0;
+            }
             if let Some(ref mut current) = self.current {
-                while self.pos < PAYLOAD_MAX {
+                while self.pos < PAGE_SIZE {
                     let data_type = DataType::from(current.payload[self.pos]);
                     self.pos += 1;
                     if data_type == DataType::AppData {
@@ -429,8 +455,6 @@ impl<'file> DataIterator<'file> {
             else {
                 return None;
             }
-            self.current = self.page_iterator.next();
-            self.pos = 0;
         }
     }
 
@@ -449,7 +473,7 @@ impl<'file> DataIterator<'file> {
         let mut v = Vec::with_capacity(n);
         let mut read = 0;
         loop {
-            let have = min(PAYLOAD_MAX - self.pos, n - read);
+            let have = min(PAGE_SIZE - self.pos, n - read);
             if let Some(ref mut current) = self.current {
                 v.write(&current.payload[self.pos .. self.pos + have]).unwrap();
                 self.pos += have;

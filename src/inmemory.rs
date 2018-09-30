@@ -56,8 +56,8 @@ impl BCDBFactory for InMemory {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = KeyFile::new(Box::new(InMemory::new(false)), log);
-        let data = DataFile::new(Box::new(InMemory::new(true)))?;
-        let bucket = DataFile::new(Box::new(InMemory::new(true)))?;
+        let data = DataFile::new(Box::new(InMemory::new(true)), "data")?;
+        let bucket = DataFile::new(Box::new(InMemory::new(true)), "link")?;
 
         BCDB::new(table, data, bucket)
     }
@@ -79,17 +79,16 @@ impl PageFile for InMemory {
 
     fn sync(&self) -> Result<(), BCDBError> { Ok(()) }
 
-    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
         let len = inner.seek(SeekFrom::End(0))?;
         if offset.as_u64() >= len {
-            return Err(BCDBError::InvalidOffset);
+            return Ok(None);
         }
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.read(&mut buffer)?;
-        let page = Arc::new(Page::from_buf(buffer));
-        Ok(page)
+        Ok(Some(Page::from_buf(buffer)))
     }
 
     fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
@@ -98,9 +97,9 @@ impl PageFile for InMemory {
         Ok(())
     }
 
-    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
-        inner.seek(SeekFrom::Start(page.offset.as_u64()))?;
+        inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.write(&page.finish()[..])?;
         Ok(())
     }

@@ -87,7 +87,7 @@ impl BCDB {
         for page in log.page_iter() {
             if !first {
                 debug!("recover BCDB: patch page {}", page.offset.as_u64());
-                self.table.patch_page(page)?;
+                self.table.patch_page(Arc::new(page))?;
             }
                 else {
                     let mut size = [0u8; 6];
@@ -124,18 +124,25 @@ impl BCDBAPI for BCDB {
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError> {
         debug!("batch end");
+        println!("1");
         self.data.flush()?;
         self.data.sync()?;
+        println!("2");
         self.data.clear_cache();
         self.bucket.flush()?;
+        println!("3");
         self.bucket.sync()?;
         self.bucket.clear_cache();
         self.table.flush()?;
+        println!("4");
         self.table.sync()?;
         self.table.clear_cache();
         let data_len = self.data.len()?;
         let table_len = self.table.len()?;
         let bucket_len = self.bucket.len()?;
+        debug!("data length {}", data_len);
+        debug!("table length {}", table_len);
+        debug!("link length {}", bucket_len);
 
         let mut log = self.log.lock().unwrap();
         log.clear_cache();
@@ -151,7 +158,6 @@ impl BCDBAPI for BCDB {
         log.append_page(Arc::new(first))?;
         log.flush()?;
         log.sync()?;
-        log.clear_cache();
         debug!("batch start");
 
         Ok(())
@@ -232,7 +238,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;40];
 
-        for _ in 0 .. 100000 {
+        for _ in 0 .. 100 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);

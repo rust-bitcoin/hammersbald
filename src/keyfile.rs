@@ -62,7 +62,7 @@ impl KeyFile {
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
-        if let Ok(first_page) = self.read_page(Offset::from(0)) {
+        if let Some(first_page) = self.read_page(Offset::from(0))? {
             let buckets = first_page.read_offset(0).unwrap().as_u64() as u32;
             if buckets > 0 {
                 self.buckets = buckets;
@@ -116,7 +116,7 @@ impl KeyFile {
                 self.write_page(Arc::new(page))?;
             }
 
-            if let Ok(mut first_page) = self.read_page(Offset::from(0)) {
+            if let Some(mut first_page) = self.read_page(Offset::from(0))? {
                 first_page.write_offset(0, Offset::from(self.buckets as u64))?;
                 first_page.write_offset(6, Offset::from(self.step as u64))?;
                 self.write_page(Arc::new(first_page))?;
@@ -129,65 +129,70 @@ impl KeyFile {
     fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket);
 
-        let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        if let Some(mut bucket_page) = self.read_page(bucket_offset.this_page())? {
+            let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
 
-        let mut current_spillovers = Vec::new();
-        let mut rewrite = false;
-        loop {
-            if spill_offset.as_u64() == 0 {
-                break;
-            }
-            match bucket_file.get_content(spill_offset)? {
-                Content::Spillover(spills, next) => {
-                    current_spillovers.push(spills);
-                    spill_offset = next;
-                    if spill_offset.as_u64() != 0 {
-                        rewrite = true;
-                    }
-                },
-                _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
-            }
-        }
-        // process in reverse order to ensure latest put takes precedence in the new bucket
-        current_spillovers.reverse();
-
-        let mut remaining_spillovers = HashMap::new();
-        for spill in current_spillovers {
-            for s in spill.iter() {
-                let hash = s.0;
-                let mut same_hash_spill = s.1.clone();
-                let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-                if new_bucket != bucket {
-                    // store to new bucket
-                    self.store_to_bucket(new_bucket, vec![(hash, same_hash_spill)], bucket_file)?;
-                    bucket_page = self.read_page(bucket_offset.this_page())?;
-                    rewrite = true;
-                } else {
-                    // merge spillovers of same hash
-                    remaining_spillovers.entry(hash).or_insert(Vec::new()).extend(
-                        same_hash_spill.iter());
+            let mut current_spillovers = Vec::new();
+            let mut rewrite = false;
+            loop {
+                if !spill_offset.is_valid() {
+                    break;
+                }
+                match bucket_file.get_content(spill_offset)? {
+                    Content::Spillover(spills, next) => {
+                        current_spillovers.push(spills);
+                        spill_offset = next;
+                        if spill_offset.is_valid() {
+                            rewrite = true;
+                        }
+                    },
+                    _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
                 }
             }
-        }
+            // process in reverse order to ensure latest put takes precedence in the new bucket
+            current_spillovers.reverse();
 
-        if rewrite {
-            let mut next = Offset::from(0);
-            let spills:Vec<(u32, Vec<Offset>)> =
-                remaining_spillovers.iter().map(|(h, s)| {
-                    let mut offsets = s.clone();
-                    offsets.sort_unstable();
-                    offsets.reverse();
-                    (*h, offsets)
-                }).collect();
-            for spill in spills.chunks(255).rev() {
-                let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
-                next = so;
+            let mut remaining_spillovers = HashMap::new();
+            for spill in current_spillovers {
+                for s in spill.iter() {
+                    let hash = s.0;
+                    let mut same_hash_spill = s.1.clone();
+                    let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                    if new_bucket != bucket {
+                        // store to new bucket
+                        self.store_to_bucket(new_bucket, vec![(hash, same_hash_spill)], bucket_file)?;
+                        if let Some(bp) = self.read_page(bucket_offset.this_page())? {
+                            bucket_page = bp;
+                        }
+                        rewrite = true;
+                    } else {
+                        // merge spillovers of same hash
+                        remaining_spillovers.entry(hash).or_insert(Vec::new()).extend(
+                            same_hash_spill.iter());
+                    }
+                }
             }
-            bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
-            self.write_page(Arc::new(bucket_page))?;
-        }
 
+            if rewrite {
+                let mut next = Offset::invalid();
+                let spills: Vec<(u32, Vec<Offset>)> =
+                    remaining_spillovers.iter().map(|(h, s)| {
+                        let mut offsets = s.clone();
+                        offsets.sort_unstable();
+                        offsets.reverse();
+                        (*h, offsets)
+                    }).collect();
+                for spill in spills.chunks(255).rev() {
+                    let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
+                    next = so;
+                }
+                bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
+                self.write_page(Arc::new(bucket_page))?;
+            }
+        }
+        else {
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+        }
         Ok(())
     }
 
@@ -199,77 +204,85 @@ impl KeyFile {
         }
 
         let bucket_offset = Self::bucket_offset(bucket);
-        let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+        if let Some(mut bucket_page) = self.read_page(bucket_offset.this_page())? {
+            let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
 
-        let mut remaining_spillovers = HashMap::new();
-        let mut original_spillovers = Vec::new();
-        loop {
-            if spill_offset.as_u64() == 0 {
-                break;
-            }
-            match bucket_file.get_content(spill_offset)? {
-                Content::Spillover(spills, next) => {
-                    for s in &spills {
-                        let h = s.0;
-                        let mut spills = s.1.clone();
-                        // merge spillovers of same hash
-                        remaining_spillovers.entry(h).or_insert(Vec::new()).extend(spills.iter());
-                    }
-                    original_spillovers.push(spills);
-                    spill_offset = next;
-                },
-                _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
-            };
-        }
-
-        {
-            let ds = remaining_spillovers.entry(hash).or_insert(Vec::new());
-            ds.dedup_by_key(|offset| {
-                if let Ok(Content::Data(k, _)) = data_file.get_content(*offset) {
-                    return k;
+            let mut remaining_spillovers = HashMap::new();
+            let mut original_spillovers = Vec::new();
+            loop {
+                if !spill_offset.is_valid() {
+                    break;
                 }
-                Vec::new()
-            });
-        }
-        let mut rewrite = false;
-        for v in original_spillovers {
-            for (hash, s) in v {
-                if let Some(sl) = remaining_spillovers.get(&hash) {
-                    if *sl != s {
+                match bucket_file.get_content(spill_offset)? {
+                    Content::Spillover(spills, next) => {
+                        for s in &spills {
+                            let h = s.0;
+                            let mut spills = s.1.clone();
+                            // merge spillovers of same hash
+                            remaining_spillovers.entry(h).or_insert(Vec::new()).extend(spills.iter());
+                        }
+                        original_spillovers.push(spills);
+                        spill_offset = next;
+                    },
+                    _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
+                };
+            }
+
+            {
+                let ds = remaining_spillovers.entry(hash).or_insert(Vec::new());
+                ds.dedup_by_key(|offset| {
+                    if let Ok(Content::Data(k, _)) = data_file.get_content(*offset) {
+                        return k;
+                    }
+                    Vec::new()
+                });
+            }
+            let mut rewrite = false;
+            for v in original_spillovers {
+                for (hash, s) in v {
+                    if let Some(sl) = remaining_spillovers.get(&hash) {
+                        if *sl != s {
+                            rewrite = true;
+                        }
+                    } else {
                         rewrite = true;
                     }
-                } else {
-                    rewrite = true;
                 }
             }
-        }
 
-        if rewrite {
-            let mut next = Offset::from(0);
-            let spills: Vec<(u32, Vec<Offset>)> = remaining_spillovers.iter().map(|(h, s)| (*h, s.clone())).collect();
-            for spill in spills.chunks(255).rev() {
-                if !spill.is_empty () {
-                    let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
-                    next = so;
+            if rewrite {
+                let mut next = Offset::invalid();
+                let spills: Vec<(u32, Vec<Offset>)> = remaining_spillovers.iter().map(|(h, s)| (*h, s.clone())).collect();
+                for spill in spills.chunks(255).rev() {
+                    if !spill.is_empty() {
+                        let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
+                        next = so;
+                    }
                 }
+                bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             }
-            bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
+            self.write_page(Arc::new(bucket_page))?;
         }
-        self.write_page(Arc::new(bucket_page))?;
+        else {
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+        }
         Ok(())
     }
 
     fn store_to_bucket(&mut self, bucket: u32, spill: Vec<(u32, Vec<Offset>)>, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket);
-        let mut bucket_page = self.read_page(bucket_offset.this_page())?;
-        let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
-        // prepend spillover chain
-        // this logically overwrites previous key association in the spillover chain
-        // since search stops at first key match
-        let so = bucket_file.append_content(Content::Spillover(spill, spill_offset))?;
-        bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
-        self.write_page(Arc::new(bucket_page))?;
+        if let Some(mut bucket_page) = self.read_page(bucket_offset.this_page())? {
+            let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+            // prepend spillover chain
+            // this logically overwrites previous key association in the spillover chain
+            // since search stops at first key match
+            let so = bucket_file.append_content(Content::Spillover(spill, spill_offset))?;
+            bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
+            self.write_page(Arc::new(bucket_page))?;
+        }
+        else {
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+        }
         Ok(())
     }
 
@@ -280,37 +293,39 @@ impl KeyFile {
             bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
         let bucket_offset = Self::bucket_offset(bucket);
-        let bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
-        loop {
-            if spill_offset.as_u64() == 0 {
-                return Ok(None);
-            }
-            match bucket_file.get_content(spill_offset)? {
-                Content::Spillover(spills, next) => {
-                    for s in spills {
-                        let h = s.0;
-                        let offsets = s.1;
-                        if h == hash {
-                            for current in offsets {
-                                match data_file.get_content(current)? {
-                                    Content::Data(data_key, data) => {
-                                        for k in data_key {
-                                            if k == key {
-                                                return Ok(Some(data));
+        if let Some (bucket_page) = self.read_page(bucket_offset.this_page())? {
+            let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+            loop {
+                if !spill_offset.is_valid() {
+                    return Ok(None);
+                }
+                match bucket_file.get_content(spill_offset)? {
+                    Content::Spillover(spills, next) => {
+                        for s in spills {
+                            let h = s.0;
+                            let offsets = s.1;
+                            if h == hash {
+                                for current in offsets {
+                                    match data_file.get_content(current)? {
+                                        Content::Data(data_key, data) => {
+                                            for k in data_key {
+                                                if k == key {
+                                                    return Ok(Some(data));
+                                                }
                                             }
-                                        }
-                                    },
-                                    _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                                        },
+                                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                                    }
                                 }
                             }
                         }
-                    }
-                    spill_offset = next;
-                },
-                _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
+                        spill_offset = next;
+                    },
+                    _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
+                }
             }
         }
+        Ok(None)
     }
 
     pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Vec<Offset>, BCDBError> {
@@ -320,35 +335,39 @@ impl KeyFile {
             bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
         }
         let bucket_offset = Self::bucket_offset(bucket);
-        let bucket_page = self.read_page(bucket_offset.this_page())?;
-        let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
-        let mut result = Vec::new();
-        loop {
-            if spill_offset.as_u64() == 0 {
-                return Ok(result);
-            }
-            match bucket_file.get_content(spill_offset)? {
-                Content::Spillover(spills, next) => {
-                    for s in spills {
-                        let h = s.0;
-                        let offsets = s.1;
-                        if h == hash {
-                            for current in offsets {
-                                match data_file.get_content(current)? {
-                                    Content::Data(data_key, _) => {
-                                        if data_key.iter().any(|k| k.as_slice() == key) {
-                                            result.push(current);
-                                        }
-                                    },
-                                    _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+        if let Some(bucket_page) = self.read_page(bucket_offset.this_page())? {
+            let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
+            let mut result = Vec::new();
+            loop {
+                if !spill_offset.is_valid() {
+                    return Ok(result);
+                }
+                match bucket_file.get_content(spill_offset)? {
+                    Content::Spillover(spills, next) => {
+                        for s in spills {
+                            let h = s.0;
+                            let offsets = s.1;
+                            if h == hash {
+                                for current in offsets {
+                                    match data_file.get_content(current)? {
+                                        Content::Data(data_key, _) => {
+                                            if data_key.iter().any(|k| k.as_slice() == key) {
+                                                result.push(current);
+                                            }
+                                        },
+                                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
+                                    }
                                 }
                             }
                         }
-                    }
-                    spill_offset = next;
-                },
-                _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
+                        spill_offset = next;
+                    },
+                    _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
+                }
             }
+        }
+        else {
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
         }
     }
 
@@ -403,14 +422,18 @@ impl KeyFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
-        use std::ops::Deref;
-
-        Ok(self.async_file.read_page(offset)?.deref().clone())
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        if let Some(page) = self.async_file.read_page(offset)? {
+            if page.offset.as_u64() != offset.as_u64() {
+                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset.as_u64())));
+            }
+            return Ok(Some(page));
+        }
+        Ok(None)
     }
 
     fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.async_file.write_page(page)
+        self.async_file.write_page(page.offset, page)
     }
 }
 
@@ -457,34 +480,40 @@ impl KeyPageFile {
                     writes = cache.move_writes_to_wrote();
                 }
             }
-            let time_spent = Instant::now() - last_loop;
-            if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
-                writes = cache.move_writes_to_wrote();
-            }
-            else {
-                let (mut c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
-                if t.timed_out() {
-                    writes = c.move_writes_to_wrote();
+            if writes.is_empty() {
+                let time_spent = Instant::now() - last_loop;
+                if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
+                    writes = cache.move_writes_to_wrote();
+                } else {
+                    let (mut c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
+                    if t.timed_out() {
+                        writes = c.move_writes_to_wrote();
+                    }
                 }
             }
             if !writes.is_empty() {
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
                 let mut log = inner.log.lock().expect("log lock poisoned");
                 let mut logged = false;
                 for write in &writes {
-                    if write.offset.as_u64() < log.tbl_len && !log.is_logged(write.offset) {
-                        let page = file.read_page(write.offset).expect("can not read hash table file");
-                        log.append_page(page).expect("can not write log file");
-                        logged = true;
+                    let offset = write.0;
+                    if offset.as_u64() < log.tbl_len && !log.is_logged(offset) {
+                        if let Some(page) = file.read_page(offset).expect("can not read hash table file") {
+                            log.append_page(Arc::new(page)).expect("can not write log file");
+                            logged = true;
+                        }
+                        else {
+                            panic!("can not find pre-image to log {}", offset.as_u64());
+                        }
                     }
                 }
                 if logged {
                     log.flush().expect("can not flush log");
                     log.sync().expect("can not sync log");
                 }
-                for write in writes {
-                    file.write_page(write.clone()).expect("write hash table failed");
+                for (offset, page) in writes {
+                    file.write_page(offset, page.clone()).expect("write hash table failed");
                 }
             }
             last_loop = Instant::now();
@@ -492,10 +521,13 @@ impl KeyPageFile {
     }
 
     pub fn patch_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().write_page(page)
+        self.inner.file.lock().unwrap().write_page(page.offset, page)
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        if offset != offset.this_page () {
+            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset.as_u64())))
+        }
         self.inner.file.lock().unwrap().read_page(offset)
     }
 
@@ -536,24 +568,26 @@ impl PageFile for KeyPageFile {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if let Some(page) = cache.get(offset) {
-            return Ok(page);
+            use std::ops::Deref;
+
+            return Ok(Some(page.deref().clone()));
         }
-
-        let page = self.read_page_from_store(offset)?;
-        cache.cache(page.clone());
-
-        Ok(page)
+        if let Some(page) = self.read_page_from_store(offset)? {
+            cache.cache(offset, Arc::new(page.clone()));
+            return Ok(Some(page));
+        }
+        Ok(None)
     }
 
     fn append_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.inner.cache.lock().unwrap().write(page);
+    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+        self.inner.cache.lock().unwrap().write(offset, page);
         self.inner.work.notify_one();
         Ok(())
 

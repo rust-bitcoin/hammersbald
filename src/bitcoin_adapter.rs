@@ -45,7 +45,7 @@ impl BitcoinAdapter {
     pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<Offset, BCDBError> {
         let key = header.bitcoin_hash().data();
         let mut serialized_header = encode(header)?;
-        serialized_header.write_u48::<BigEndian>(0)?; // no transactions
+        serialized_header.write_u48::<BigEndian>(Offset::invalid().as_u64())?; // no transactions
         serialized_header.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
             let offset = self.bcdb.put_content(d.clone())?;
@@ -99,7 +99,7 @@ impl BitcoinAdapter {
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             let txdata_offset = Offset::from(data.read_u48::<BigEndian>()?);
             let mut txdata: Vec<Transaction> = Vec::new();
-            if txdata_offset.as_u64() != 0 {
+            if txdata_offset.is_valid() {
                 let offsets = self.get_content(txdata_offset)?;
                 let mut oc = Cursor::new(offsets);
                 while let Ok(o) = oc.read_u48::<BigEndian>() {
