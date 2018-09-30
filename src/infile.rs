@@ -87,8 +87,4 @@ impl PageFile for InFile {
     fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.write_page(page)
     }
-
-    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
-        self.file.write_batch(writes)
-    }
 }

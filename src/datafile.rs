@@ -188,31 +188,23 @@ impl DataPageFile {
         let mut last_loop = Instant::now();
         while run {
             run = inner.run.lock().expect("run lock poisoned").get();
-            let mut writes;
-            loop {
-                let mut cache = inner.cache.lock().expect("cache lock poisoned");
-                if cache.is_empty() {
-                    inner.flushed.notify_all();
-                }
-                else {
+            let mut writes = Vec::new();
+            let mut cache = inner.cache.lock().expect("cache lock poisoned");
+            if cache.is_empty() {
+                inner.flushed.notify_all();
+            } else {
+                writes = cache.move_writes_to_wrote();
+            }
+            let time_spent = Instant::now() - last_loop;
+            if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
+                writes = cache.move_writes_to_wrote();
+            } else {
+                let (c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
+                if t.timed_out() {
+                    cache = c;
                     writes = cache.move_writes_to_wrote();
-                    break;
-                }
-                let time_spent = Instant::now() - last_loop;
-                if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
-                    writes = cache.move_writes_to_wrote();
-                    break;
-                }
-                else {
-                    let (c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
-                    if t.timed_out() {
-                        cache = c;
-                        writes = cache.move_writes_to_wrote();
-                        break;
-                    }
                 }
             }
-            last_loop = Instant::now();
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
@@ -221,6 +213,7 @@ impl DataPageFile {
                     file.append_page(page.deref().clone()).expect("can not extend data file");
                 }
             }
+            last_loop = Instant::now();
         }
     }
 
@@ -265,21 +258,12 @@ impl PageFile for DataPageFile {
 
         use std::ops::Deref;
 
-        {
-            let cache = self.inner.cache.lock().unwrap();
-            if let Some(page) = cache.get(offset) {
-                return Ok(page.deref().clone());
-            }
+        let mut cache = self.inner.cache.lock().unwrap();
+        if let Some(page) = cache.get(offset) {
+            return Ok(page.deref().clone());
         }
-
-        // read outside of cache lock
         let page = self.read_page_from_store(offset)?;
-
-        {
-            // write cache takes precedence, therefore insert of outdated read will be ignored
-            let mut cache = self.inner.cache.lock().unwrap();
-            cache.cache(page.clone());
-        }
+        cache.cache(page.clone());
         Ok(page)
     }
 
@@ -290,10 +274,6 @@ impl PageFile for DataPageFile {
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
-        unimplemented!()
-    }
-
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }
@@ -337,10 +317,6 @@ impl PageFile for DataFile {
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
-        unimplemented!()
-    }
-
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

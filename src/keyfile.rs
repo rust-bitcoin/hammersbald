@@ -74,8 +74,7 @@ impl KeyFile {
             info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
         else {
-            let page = Page::new(Offset::from(0));
-            let mut fp = LoggedPage { preimage: page.clone(), page};
+            let mut fp = Page::new(Offset::from(0));
             fp.write_offset(0, Offset::from(self.buckets as u64))?;
             fp.write_offset(6, Offset::from(self.step as u64))?;
             fp.write_u64(12, self.sip0)?;
@@ -114,8 +113,7 @@ impl KeyFile {
             self.buckets += 1;
             if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
                 let page = Page::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
-                // no need of pre-image here
-                self.async_file.write_page(page)?;
+                self.write_page(page)?;
             }
 
             if let Ok(mut first_page) = self.read_page(Offset::from(0)) {
@@ -405,43 +403,12 @@ impl KeyFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<LoggedPage, BCDBError> {
-        let page = self.async_file.read_page(offset)?;
-        Ok(LoggedPage { preimage: page.clone(), page })
+    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
+        self.async_file.read_page(offset)
     }
 
-    fn write_page(&mut self, page: LoggedPage) -> Result<(), BCDBError> {
-        if page.preimage.payload[..] != page.page.payload[..] {
-            self.async_file.inner.log.lock().unwrap().preimage(page.preimage);
-            self.async_file.write_page(page.page)
-        }
-        else {
-            Ok(())
-        }
-    }
-}
-
-struct LoggedPage {
-    preimage: Page,
-    page: Page
-}
-
-impl LoggedPage {
-
-    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
-        self.page.write_offset(pos, offset)
-    }
-
-    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
-        self.page.read_offset(pos)
-    }
-
-    pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
-        self.page.read_u64(pos)
-    }
-
-    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
-        self.page.write_u64(pos, n)
+    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        self.async_file.write_page(page)
     }
 }
 
@@ -478,43 +445,49 @@ impl KeyPageFile {
         let mut last_loop= Instant::now();
         while run {
             run = inner.run.lock().expect("run lock poisoned").get();
-            let mut writes;
-            loop {
-                let mut cache = inner.cache.lock().expect("cache lock poisoned");
-                if cache.is_empty() {
-                    inner.flushed.notify_all();
-                }
-                else {
-                    if cache.new_writes > 1000 {
-                        writes = cache.move_writes_to_wrote();
-                        break;
-                    }
-                }
-                let time_spent = Instant::now() - last_loop;
-                if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
+            let mut writes = Vec::new();
+            let mut cache = inner.cache.lock().expect("cache lock poisoned");
+            if cache.is_empty() {
+                inner.flushed.notify_all();
+            }
+            else {
+                if cache.new_writes > 1000 {
                     writes = cache.move_writes_to_wrote();
-                    break;
-                }
-                else {
-                    let (c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
-                    if t.timed_out() {
-                        cache = c;
-                        writes = cache.move_writes_to_wrote();
-                        break;
-                    }
                 }
             }
-            last_loop = Instant::now();
+            let time_spent = Instant::now() - last_loop;
+            if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
+                writes = cache.move_writes_to_wrote();
+            }
+            else {
+                let (mut c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
+                if t.timed_out() {
+                    writes = c.move_writes_to_wrote();
+                }
+            }
             if !writes.is_empty() {
-                {
-                    let mut log = inner.log.lock().expect("log lock poisoned");
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
+                let mut file = inner.file.lock().expect("file lock poisoned");
+                let mut log = inner.log.lock().expect("log lock poisoned");
+                let mut logged = false;
+                for write in &writes {
+                    if write.offset.as_u64() < log.tbl_len && !log.is_logged(write.offset) {
+                        let page = file.read_page(write.offset).expect("can not read hash table file");
+                        log.append_page(page).expect("can not write log file");
+                        logged = true;
+                    }
+                }
+                if logged {
                     log.flush().expect("can not flush log");
                     log.sync().expect("can not sync log");
                 }
-                let mut file = inner.file.lock().expect("file lock poisoned");
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
-                file.write_batch(writes).expect("batch write failed");
+                for write in writes {
+                    use std::ops::Deref;
+
+                    file.write_page(write.deref().clone()).expect("write hash table failed");
+                }
             }
+            last_loop = Instant::now();
         }
     }
 
@@ -567,21 +540,13 @@ impl PageFile for KeyPageFile {
 
         use std::ops::Deref;
 
-        {
-            let cache = self.inner.cache.lock().unwrap();
-            if let Some(page) = cache.get(offset) {
-                return Ok(page.deref().clone());
-            }
+        let mut cache = self.inner.cache.lock().unwrap();
+        if let Some(page) = cache.get(offset) {
+            return Ok(page.deref().clone());
         }
 
-        // read outside of cache lock
         let page = self.read_page_from_store(offset)?;
-
-        {
-            // write cache takes precedence, therefore insert of outdated read will be ignored
-            let mut cache = self.inner.cache.lock().unwrap();
-            cache.cache(page.clone());
-        }
+        cache.cache(page.clone());
 
         Ok(page)
     }
@@ -595,9 +560,5 @@ impl PageFile for KeyPageFile {
         self.inner.work.notify_one();
         Ok(())
 
-    }
-
-    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().write_batch(writes)
     }
 }

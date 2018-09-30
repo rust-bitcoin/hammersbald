@@ -28,7 +28,6 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::cmp::max;
-use std::sync::Arc;
 
 pub struct RolledFile {
     name: String,
@@ -179,15 +178,6 @@ impl PageFile for RolledFile {
             return Err(BCDBError::Corrupted("missing chunk in write page".to_string()));
         }
     }
-
-    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
-        for page in writes {
-            use std::ops::Deref;
-
-            self.write_page(page.deref().clone())?;
-        }
-        Ok(())
-    }
 }
 
 struct SingleFile {
@@ -259,9 +249,5 @@ impl PageFile for SingleFile {
         file.write(&page.finish()[..])?;
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(())
-    }
-
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
-        unimplemented!()
     }
 }

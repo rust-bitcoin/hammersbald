@@ -104,14 +104,6 @@ impl PageFile for InMemory {
         inner.write(&page.finish()[..])?;
         Ok(())
     }
-
-    fn write_batch(&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError> {
-        for page in writes {
-            use std::ops::Deref;
-            self.write_page(page.deref().clone())?;
-        }
-        Ok(())
-    }
 }
 
 impl Read for Inner {

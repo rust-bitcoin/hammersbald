@@ -25,36 +25,30 @@ use error::BCDBError;
 use types::Offset;
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// The buffer pool
 pub struct LogFile {
     rw: Box<PageFile>,
     logged: HashSet<Offset>,
-    to_log: Vec<Page>,
     pub tbl_len: u64
 }
 
 impl LogFile {
     pub fn new(rw: Box<PageFile>) -> LogFile {
-        LogFile { rw, to_log: Vec::new(), logged: HashSet::new(), tbl_len: 0 }
+        LogFile { rw, logged: HashSet::new(), tbl_len: 0 }
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
         Ok(())
     }
 
-    pub fn preimage(&mut self, page: Page) {
-        if page.offset.as_u64() < self.tbl_len && !self.logged.contains(&page.offset) {
-            self.logged.insert(page.offset);
-            self.to_log.push(page);
-        }
+    pub fn is_logged (&self, offset: Offset) -> bool {
+        self.logged.contains(&offset)
     }
 
     /// empties the set of logged pages
     pub fn clear_cache(&mut self) {
         self.logged.clear();
-        self.to_log.clear();
     }
 
     pub fn page_iter (&self) -> PageIterator {
@@ -64,9 +58,6 @@ impl LogFile {
 
 impl PageFile for LogFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
-        for page in self.to_log.drain(..) {
-            self.rw.append_page(page)?;
-        }
         Ok(self.rw.flush()?)
     }
 
@@ -87,14 +78,11 @@ impl PageFile for LogFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        self.logged.insert(page.offset);
         self.rw.append_page(page)
     }
 
     fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
-        unimplemented!()
-    }
-
-    fn write_batch(&mut self, _: Vec<Arc<Page>>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

@@ -32,7 +32,6 @@ use types::Offset;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
-use std::sync::Arc;
 use std::io::Cursor;
 
 pub const PAGE_SIZE: usize = 4096;
@@ -134,8 +133,6 @@ pub trait PageFile : Send + Sync {
     fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
     /// write a page at its position as specified in page.offset
     fn write_page (&mut self, page: Page) -> Result<(), BCDBError>;
-    /// write a batch of pages in parallel (if possible)
-    fn write_batch (&mut self, writes: Vec<Arc<Page>>) -> Result<(), BCDBError>;
 }
 
 /// iterate through pages of a paged file
