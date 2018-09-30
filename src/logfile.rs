@@ -25,6 +25,7 @@ use error::BCDBError;
 use types::Offset;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// The buffer pool
 pub struct LogFile {
@@ -73,16 +74,16 @@ impl PageFile for LogFile {
         self.rw.sync()
     }
 
-    fn read_page (&self, offset: Offset) -> Result<Page, BCDBError> {
+    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         self.rw.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.logged.insert(page.offset);
         self.rw.append_page(page)
     }
 
-    fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

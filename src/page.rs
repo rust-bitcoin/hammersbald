@@ -33,6 +33,7 @@ use types::Offset;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::Cursor;
+use std::sync::Arc;
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAYLOAD_MAX: usize = 4090;
@@ -128,11 +129,11 @@ pub trait PageFile : Send + Sync {
     /// tell OS to flush buffers to disk
     fn sync (&self) -> Result<(), BCDBError>;
     /// read a page at given offset
-    fn read_page (&self, offset: Offset) -> Result<Page, BCDBError>;
+    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCDBError>;
     /// append a page (ignore offset in the Page)
-    fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
+    fn append_page (&mut self, page: Arc<Page>) -> Result<(), BCDBError>;
     /// write a page at its position as specified in page.offset
-    fn write_page (&mut self, page: Page) -> Result<(), BCDBError>;
+    fn write_page (&mut self, page: Arc<Page>) -> Result<(), BCDBError>;
 }
 
 /// iterate through pages of a paged file
@@ -151,7 +152,7 @@ impl<'file> PageIterator<'file> {
 }
 
 impl<'file> Iterator for PageIterator<'file> {
-    type Item = Page;
+    type Item = Arc<Page>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {

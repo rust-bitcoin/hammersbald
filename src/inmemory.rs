@@ -79,7 +79,7 @@ impl PageFile for InMemory {
 
     fn sync(&self) -> Result<(), BCDBError> { Ok(()) }
 
-    fn read_page (&self, offset: Offset) -> Result<Page, BCDBError> {
+    fn read_page (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
         let len = inner.seek(SeekFrom::End(0))?;
@@ -88,17 +88,17 @@ impl PageFile for InMemory {
         }
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.read(&mut buffer)?;
-        let page = Page::from_buf(buffer);
+        let page = Arc::new(Page::from_buf(buffer));
         Ok(page)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.finish()[..])?;
         Ok(())
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(page.offset.as_u64()))?;
         inner.write(&page.finish()[..])?;

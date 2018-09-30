@@ -37,7 +37,7 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn cache (&mut self, page: Page) {
+    pub fn cache (&mut self, page: Arc<Page>) {
         if !self.writes.contains_key(&page.offset) && !self.wrote.contains_key(&page.offset) {
             if self.reads.len() >= READ_CACHE_PAGES {
                 if let Some(old) = self.fifo.pop_front() {
@@ -45,16 +45,14 @@ impl Cache {
                 }
             }
 
-            let pp = Arc::new(page);
-            if self.reads.insert(pp.offset, pp.clone()).is_none() {
-                self.fifo.push_back(pp.offset);
+            if self.reads.insert(page.offset, page.clone()).is_none() {
+                self.fifo.push_back(page.offset);
             }
         }
     }
 
-    pub fn write (&mut self, page: Page) {
+    pub fn write (&mut self, page: Arc<Page>) {
         let offset = page.offset;
-        let page = Arc::new(page);
         if self.wrote.insert(offset, page.clone()).is_none() {
             self.new_writes += 1;
         }

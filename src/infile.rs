@@ -76,15 +76,15 @@ impl PageFile for InFile {
         self.file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         self.file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.file.append_page(page)
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.file.write_page(page)
     }
 }

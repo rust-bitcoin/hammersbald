@@ -79,7 +79,7 @@ impl KeyFile {
             fp.write_offset(6, Offset::from(self.step as u64))?;
             fp.write_u64(12, self.sip0)?;
             fp.write_u64(20, self.sip1)?;
-            self.write_page(fp)?;
+            self.write_page(Arc::new(fp))?;
             info!("open empty BCDB");
         };
 
@@ -113,13 +113,13 @@ impl KeyFile {
             self.buckets += 1;
             if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
                 let page = Page::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
-                self.write_page(page)?;
+                self.write_page(Arc::new(page))?;
             }
 
             if let Ok(mut first_page) = self.read_page(Offset::from(0)) {
                 first_page.write_offset(0, Offset::from(self.buckets as u64))?;
                 first_page.write_offset(6, Offset::from(self.step as u64))?;
-                self.write_page(first_page)?;
+                self.write_page(Arc::new(first_page))?;
             }
         }
 
@@ -185,7 +185,7 @@ impl KeyFile {
                 next = so;
             }
             bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
-            self.write_page(bucket_page)?;
+            self.write_page(Arc::new(bucket_page))?;
         }
 
         Ok(())
@@ -256,7 +256,7 @@ impl KeyFile {
             }
             bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
         }
-        self.write_page(bucket_page)?;
+        self.write_page(Arc::new(bucket_page))?;
         Ok(())
     }
 
@@ -269,7 +269,7 @@ impl KeyFile {
         // since search stops at first key match
         let so = bucket_file.append_content(Content::Spillover(spill, spill_offset))?;
         bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
-        self.write_page(bucket_page)?;
+        self.write_page(Arc::new(bucket_page))?;
         Ok(())
     }
 
@@ -352,7 +352,7 @@ impl KeyFile {
         }
     }
 
-    pub fn patch_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.async_file.patch_page(page)
     }
 
@@ -404,10 +404,12 @@ impl KeyFile {
     }
 
     fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
-        self.async_file.read_page(offset)
+        use std::ops::Deref;
+
+        Ok(self.async_file.read_page(offset)?.deref().clone())
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.async_file.write_page(page)
     }
 }
@@ -482,20 +484,18 @@ impl KeyPageFile {
                     log.sync().expect("can not sync log");
                 }
                 for write in writes {
-                    use std::ops::Deref;
-
-                    file.write_page(write.deref().clone()).expect("write hash table failed");
+                    file.write_page(write.clone()).expect("write hash table failed");
                 }
             }
             last_loop = Instant::now();
         }
     }
 
-    pub fn patch_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().write_page(page)
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCDBError> {
+    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         self.inner.file.lock().unwrap().read_page(offset)
     }
 
@@ -536,13 +536,10 @@ impl PageFile for KeyPageFile {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
-
-        use std::ops::Deref;
-
+    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if let Some(page) = cache.get(offset) {
-            return Ok(page.deref().clone());
+            return Ok(page);
         }
 
         let page = self.read_page_from_store(offset)?;
@@ -551,11 +548,11 @@ impl PageFile for KeyPageFile {
         Ok(page)
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())

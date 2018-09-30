@@ -64,7 +64,7 @@ impl DataFile {
     pub fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
         let page = {
             if self.page.offset == offset.this_page() {
-                self.page.clone()
+                Arc::new(self.page.clone())
             }
             else {
                 self.read_page(offset.this_page())?
@@ -141,7 +141,7 @@ impl DataFile {
             wrote += have;
             wrote_on_this_page += have;
             if pos == PAYLOAD_MAX {
-                self.async_file.append_page(self.page.clone())?;
+                self.async_file.append_page(Arc::new(self.page.clone()))?;
                 self.append_pos = self.append_pos.next_page();
                 self.page.offset = self.append_pos;
                 pos = 0;
@@ -209,15 +209,14 @@ impl DataPageFile {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.offset.as_u64(), &b.offset.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
                 for page in &writes {
-                    use std::ops::Deref;
-                    file.append_page(page.deref().clone()).expect("can not extend data file");
+                    file.append_page(page.clone()).expect("can not extend data file");
                 }
             }
             last_loop = Instant::now();
         }
     }
 
-    fn read_page_from_store (&self, offset: Offset) -> Result<Page, BCDBError> {
+    fn read_page_from_store (&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         self.inner.file.lock().unwrap().read_page(offset)
     }
 
@@ -254,26 +253,23 @@ impl PageFile for DataPageFile {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
-
-        use std::ops::Deref;
-
+    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if let Some(page) = cache.get(offset) {
-            return Ok(page.deref().clone());
+            return Ok(page);
         }
         let page = self.read_page_from_store(offset)?;
         cache.cache(page.clone());
         Ok(page)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.inner.cache.lock().unwrap().write(page);
         self.inner.work.notify_one();
         Ok(())
     }
 
-    fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }
@@ -281,7 +277,7 @@ impl PageFile for DataPageFile {
 impl PageFile for DataFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
-            self.async_file.append_page(self.page.clone())?;
+            self.async_file.append_page(Arc::new(self.page.clone()))?;
             self.append_pos = self.append_pos.next_page();
             self.page.offset = self.append_pos;
         }
@@ -302,9 +298,9 @@ impl PageFile for DataFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Page, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Arc<Page>, BCDBError> {
         if offset == self.page.offset {
-            return Ok(self.page.clone())
+            return Ok(Arc::new(self.page.clone()))
         }
         if offset.as_u64() >= self.page.offset.as_u64() {
             return Err(BCDBError::Corrupted(format!("Read past EOF on data {}", offset.as_u64())));
@@ -312,11 +308,11 @@ impl PageFile for DataFile {
         self.async_file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
         self.async_file.append_page(page)
     }
 
-    fn write_page(&mut self, _: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }
@@ -404,12 +400,12 @@ impl DataEntry {
 
 struct DataIterator<'file> {
     page_iterator: PageIterator<'file>,
-    current: Option<Page>,
+    current: Option<Arc<Page>>,
     pos: usize
 }
 
 impl<'file> DataIterator<'file> {
-    pub fn new_fetch (page_iterator: PageIterator<'file>, pos: usize, page: Page) -> DataIterator {
+    pub fn new_fetch (page_iterator: PageIterator<'file>, pos: usize, page: Arc<Page>) -> DataIterator {
         DataIterator{page_iterator, pos, current: Some(page)}
     }
 
