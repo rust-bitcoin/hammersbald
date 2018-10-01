@@ -65,7 +65,7 @@ impl KeyFile {
             if buckets > 0 {
                 self.buckets = buckets;
                 self.step = first_page.read_offset(6).unwrap().as_u64() as u32;
-                self.log_mod = (32 - buckets.leading_zeros()) as u32 - 1;
+                self.log_mod = (32 - buckets.leading_zeros()) as u32 - 2;
                 self.sip0 = first_page.read_u64(12).unwrap();
                 self.sip1 = first_page.read_u64(20).unwrap();
             }
@@ -103,7 +103,7 @@ impl KeyFile {
             }
 
             self.step += 1;
-            if self.step == (1 << (self.log_mod + 1)) {
+            if self.step > (1 << (self.log_mod + 1)) && (self.buckets - FIRST_BUCKETS_PER_PAGE as u32) % BUCKETS_PER_PAGE as u32 == 0 {
                 self.log_mod += 1;
                 self.step = 0;
             }
@@ -189,7 +189,7 @@ impl KeyFile {
             }
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
+            return Err(BCDBError::Corrupted(format!("missing hash table page {} in rehash", bucket_offset)));
         }
         Ok(())
     }
@@ -262,7 +262,7 @@ impl KeyFile {
             self.write_page(bucket_page)?;
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
+            return Err(BCDBError::Corrupted(format!("missing hash table page {} in dedup", bucket_offset)));
         }
         Ok(())
     }
@@ -279,7 +279,7 @@ impl KeyFile {
             self.write_page(bucket_page)?;
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
+            return Err(BCDBError::Corrupted(format!("missing hash table page {} in store to bucket", bucket_offset)));
         }
         Ok(())
     }
@@ -365,7 +365,7 @@ impl KeyFile {
             }
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
+            return Err(BCDBError::Corrupted(format!("missing hash table page {} in get", bucket_offset)));
         }
     }
 
