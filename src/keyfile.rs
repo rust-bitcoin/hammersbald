@@ -29,11 +29,9 @@ use rand::{thread_rng, RngCore};
 use siphasher::sip::SipHasher;
 
 use std::sync::{Mutex, Arc, Condvar};
-use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
 use std::hash::Hasher;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const FIRST_PAGE_HEAD:u64 = 28;
@@ -447,13 +445,18 @@ struct KeyPageFileInner {
     cache: Mutex<Cache>,
     flushed: Condvar,
     work: Condvar,
-    run: Mutex<Cell<bool>>
+    run: AtomicBool,
+    flushing: AtomicBool
 }
 
 impl KeyPageFileInner {
     pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> KeyPageFileInner {
         KeyPageFileInner { file: Mutex::new(file), log,
-            cache: Mutex::new(Cache::default()), flushed: Condvar::new(), work: Condvar::new(), run: Mutex::new(Cell::new(true)) }
+            cache: Mutex::new(Cache::default()), flushed: Condvar::new(),
+            work: Condvar::new(),
+            run: AtomicBool::new(true),
+            flushing: AtomicBool::new(false)
+        }
     }
 }
 
@@ -466,31 +469,17 @@ impl KeyPageFile {
     }
 
     fn background (inner: Arc<KeyPageFileInner>) {
-        let mut run = true;
-        let mut last_loop= Instant::now();
-        while run {
-            run = inner.run.lock().expect("run lock poisoned").get();
+        while inner.run.load(Ordering::Relaxed) {
             let mut writes = Vec::new();
             let mut cache = inner.cache.lock().expect("cache lock poisoned");
             if cache.is_empty() {
                 inner.flushed.notify_all();
             }
-            else {
-                if cache.new_writes > 1000 {
-                    writes = cache.move_writes_to_wrote();
-                }
+            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+            if cache.new_writes > 1000 || inner.flushing.swap(false, Ordering::Relaxed) {
+                writes = cache.move_writes_to_wrote();
             }
-            if writes.is_empty() {
-                let time_spent = Instant::now() - last_loop;
-                if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
-                    writes = cache.move_writes_to_wrote();
-                } else {
-                    let (mut c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
-                    if t.timed_out() {
-                        writes = c.move_writes_to_wrote();
-                    }
-                }
-            }
+
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
@@ -516,7 +505,6 @@ impl KeyPageFile {
                     file.write_page(offset, page.clone()).expect("write hash table failed");
                 }
             }
-            last_loop = Instant::now();
         }
     }
 
@@ -536,7 +524,7 @@ impl KeyPageFile {
     }
 
     pub fn shutdown (&mut self) {
-        self.inner.run.lock().unwrap().set(false);
+        self.inner.run.store(false, Ordering::Relaxed);
         self.inner.work.notify_one();
     }
 
@@ -550,6 +538,7 @@ impl PageFile for KeyPageFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if !cache.is_empty() {
+            self.inner.flushing.store(true, Ordering::Relaxed);
             self.inner.work.notify_one();
             cache = self.inner.flushed.wait(cache)?;
         }

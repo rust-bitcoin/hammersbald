@@ -124,17 +124,13 @@ impl BCDBAPI for BCDB {
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError> {
         debug!("batch end");
-        println!("1");
         self.data.flush()?;
         self.data.sync()?;
-        println!("2");
         self.data.clear_cache();
         self.bucket.flush()?;
-        println!("3");
         self.bucket.sync()?;
         self.bucket.clear_cache();
         self.table.flush()?;
-        println!("4");
         self.table.sync()?;
         self.table.clear_cache();
         let data_len = self.data.len()?;
@@ -238,7 +234,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;40];
 
-        for _ in 0 .. 100 {
+        for _ in 0 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);
