@@ -51,7 +51,7 @@ impl BCDBFactory for InFile {
             RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))));
         let table = KeyFile::new(Box::new(InFile::new(
             RolledFile::new(name.to_string(), "tb".to_string(), false, KEY_CHUNK_SIZE)?
-        )), log);
+        )), log)?;
         let bucket = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?), "data")?;
         let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?), "link")?;
 

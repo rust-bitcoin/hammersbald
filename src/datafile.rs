@@ -42,7 +42,7 @@ pub struct DataFile {
 
 impl DataFile {
     pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFile, BCDBError> {
-        let file = DataPageFile::new(rw);
+        let file = DataPageFile::new(rw)?;
         let append_pos = Offset::from(file.len()?);
         Ok(DataFile{async_file: file,
             append_pos,
@@ -98,7 +98,6 @@ impl DataFile {
             if pos == PAGE_SIZE {
                 self.async_file.append_page(self.page.clone())?;
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-                self.append_pos = self.append_pos.next_page();
                 pos = 0;
                 wrote_on_this_page = 0;
             }
@@ -107,10 +106,51 @@ impl DataFile {
         Ok(())
     }
 
-    pub fn clear_cache(&mut self) {
-        self.async_file.clear_cache();
+    pub fn clear_cache(&mut self, len: u64) {
+        self.async_file.clear_cache(len);
     }
 }
+
+impl PageFile for DataFile {
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        if self.append_pos.in_page_pos() > 0 {
+            let page = self.page.clone();
+            self.append_page(page)?;
+            self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
+            self.append_pos = self.append_pos.next_page();
+        }
+        self.async_file.flush()
+    }
+
+    fn len(&self) -> Result<u64, BCDBError> {
+        self.async_file.len()
+    }
+
+    fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
+        self.append_pos = Offset::from(len);
+        self.async_file.truncate(len)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
+        self.async_file.sync()
+    }
+
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        if offset == self.append_pos.this_page() {
+            return Ok(Some(self.page.clone()))
+        }
+        self.async_file.read_page(offset)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        self.async_file.append_page(page)
+    }
+
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
+        unimplemented!()
+    }
+}
+
 
 struct DataPageFile {
     inner: Arc<DataPageFileInner>
@@ -125,18 +165,19 @@ struct DataPageFileInner {
 }
 
 impl DataPageFileInner {
-    pub fn new (file: Box<PageFile>) -> DataPageFileInner {
-        DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::default()),
-            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true) }
+    pub fn new (file: Box<PageFile>) -> Result<DataPageFileInner, BCDBError> {
+        let len = file.len()?;
+        Ok(DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
+            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true) })
     }
 }
 
 impl DataPageFile {
-    pub fn new (file: Box<PageFile>) -> DataPageFile {
-        let inner = Arc::new(DataPageFileInner::new(file));
+    pub fn new (file: Box<PageFile>) -> Result<DataPageFile, BCDBError> {
+        let inner = Arc::new(DataPageFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::spawn(move || { DataPageFile::background(inner2) });
-        DataPageFile { inner }
+        Ok(DataPageFile { inner })
     }
 
     fn background (inner: Arc<DataPageFileInner>) {
@@ -172,8 +213,8 @@ impl DataPageFile {
         self.inner.work.notify_one();
     }
 
-    pub fn clear_cache(&mut self) {
-        self.inner.cache.lock().unwrap().clear();
+    pub fn clear_cache(&mut self, len: u64) {
+        self.inner.cache.lock().unwrap().clear(len);
     }
 }
 
@@ -218,49 +259,9 @@ impl PageFile for DataPageFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        self.inner.cache.lock().unwrap().write(Offset::from(self.len()?), page);
+        self.inner.cache.lock().unwrap().append(page);
         self.inner.work.notify_one();
         Ok(())
-    }
-
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
-        unimplemented!()
-    }
-}
-
-impl PageFile for DataFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        if self.append_pos.in_page_pos() > 0 {
-            let page = self.page.clone();
-            self.append_page(page)?;
-            self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-            self.append_pos = self.append_pos.next_page();
-        }
-        self.async_file.flush()
-    }
-
-    fn len(&self) -> Result<u64, BCDBError> {
-        self.async_file.len()
-    }
-
-    fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
-        self.append_pos = Offset::from(len);
-        self.async_file.truncate(len)
-    }
-
-    fn sync(&self) -> Result<(), BCDBError> {
-        self.async_file.sync()
-    }
-
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        if offset == self.append_pos.this_page() {
-            return Ok(Some(self.page.clone()))
-        }
-        self.async_file.read_page(offset)
-    }
-
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        self.async_file.append_page(page)
     }
 
     fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {

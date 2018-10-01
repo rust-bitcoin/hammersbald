@@ -115,6 +115,9 @@ impl PageFile for RolledFile {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        if new_len % PAGE_SIZE as u64 != 0 {
+            return Err(BCDBError::Corrupted(format!("truncate not to page boundary {}", new_len)));
+        }
         let chunk = (new_len / self.chunk_size) as u16;
         for (c, file) in &mut self.files {
             if *c > chunk {

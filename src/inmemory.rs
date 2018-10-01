@@ -55,7 +55,7 @@ impl InMemory {
 impl BCDBFactory for InMemory {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
-        let table = KeyFile::new(Box::new(InMemory::new(false)), log);
+        let table = KeyFile::new(Box::new(InMemory::new(false)), log)?;
         let data = DataFile::new(Box::new(InMemory::new(true)), "data")?;
         let bucket = DataFile::new(Box::new(InMemory::new(true)), "link")?;
 
@@ -72,6 +72,9 @@ impl PageFile for InMemory {
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
+        if len % PAGE_SIZE as u64 != 0 {
+            return Err(BCDBError::Corrupted(format!("truncate not to page boundary {}", len)));
+        }
         let mut inner = self.inner.lock().unwrap();
         inner.data.truncate(len as usize);
         Ok(())

@@ -19,24 +19,30 @@
 //! A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
 //!
 
-use page::Page;
+use page::{Page, PAGE_SIZE};
 use types::Offset;
 
 use std::collections::{HashMap,VecDeque};
 use std::sync::Arc;
+use std::cmp::max;
+
 // read cache size
 pub const READ_CACHE_PAGES: usize = 100000;
 
-#[derive(Default)]
 pub struct Cache {
     writes: HashMap<Offset, Arc<Page>>,
     wrote: HashMap<Offset, Arc<Page>>,
     reads: HashMap<Offset, Arc<Page>>,
     fifo: VecDeque<Offset>,
+    len: u64,
     pub new_writes: usize
 }
 
 impl Cache {
+    pub fn new (len: u64) -> Cache {
+        Cache { writes: HashMap::new(), wrote: HashMap::new(), reads: HashMap::new(), fifo: VecDeque::new(), len, new_writes: 0 }
+    }
+
     pub fn cache (&mut self, offset: Offset, page: Page) {
         if !self.writes.contains_key(&offset) && !self.wrote.contains_key(&offset) {
             if self.reads.len() >= READ_CACHE_PAGES {
@@ -57,6 +63,12 @@ impl Cache {
             self.new_writes += 1;
         }
         self.writes.insert(offset, page);
+        self.len = max(self.len, offset.as_u64() + PAGE_SIZE as u64);
+    }
+
+    pub fn append (&mut self, page: Page) {
+        let len = self.len;
+        self.write(Offset::from(len), page)
     }
 
     pub fn is_empty (&self) -> bool {
@@ -87,7 +99,8 @@ impl Cache {
         writes
     }
 
-    pub fn clear (&mut self) {
+    pub fn clear (&mut self, len: u64) {
+        self.len = len;
         self.new_writes = 0;
         self.writes.clear();
         self.wrote.clear();

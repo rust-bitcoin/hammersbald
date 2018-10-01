@@ -127,16 +127,17 @@ impl BCDBAPI for BCDB {
         debug!("batch end");
         self.data.flush()?;
         self.data.sync()?;
-        self.data.clear_cache();
+        let data_len = self.data.len()?;
+        self.data.clear_cache(data_len);
         self.bucket.flush()?;
         self.bucket.sync()?;
-        self.bucket.clear_cache();
+        let bucket_len = self.bucket.len()?;
+        self.bucket.clear_cache(bucket_len);
         self.table.flush()?;
         self.table.sync()?;
-        self.table.clear_cache();
-        let data_len = self.data.len()?;
         let table_len = self.table.len()?;
-        let bucket_len = self.bucket.len()?;
+        self.table.clear_cache(table_len);
+
         debug!("data length {}", data_len);
         debug!("table length {}", table_len);
         debug!("link length {}", bucket_len);
@@ -235,7 +236,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;40];
 
-        for _ in 0 .. 100000 {
+        for _ in 0 .. 100 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);

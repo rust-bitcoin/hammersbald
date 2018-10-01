@@ -52,11 +52,11 @@ pub struct KeyFile {
 }
 
 impl KeyFile {
-    pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> KeyFile {
+    pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> Result<KeyFile, BCDBError> {
         let mut rng = thread_rng();
-        KeyFile{async_file: KeyPageFile::new(rw, log_file), step: 0,
+        Ok(KeyFile{async_file: KeyPageFile::new(rw, log_file)?, step: 0,
             buckets: INIT_BUCKETS as u32, log_mod: INIT_LOGMOD as u32,
-        sip0: rng.next_u64(), sip1: rng.next_u64() }
+        sip0: rng.next_u64(), sip1: rng.next_u64() })
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
@@ -373,8 +373,8 @@ impl KeyFile {
         self.async_file.patch_page(page)
     }
 
-    pub fn clear_cache(&mut self) {
-        self.async_file.clear_cache();
+    pub fn clear_cache(&mut self, len: u64) {
+        self.async_file.clear_cache(len);
     }
 
     pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
@@ -451,22 +451,23 @@ struct KeyPageFileInner {
 }
 
 impl KeyPageFileInner {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> KeyPageFileInner {
-        KeyPageFileInner { file: Mutex::new(file), log,
-            cache: Mutex::new(Cache::default()), flushed: Condvar::new(),
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<KeyPageFileInner, BCDBError> {
+        let len = file.len()?;
+        Ok(KeyPageFileInner { file: Mutex::new(file), log,
+            cache: Mutex::new(Cache::new(len)), flushed: Condvar::new(),
             work: Condvar::new(),
             run: AtomicBool::new(true),
             flushing: AtomicBool::new(false)
-        }
+        })
     }
 }
 
 impl KeyPageFile {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> KeyPageFile {
-        let inner = Arc::new(KeyPageFileInner::new(file, log));
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<KeyPageFile, BCDBError> {
+        let inner = Arc::new(KeyPageFileInner::new(file, log)?);
         let inner2 = inner.clone();
         thread::spawn(move || { KeyPageFile::background(inner2) });
-        KeyPageFile { inner }
+        Ok(KeyPageFile { inner })
     }
 
     fn background (inner: Arc<KeyPageFileInner>) {
@@ -530,8 +531,8 @@ impl KeyPageFile {
         self.inner.work.notify_one();
     }
 
-    pub fn clear_cache(&mut self) {
-        self.inner.cache.lock().unwrap().clear();
+    pub fn clear_cache(&mut self, len: u64) {
+        self.inner.cache.lock().unwrap().clear(len);
     }
 }
 

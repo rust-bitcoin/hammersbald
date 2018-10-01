@@ -113,7 +113,7 @@ impl Offset {
 
     /// position within the offset's page
     pub fn in_page_pos(&self) -> usize {
-        (self.0 - (self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64) as usize
+        (self.0 % PAGE_SIZE as u64) as usize
     }
 }
 
