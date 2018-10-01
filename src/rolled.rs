@@ -28,7 +28,6 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::cmp::max;
-use std::sync::Arc;
 
 pub struct RolledFile {
     name: String,

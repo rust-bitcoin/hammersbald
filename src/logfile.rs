@@ -25,7 +25,6 @@ use error::BCDBError;
 use types::Offset;
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// The buffer pool
 pub struct LogFile {

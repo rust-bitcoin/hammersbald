@@ -26,7 +26,6 @@ use types::Offset;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::Cursor;
-use std::sync::Arc;
 
 pub const PAGE_SIZE: usize = 4096;
 

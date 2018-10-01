@@ -472,15 +472,16 @@ impl KeyPageFile {
     fn background (inner: Arc<KeyPageFileInner>) {
         while inner.run.load(Ordering::Relaxed) {
             let mut writes = Vec::new();
-            let mut cache = inner.cache.lock().expect("cache lock poisoned");
-            if cache.is_empty() {
-                inner.flushed.notify_all();
+            {
+                let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                if cache.is_empty() {
+                    inner.flushed.notify_all();
+                }
+                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                if cache.new_writes > 1000 || inner.flushing.swap(false, Ordering::Relaxed) {
+                    writes = cache.move_writes_to_wrote();
+                }
             }
-            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-            if cache.new_writes > 1000 || inner.flushing.swap(false, Ordering::Relaxed) {
-                writes = cache.move_writes_to_wrote();
-            }
-
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
@@ -559,11 +560,16 @@ impl PageFile for KeyPageFile {
     }
 
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        if let Some(page) = cache.get(offset) {
-            return Ok(Some(page));
+        {
+            let cache = self.inner.cache.lock().unwrap();
+            if let Some(page) = cache.get(offset) {
+                return Ok(Some(page));
+            }
         }
         if let Some(page) = self.read_page_from_store(offset)? {
+            // write cache takes precedence therefore no problem if there was
+            // a write between above read and this lock
+            let mut cache = self.inner.cache.lock().unwrap();
             cache.cache(offset, page.clone());
             return Ok(Some(page));
         }
