@@ -137,7 +137,7 @@ impl KeyFile {
                     break;
                 }
                 match bucket_file.get_content(spill_offset)? {
-                    Content::Spillover(spills, next) => {
+                    Some(Content::Spillover(spills, next)) => {
                         current_spillovers.push(spills);
                         spill_offset = next;
                         if spill_offset.is_valid() {
@@ -212,7 +212,7 @@ impl KeyFile {
                     break;
                 }
                 match bucket_file.get_content(spill_offset)? {
-                    Content::Spillover(spills, next) => {
+                    Some(Content::Spillover(spills, next)) => {
                         for s in &spills {
                             let h = s.0;
                             let mut spills = s.1.clone();
@@ -229,7 +229,7 @@ impl KeyFile {
             {
                 let ds = remaining_spillovers.entry(hash).or_insert(Vec::new());
                 ds.dedup_by_key(|offset| {
-                    if let Ok(Content::Data(k, _)) = data_file.get_content(*offset) {
+                    if let Ok(Some(Content::Data(k, _))) = data_file.get_content(*offset) {
                         return k;
                     }
                     Vec::new()
@@ -298,14 +298,14 @@ impl KeyFile {
                     return Ok(None);
                 }
                 match bucket_file.get_content(spill_offset)? {
-                    Content::Spillover(spills, next) => {
+                    Some(Content::Spillover(spills, next)) => {
                         for s in spills {
                             let h = s.0;
                             let offsets = s.1;
                             if h == hash {
                                 for current in offsets {
                                     match data_file.get_content(current)? {
-                                        Content::Data(data_key, data) => {
+                                        Some(Content::Data(data_key, data)) => {
                                             for k in data_key {
                                                 if k == key {
                                                     return Ok(Some(data));
@@ -341,14 +341,14 @@ impl KeyFile {
                     return Ok(result);
                 }
                 match bucket_file.get_content(spill_offset)? {
-                    Content::Spillover(spills, next) => {
+                    Some(Content::Spillover(spills, next)) => {
                         for s in spills {
                             let h = s.0;
                             let offsets = s.1;
                             if h == hash {
                                 for current in offsets {
                                     match data_file.get_content(current)? {
-                                        Content::Data(data_key, _) => {
+                                        Some(Content::Data(data_key, _)) => {
                                             if data_key.iter().any(|k| k.as_slice() == key) {
                                                 result.push(current);
                                             }

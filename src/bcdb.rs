@@ -205,7 +205,7 @@ impl BCDBAPI for BCDB {
     /// get some content at a known offset
     fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
         match self.data.get_content(offset)? {
-            Content::Extension(data) => return Ok(data),
+            Some(Content::Extension(data)) => return Ok(data),
             _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset.as_u64())))
         }
     }

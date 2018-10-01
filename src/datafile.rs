@@ -58,13 +58,10 @@ impl DataFile {
         self.async_file.shutdown()
     }
 
-    pub fn get_content(&self, offset: Offset) -> Result<Content, BCDBError> {
+    pub fn get_content(&self, offset: Offset) -> Result<Option<Content>, BCDBError> {
         let mut fetch_iterator = DataIterator::new_fetch(
             DataPageIterator::new(&self, offset.page_number()), offset.in_page_pos());
-        if let Some(content) = fetch_iterator.next() {
-            return Ok(content);
-        }
-        return Err(BCDBError::Corrupted(format!("{} expected content at {} len {}", self.role, offset.as_u64(), self.len()?)));
+        Ok(fetch_iterator.next())
     }
 
     pub fn append_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
