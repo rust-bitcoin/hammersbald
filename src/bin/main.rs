@@ -17,12 +17,12 @@ pub fn main () {
     db.init().unwrap();
 
     // transaction size assumed 300 bytes
-    let data = [0x0u8;300];
+    let mut data = [0x0u8;300];
 
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 5000000;
+    let ntx = 50000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)
@@ -38,9 +38,10 @@ pub fn main () {
     let mut elapsed;
     let mut key = [0u8;32];
     for i in 0 .. ntx {
-        thread_rng().fill(&mut key);
+        thread_rng().fill(&mut data[..]);
+        thread_rng().fill(&mut key[..]);
         if i % 100 == 0 {
-            check.push (key.clone());
+            check.push ((key.clone(), data.clone()));
         }
         db.put(vec!(key.to_vec()), &data).unwrap();
         n += 1;
@@ -60,8 +61,8 @@ pub fn main () {
     thread_rng().shuffle(&mut check);
     println!("Reading data in random order...");
     now = Instant::now();
-    for key in &check {
-        db.get(key).unwrap();
+    for (key, data) in &check {
+        assert_eq!(db.get_unique(key).unwrap(), Some(data.to_vec()));
     }
     elapsed = now.elapsed().as_secs();
     if elapsed > 0 {
