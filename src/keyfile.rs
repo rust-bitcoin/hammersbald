@@ -479,7 +479,7 @@ impl KeyPageFile {
                     inner.flushed.notify_all();
                 }
                 cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                if cache.new_writes > 1000 || inner.flushing.swap(false, Ordering::Relaxed) {
+                if cache.new_writes > 1000 || inner.flushing.swap(false, Ordering::AcqRel) {
                     writes = cache.move_writes_to_wrote();
                 }
             }
@@ -541,7 +541,7 @@ impl PageFile for KeyPageFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if !cache.is_empty() {
-            self.inner.flushing.store(true, Ordering::Relaxed);
+            self.inner.flushing.store(true, Ordering::Release);
             self.inner.work.notify_one();
             cache = self.inner.flushed.wait(cache)?;
         }
