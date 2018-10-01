@@ -16,13 +16,13 @@ pub fn main () {
     let mut db = InFile::new_db("testdb").unwrap();
     db.init().unwrap();
 
-    // transaction size assumed 300 bytes
-    let mut data = [0x0u8;300];
+    // transaction size assumed 500 bytes
+    let mut data = [0x0u8;500];
 
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 500000000;
+    let ntx = 350000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)
