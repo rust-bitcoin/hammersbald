@@ -108,6 +108,16 @@ impl BCDB {
         }
         Ok(())
     }
+
+    /// get a data iterator
+    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=Content> + 'a {
+        self.data.iter()
+    }
+
+    /// get a link iterator
+    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=Content> + 'a {
+        self.bucket.iter()
+    }
 }
 
 impl BCDBAPI for BCDB {

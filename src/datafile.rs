@@ -41,6 +41,7 @@ pub struct DataFile {
 }
 
 impl DataFile {
+    /// create a new data file
     pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFile, BCDBError> {
         let file = DataPageFile::new(rw)?;
         let append_pos = Offset::from(file.len()?);
@@ -49,21 +50,30 @@ impl DataFile {
             page: Page::new(), role: role.to_string()})
     }
 
+    /// initialize
     pub fn init(&mut self) -> Result<(), BCDBError> {
         self.append_slice(&[0xBC, 0xDA])?;
         Ok(())
     }
 
+    /// shutdown
     pub fn shutdown (&mut self) {
         self.async_file.shutdown()
     }
 
+    /// get an iterator of data
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Content> + 'a {
+        DataIterator::new_fetch(DataPageIterator::new(&self, 0), 2)
+    }
+
+    /// get a stored content at offset
     pub fn get_content(&self, offset: Offset) -> Result<Option<Content>, BCDBError> {
         let mut fetch_iterator = DataIterator::new_fetch(
             DataPageIterator::new(&self, offset.page_number()), offset.in_page_pos());
         Ok(fetch_iterator.next())
     }
 
+    /// append content
     pub fn append_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
         match content {
             Content::Data(k, d) => self.append(DataEntry::new_data(k, d.as_slice())),
@@ -93,16 +103,23 @@ impl DataFile {
             self.page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
             pos += have;
             wrote += have;
-            if pos == PAGE_SIZE {
-                self.async_file.append_page(self.page.clone())?;
+            if pos == PAGE_SIZE && wrote < slice.len() {
+                let page = self.page.clone();
+                self.append_page(page)?;
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
                 pos = 0;
             }
+        }
+        if pos == PAGE_SIZE {
+            let page = self.page.clone();
+            self.append_page(page)?;
+            self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
         }
         self.append_pos = Offset::from(self.append_pos.as_u64() + slice.len() as u64);
         Ok(())
     }
 
+    /// clear cache
     pub fn clear_cache(&mut self, len: u64) {
         self.async_file.clear_cache(len);
     }
@@ -309,7 +326,7 @@ pub enum Content {
 
 /// types of data stored in the data file
 #[derive(Eq, PartialEq,Debug,Copy, Clone)]
-pub enum DataType {
+enum DataType {
     /// no data, just padding the storage pages with zero bytes
     Padding,
     /// application defined data
@@ -432,47 +449,56 @@ impl<'file> Iterator for DataIterator<'file> {
         if self.current.is_none() {
             self.current = self.page_iterator.next();
         }
-        if let Some(current) = self.current.clone() {
-            let data_type = DataType::from(current.payload[self.pos]);
-            self.pos += 1;
-            if data_type == DataType::AppData {
-                if let Some(buf) = self.read_sized() {
-                    let mut cursor = Cursor::new(buf);
-                    let n_keys = cursor.read_u8().unwrap();
-                    let mut keys = Vec::new();
-                    for _ in 0 .. n_keys {
-                        let key_len = cursor.read_u8().unwrap() as usize;
-                        let mut key = vec!(0u8;key_len);
-                        cursor.read(&mut key).unwrap();
-                        keys.push(key);
+        if let Some(mut current) = self.current.clone() {
+            loop {
+                if self.pos == PAGE_SIZE {
+                    if let Some(c) = self.page_iterator.next() {
+                        current = c;
+                        self.pos = 0;
                     }
-                    let pos = cursor.position() as usize;
-                    let v = cursor.into_inner();
-                    let (_, data) = v.split_at(pos);
-                    return Some(Content::Data(keys, data.to_vec()));
+                    else {
+                        return None;
+                    }
                 }
-            }
-            else if data_type == DataType::AppDataExtension {
-                if let Some(buf) = self.read_sized() {
-                    return Some(Content::Extension(buf));
-                }
-            }
-            else if data_type == DataType::TableSpillOver {
-                if let Some(buf) = self.read_sized () {
-                    let mut cursor = Cursor::new(buf);
-                    let m = cursor.read_u8().unwrap() as usize;
-                    let mut spills = Vec::new();
-                    for _ in 0 .. m {
-                        let hash = cursor.read_u32::<BigEndian>().unwrap();
-                        let n = cursor.read_u8().unwrap() as usize;
-                        let mut offsets = Vec::new();
-                        for _ in 0..n {
-                            offsets.push(cursor.read_offset())
+                let data_type = DataType::from(current.payload[self.pos]);
+                self.pos += 1;
+                if data_type == DataType::AppData {
+                    if let Some(buf) = self.read_sized() {
+                        let mut cursor = Cursor::new(buf);
+                        let n_keys = cursor.read_u8().unwrap();
+                        let mut keys = Vec::new();
+                        for _ in 0..n_keys {
+                            let key_len = cursor.read_u8().unwrap() as usize;
+                            let mut key = vec!(0u8; key_len);
+                            cursor.read(&mut key).unwrap();
+                            keys.push(key);
                         }
-                        spills.push((hash, offsets));
+                        let pos = cursor.position() as usize;
+                        let v = cursor.into_inner();
+                        let (_, data) = v.split_at(pos);
+                        return Some(Content::Data(keys, data.to_vec()));
                     }
-                    let next = cursor.read_offset();
-                    return Some(Content::Spillover(spills, next));
+                } else if data_type == DataType::AppDataExtension {
+                    if let Some(buf) = self.read_sized() {
+                        return Some(Content::Extension(buf));
+                    }
+                } else if data_type == DataType::TableSpillOver {
+                    if let Some(buf) = self.read_sized() {
+                        let mut cursor = Cursor::new(buf);
+                        let m = cursor.read_u8().unwrap() as usize;
+                        let mut spills = Vec::new();
+                        for _ in 0..m {
+                            let hash = cursor.read_u32::<BigEndian>().unwrap();
+                            let n = cursor.read_u8().unwrap() as usize;
+                            let mut offsets = Vec::new();
+                            for _ in 0..n {
+                                offsets.push(cursor.read_offset())
+                            }
+                            spills.push((hash, offsets));
+                        }
+                        let next = cursor.read_offset();
+                        return Some(Content::Spillover(spills, next));
+                    }
                 }
             }
         }
