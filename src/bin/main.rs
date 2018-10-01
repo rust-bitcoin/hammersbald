@@ -12,7 +12,7 @@ use rand::{thread_rng, Rng};
 use std::time::{Instant};
 
 pub fn main () {
-    simple_logger::init_with_level(log::Level::Debug).unwrap();
+    simple_logger::init_with_level(log::Level::Info).unwrap();
     let mut db = InFile::new_db("testdb").unwrap();
     db.init().unwrap();
 
@@ -22,7 +22,7 @@ pub fn main () {
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 50000000;
+    let ntx = 500000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)

@@ -95,7 +95,7 @@ impl KeyFile {
             self.store_to_bucket(bucket, vec![(hash, vec![offset])], bucket_file)?;
         }
 
-        if self.step < <u32>::max_value() {
+        if thread_rng().next_u32() % 16 == 0 && self.step < <u32>::max_value() {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
