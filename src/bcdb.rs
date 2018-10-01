@@ -87,7 +87,6 @@ impl BCDB {
         for page in log.page_iter() {
             if !first {
                 let key_page = KeyPage::from(page);
-                debug!("recover BCDB: patch page {}", key_page.offset);
                 self.table.patch_page(key_page)?;
             }
                 else {
@@ -104,7 +103,7 @@ impl BCDB {
                     let bucket_len = Offset::from(&size[..]).as_u64();
                     self.bucket.truncate(bucket_len)?;
                     first = false;
-                    debug!("recover BCDB: set lengths to table: {} data: {}", table_len, data_len);
+                    debug!("recover BCDB: set lengths to table: {} link: {} data: {}", bucket_len, table_len, data_len);
                 }
         }
         Ok(())
