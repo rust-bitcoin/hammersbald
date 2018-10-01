@@ -80,11 +80,11 @@ impl PageFile for InFile {
         self.file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.append_page(page)
     }
 
-    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, offset: Offset, page: Page) -> Result<(), BCDBError> {
         self.file.write_page(offset, page)
     }
 }

@@ -116,12 +116,13 @@ pub trait PageFile : Send + Sync {
     /// read a page at given offset
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError>;
     /// append a page (ignore offset in the Page)
-    fn append_page (&mut self, page: Arc<Page>) -> Result<(), BCDBError>;
+    fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
     /// write a page at its position as specified in page.offset
-    fn write_page (&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError>;
+    fn write_page (&mut self, offset: Offset, page: Page) -> Result<(), BCDBError>;
 }
 
 /// a page of the hash table
+#[derive(Clone)]
 pub struct KeyPage {
     pub page: Page,
     pub offset: Offset

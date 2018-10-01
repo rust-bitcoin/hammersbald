@@ -432,7 +432,7 @@ impl KeyFile {
     }
 
     fn write_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
-        self.async_file.write_page(page.offset, Arc::new(page.page))
+        self.async_file.write_page(page.offset, page.page)
     }
 }
 
@@ -490,7 +490,7 @@ impl KeyPageFile {
                     let offset = write.0;
                     if offset.as_u64() < log.tbl_len && !log.is_logged(offset) {
                         if let Some(page) = file.read_page(offset).expect("can not read hash table file") {
-                            log.append_page(Arc::new(page)).expect("can not write log file");
+                            log.append_page(page).expect("can not write log file");
                             logged = true;
                         }
                         else {
@@ -510,7 +510,7 @@ impl KeyPageFile {
     }
 
     pub fn patch_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().write_page(page.offset, Arc::new(page.page))
+        self.inner.file.lock().unwrap().write_page(page.offset, page.page)
     }
 
     fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
@@ -561,22 +561,20 @@ impl PageFile for KeyPageFile {
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if let Some(page) = cache.get(offset) {
-            use std::ops::Deref;
-
-            return Ok(Some(page.deref().clone()));
+            return Ok(Some(page));
         }
         if let Some(page) = self.read_page_from_store(offset)? {
-            cache.cache(offset, Arc::new(page.clone()));
+            cache.cache(offset, page.clone());
             return Ok(Some(page));
         }
         Ok(None)
     }
 
-    fn append_page(&mut self, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 
-    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, offset: Offset, page: Page) -> Result<(), BCDBError> {
         self.inner.cache.lock().unwrap().write(offset, page);
         self.inner.work.notify_one();
         Ok(())

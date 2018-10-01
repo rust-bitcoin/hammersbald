@@ -96,7 +96,7 @@ impl DataFile {
             wrote += have;
             wrote_on_this_page += have;
             if pos == PAGE_SIZE {
-                self.async_file.append_page(Arc::new(self.page.clone()))?;
+                self.async_file.append_page(self.page.clone())?;
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
                 self.append_pos = self.append_pos.next_page();
                 pos = 0;
@@ -200,24 +200,22 @@ impl PageFile for DataPageFile {
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         if let Some(page) = cache.get(offset) {
-            use std::ops::Deref;
-
-            return Ok(Some(page.deref().clone()));
+            return Ok(Some(page));
         }
         if let Some(page) = self.read_page_from_store(offset)? {
-            cache.cache(offset, Arc::new(page.clone()));
+            cache.cache(offset, page.clone());
             return Ok(Some(page));
         }
         Ok(None)
     }
 
-    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.inner.cache.lock().unwrap().write(Offset::from(self.len()?), page);
         self.inner.work.notify_one();
         Ok(())
     }
 
-    fn write_page(&mut self, _: Offset, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }
@@ -226,7 +224,7 @@ impl PageFile for DataFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             let page = self.page.clone();
-            self.append_page(Arc::new(page))?;
+            self.append_page(page)?;
             self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
             self.append_pos = self.append_pos.next_page();
         }
@@ -253,11 +251,11 @@ impl PageFile for DataFile {
         self.async_file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.async_file.append_page(page)
     }
 
-    fn write_page(&mut self, _: Offset, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

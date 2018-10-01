@@ -144,7 +144,7 @@ impl PageFile for RolledFile {
         Ok(None)
     }
 
-    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let chunk = (self.len / self.chunk_size) as u16;
 
         if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
@@ -163,7 +163,7 @@ impl PageFile for RolledFile {
         }
     }
 
-    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, offset: Offset, page: Page) -> Result<(), BCDBError> {
         let n_offset = offset.as_u64();
         let chunk = (n_offset / self.chunk_size) as u16;
 
@@ -232,14 +232,14 @@ impl PageFile for SingleFile {
         Ok(Some(Page::from_buf(buffer)))
     }
 
-    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut file = self.file.lock().unwrap();
         file.write(&page.finish()[..])?;
         self.len += PAGE_SIZE as u64;
         Ok(())
     }
 
-    fn write_page(&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, offset: Offset, page: Page) -> Result<(), BCDBError> {
         let o = offset.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("write to wrong file".to_string()));

@@ -58,7 +58,7 @@ impl LogFile {
 
     pub fn append_key_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
         self.logged.insert(page.offset);
-        self.append_page(Arc::new(page.page))
+        self.append_page(page.page)
     }
 }
 
@@ -83,11 +83,11 @@ impl PageFile for LogFile {
         self.rw.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.rw.append_page(page)
     }
 
-    fn write_page(&mut self, _: Offset, _: Arc<Page>) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 }

@@ -37,7 +37,7 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn cache (&mut self, offset: Offset, page: Arc<Page>) {
+    pub fn cache (&mut self, offset: Offset, page: Page) {
         if !self.writes.contains_key(&offset) && !self.wrote.contains_key(&offset) {
             if self.reads.len() >= READ_CACHE_PAGES {
                 if let Some(old) = self.fifo.pop_front() {
@@ -45,13 +45,14 @@ impl Cache {
                 }
             }
 
-            if self.reads.insert(offset, page.clone()).is_none() {
+            if self.reads.insert(offset, Arc::new(page)).is_none() {
                 self.fifo.push_back(offset);
             }
         }
     }
 
-    pub fn write (&mut self, offset: Offset, page: Arc<Page>) {
+    pub fn write (&mut self, offset: Offset, page: Page) {
+        let page = Arc::new(page);
         if self.wrote.insert(offset, page.clone()).is_none() {
             self.new_writes += 1;
         }
@@ -62,21 +63,25 @@ impl Cache {
         self.writes.is_empty()
     }
 
-    pub fn get(&self, offset: Offset) -> Option<Arc<Page>> {
+    pub fn get(&self, offset: Offset) -> Option<Page> {
+        use std::ops::Deref;
+
         if let Some(content) = self.writes.get(&offset) {
-            return Some(content.clone())
+            return Some(content.deref().clone())
         }
         if let Some(content) = self.wrote.get(&offset) {
-            return Some(content.clone())
+            return Some(content.deref().clone())
         }
         if let Some(content) = self.reads.get(&offset) {
-            return Some(content.clone())
+            return Some(content.deref().clone())
         }
         None
     }
 
-    pub fn move_writes_to_wrote(&mut self) -> Vec<(Offset, Arc<Page>)> {
-        let writes = self.writes.iter().map(|(o, p)| (*o, p.clone())).collect::<Vec<_>>();
+    pub fn move_writes_to_wrote(&mut self) -> Vec<(Offset, Page)> {
+        use std::ops::Deref;
+
+        let writes = self.writes.iter().map(|(o, p)| (*o, p.deref().clone())).collect::<Vec<_>>();
         self.writes.clear();
         self.new_writes = 0;
         writes
