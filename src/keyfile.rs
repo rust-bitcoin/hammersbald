@@ -144,7 +144,7 @@ impl KeyFile {
                             rewrite = true;
                         }
                     },
-                    _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
+                    _ => return Err(BCDBError::Corrupted(format!("expected spillover at rehash {}", spill_offset).to_string()))
                 }
             }
             // process in reverse order to ensure latest put takes precedence in the new bucket
@@ -189,7 +189,7 @@ impl KeyFile {
             }
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
         }
         Ok(())
     }
@@ -262,7 +262,7 @@ impl KeyFile {
             self.write_page(bucket_page)?;
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
         }
         Ok(())
     }
@@ -279,7 +279,7 @@ impl KeyFile {
             self.write_page(bucket_page)?;
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
         }
         Ok(())
     }
@@ -365,7 +365,7 @@ impl KeyFile {
             }
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
+            return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset)));
         }
     }
 
@@ -424,7 +424,7 @@ impl KeyFile {
         if let Some(page) = self.async_file.read_page(offset)? {
             let key_page = KeyPage::from(page);
             if key_page.offset.as_u64() != offset.as_u64() {
-                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset.as_u64())));
+                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset)));
             }
             return Ok(Some(key_page));
         }
@@ -495,7 +495,7 @@ impl KeyPageFile {
                             logged = true;
                         }
                         else {
-                            panic!("can not find pre-image to log {}", offset.as_u64());
+                            panic!("can not find pre-image to log {}", offset);
                         }
                     }
                 }
@@ -516,7 +516,7 @@ impl KeyPageFile {
 
     fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         if offset != offset.this_page () {
-            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset.as_u64())))
+            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset)))
         }
         self.inner.file.lock().unwrap().read_page(offset)
     }

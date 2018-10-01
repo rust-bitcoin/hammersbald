@@ -162,7 +162,7 @@ impl DataPageFile {
 
     fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         if offset != offset.this_page () {
-            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset.as_u64())))
+            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset)))
         }
         self.inner.file.lock().unwrap().read_page(offset)
     }

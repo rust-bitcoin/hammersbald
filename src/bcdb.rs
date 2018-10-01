@@ -87,7 +87,7 @@ impl BCDB {
         for page in log.page_iter() {
             if !first {
                 let key_page = KeyPage::from(page);
-                debug!("recover BCDB: patch page {}", key_page.offset.as_u64());
+                debug!("recover BCDB: patch page {}", key_page.offset);
                 self.table.patch_page(key_page)?;
             }
                 else {
@@ -207,7 +207,7 @@ impl BCDBAPI for BCDB {
     fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
         match self.data.get_content(offset)? {
             Some(Content::Extension(data)) => return Ok(data),
-            _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset.as_u64())))
+            _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset)))
         }
     }
 }

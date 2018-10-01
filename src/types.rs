@@ -24,6 +24,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::Cursor;
 use std::cmp::Ordering;
+use std::fmt;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 /// Pointer to persistent data. Limited to 2^48
@@ -50,6 +51,12 @@ impl From<u64> for Offset {
 impl<'a> From<&'a [u8]> for Offset {
     fn from(slice: &'a [u8]) -> Self {
         Offset::from(Cursor::new(slice).read_u48::<BigEndian>().unwrap())
+    }
+}
+
+impl fmt::Display for Offset {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 
