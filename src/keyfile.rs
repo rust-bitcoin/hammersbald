@@ -222,7 +222,7 @@ impl KeyFile {
                         original_spillovers.push(spills);
                         spill_offset = next;
                     },
-                    _ => return Err(BCDBError::Corrupted("unknown content at rehash".to_string()))
+                    _ => return Err(BCDBError::Corrupted("unknown content at dedup".to_string()))
                 };
             }
 
