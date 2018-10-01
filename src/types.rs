@@ -101,11 +101,6 @@ impl Offset {
         Offset::from((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64)
     }
 
-    /// page offset after this offset
-    pub fn next_page(&self) -> Offset {
-        Offset::from((self.0/ PAGE_SIZE as u64 + 1)* PAGE_SIZE as u64)
-    }
-
     /// compute page number of an offset
     pub fn page_number(&self) -> u64 {
         self.0/PAGE_SIZE as u64
@@ -116,29 +111,3 @@ impl Offset {
         (self.0 % PAGE_SIZE as u64) as usize
     }
 }
-
-#[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
-pub(crate) struct U24 (usize);
-
-impl From<usize> for U24 {
-    fn from(n: usize) -> Self {
-        U24(n & 0xffffffusize)
-    }
-}
-
-impl<'a> From<&'a [u8]> for U24 {
-    fn from(slice: &'a [u8]) -> Self {
-        U24::from(Cursor::new(slice).read_u24::<BigEndian>().unwrap() as usize)
-    }
-}
-
-impl U24 {
-    pub fn as_usize (&self) -> usize {
-        return self.0;
-    }
-
-    pub fn serialize (&self, mut into: &mut [u8]) {
-        into.write_u24::<BigEndian>(self.0 as u32).unwrap();
-    }
-}
-

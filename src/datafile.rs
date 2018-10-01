@@ -20,7 +20,7 @@
 
 use page::{Page, PageFile, PAGE_SIZE};
 use error::BCDBError;
-use types::{Offset, U24, OffsetReader};
+use types::{Offset, OffsetReader};
 use cache::Cache;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
@@ -83,15 +83,12 @@ impl DataFile {
     }
 
     fn append (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
-        let start = self.append_pos;
-        let mut data_type = [0u8;1];
-        data_type[0] = entry.data_type.to_u8();
-        self.append_slice(&data_type)?;
-
-        let mut len = [0u8; 3];
-        U24::from(entry.data.len()).serialize(&mut len);
-        self.append_slice(&len)?;
-        self.append_slice(entry.data.as_slice())?;
+        let start= self.append_pos;
+        let mut pack = Vec::new();
+        pack.write_u8(entry.data_type.to_u8())?;
+        pack.write_u24::<BigEndian>(entry.data.len() as u32)?;
+        pack.extend(entry.data);
+        self.append_slice(pack.as_slice())?;
         return Ok(start);
     }
 
@@ -131,7 +128,7 @@ impl PageFile for DataFile {
             let page = self.page.clone();
             self.append_page(page)?;
             self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-            self.append_pos = self.append_pos.next_page();
+            self.append_pos = Offset::from(self.append_pos.this_page().as_u64() + PAGE_SIZE as u64);
         }
         self.async_file.flush()
     }
@@ -209,7 +206,12 @@ impl DataPageFile {
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
-                for (_, page) in &writes {
+                let mut next = file.len().unwrap();
+                for (o, page) in &writes {
+                    if o.as_u64() != next as u64 {
+                        panic!("non conscutive append {} {}", next, o);
+                    }
+                    next = o.as_u64() + PAGE_SIZE as u64;
                     file.append_page(page.clone()).expect("can not extend data file");
                 }
             }
@@ -408,8 +410,9 @@ impl<'file> DataIterator<'file> {
 
     fn read_sized(&mut self) -> Option<Vec<u8>> {
         if let Some(size) = self.read(3) {
-            let len = U24::from(&size[..]);
-            if let Some(buf) = self.read(len.as_usize()) {
+            let mut c = Cursor::new(size);
+            let len = c.read_u24::<BigEndian>().unwrap();
+            if let Some(buf) = self.read(len as usize) {
                 return Some(buf);
             }
         }

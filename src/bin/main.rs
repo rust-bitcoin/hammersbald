@@ -22,7 +22,7 @@ pub fn main () {
     // simulating a blockchain ingest
 
     // number of transactions
-    let ntx = 350000000;
+    let ntx = 1000000;
     // transactions per block
     let tb = 1000;
     // load batch size (in number of blocks)
