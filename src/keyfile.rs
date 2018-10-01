@@ -20,7 +20,7 @@
 
 use logfile::LogFile;
 use datafile::{DataFile, Content};
-use page::{Page, PageFile, PAGE_SIZE};
+use page::{Page, KeyPage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
 use cache::Cache;
@@ -72,12 +72,12 @@ impl KeyFile {
             info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
         else {
-            let mut fp = Page::new(Offset::from(0));
+            let mut fp = KeyPage::new(Offset::from(0));
             fp.write_offset(0, Offset::from(self.buckets as u64))?;
             fp.write_offset(6, Offset::from(self.step as u64))?;
             fp.write_u64(12, self.sip0)?;
             fp.write_u64(20, self.sip1)?;
-            self.write_page(Arc::new(fp))?;
+            self.write_page(fp)?;
             info!("open empty BCDB");
         };
 
@@ -110,14 +110,14 @@ impl KeyFile {
 
             self.buckets += 1;
             if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
-                let page = Page::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
-                self.write_page(Arc::new(page))?;
+                let page = KeyPage::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
+                self.write_page(page)?;
             }
 
             if let Some(mut first_page) = self.read_page(Offset::from(0))? {
                 first_page.write_offset(0, Offset::from(self.buckets as u64))?;
                 first_page.write_offset(6, Offset::from(self.step as u64))?;
-                self.write_page(Arc::new(first_page))?;
+                self.write_page(first_page)?;
             }
         }
 
@@ -185,7 +185,7 @@ impl KeyFile {
                     next = so;
                 }
                 bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
-                self.write_page(Arc::new(bucket_page))?;
+                self.write_page(bucket_page)?;
             }
         }
         else {
@@ -259,7 +259,7 @@ impl KeyFile {
                 }
                 bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             }
-            self.write_page(Arc::new(bucket_page))?;
+            self.write_page(bucket_page)?;
         }
         else {
             return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
@@ -276,7 +276,7 @@ impl KeyFile {
             // since search stops at first key match
             let so = bucket_file.append_content(Content::Spillover(spill, spill_offset))?;
             bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
-            self.write_page(Arc::new(bucket_page))?;
+            self.write_page(bucket_page)?;
         }
         else {
             return Err(BCDBError::Corrupted(format!("missing link page {}", bucket_offset.as_u64())));
@@ -369,7 +369,7 @@ impl KeyFile {
         }
     }
 
-    pub fn patch_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
         self.async_file.patch_page(page)
     }
 
@@ -420,18 +420,19 @@ impl KeyFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<KeyPage>, BCDBError> {
         if let Some(page) = self.async_file.read_page(offset)? {
-            if page.offset.as_u64() != offset.as_u64() {
+            let key_page = KeyPage::from(page);
+            if key_page.offset.as_u64() != offset.as_u64() {
                 return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset.as_u64())));
             }
-            return Ok(Some(page));
+            return Ok(Some(key_page));
         }
         Ok(None)
     }
 
-    fn write_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.async_file.write_page(page.offset, page)
+    fn write_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
+        self.async_file.write_page(page.offset, Arc::new(page.page))
     }
 }
 
@@ -508,8 +509,8 @@ impl KeyPageFile {
         }
     }
 
-    pub fn patch_page(&mut self, page: Arc<Page>) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().write_page(page.offset, page)
+    pub fn patch_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
+        self.inner.file.lock().unwrap().write_page(page.offset, Arc::new(page.page))
     }
 
     fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {

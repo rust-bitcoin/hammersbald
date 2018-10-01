@@ -46,7 +46,7 @@ impl DataFile {
         let append_pos = Offset::from(file.len()?);
         Ok(DataFile{async_file: file,
             append_pos,
-            page: Page::new(append_pos), role: role.to_string()})
+            page: Page::new(), role: role.to_string()})
     }
 
     pub fn init(&mut self) -> Result<(), BCDBError> {

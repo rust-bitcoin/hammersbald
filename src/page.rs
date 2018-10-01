@@ -33,21 +33,18 @@ pub const PAGE_SIZE: usize = 4096;
 /// A page of the persistent files
 #[derive(Clone)]
 pub struct Page {
-    pub payload: [u8; PAGE_SIZE],
-    pub offset: Offset
+    pub payload: [u8; PAGE_SIZE]
 }
 
 impl Page {
     /// create a new empty page to be appended at given offset
-    pub fn new (offset: Offset) -> Page {
-        let mut content = [0u8; PAGE_SIZE];
-        content[PAGE_SIZE - 6 ..].copy_from_slice(offset.to_vec().as_slice());
-        Page {payload: content, offset}
+    pub fn new () -> Page {
+        Page {payload: [0u8; PAGE_SIZE]}
     }
 
     /// create a Page from read buffer
     pub fn from_buf (payload: [u8; PAGE_SIZE]) -> Page {
-        Page {payload, offset: Offset::from(&payload[PAGE_SIZE - 6 ..]) }
+        Page {payload}
     }
 
     /// append some data
@@ -105,7 +102,6 @@ impl Page {
     }
 }
 
-
 /// a read-write-seak-able storage with added methods
 /// synchronized in its implementation
 pub trait PageFile : Send + Sync {
@@ -125,6 +121,67 @@ pub trait PageFile : Send + Sync {
     fn write_page (&mut self, offset: Offset, page: Arc<Page>) -> Result<(), BCDBError>;
 }
 
+/// a page of the hash table
+pub struct KeyPage {
+    pub page: Page,
+    pub offset: Offset
+}
+
+impl From<Page> for KeyPage {
+    fn from(page: Page) -> Self {
+        let offset = Offset::from(&page.payload[PAGE_SIZE-6 ..]);
+        KeyPage {page, offset}
+    }
+}
+
+impl KeyPage {
+    /// create a new hash table page at offset
+    pub fn new (offset: Offset) -> KeyPage {
+        let mut page = Page::new();
+        page.payload[PAGE_SIZE - 6 ..].copy_from_slice(offset.to_vec().as_slice());
+        KeyPage {page, offset}
+    }
+
+    pub fn from_buf (payload: [u8; PAGE_SIZE]) -> KeyPage {
+        KeyPage {page: Page::from_buf(payload), offset: Offset::from(&payload[PAGE_SIZE-6 ..])}
+    }
+
+    /// append some data
+    /// will return Error::DoesNotFit if data does not fit into the page
+    pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCDBError> {
+        self.page.write(pos, data)
+    }
+
+    /// write an offset
+    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
+        self.page.write_offset(pos, offset)
+    }
+
+    /// read some data
+    /// will return Error::DoesNotFit if data does not fit into the page
+    pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCDBError> {
+        self.page.read(pos, data)
+    }
+
+    /// read a stored offset
+    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
+        self.page.read_offset(pos)
+    }
+
+    pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
+        self.page.read_u64(pos)
+    }
+
+    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
+        self.page.write_u64(pos, n)
+    }
+
+    /// finish a page after appends to write out
+    pub fn finish (&self) -> [u8; PAGE_SIZE] {
+        self.page.payload
+    }
+}
+
 #[cfg(test)]
 mod test {
     extern crate hex;
@@ -132,10 +189,10 @@ mod test {
     use super::*;
     #[test]
     fn form_test () {
-        let mut page = Page::new(Offset::from(4711));
+        let mut key_page = KeyPage::new(Offset::from(4711));
         let payload: &[u8] = "hello world".as_bytes();
-        page.write(0,payload).unwrap();
-        let result = page.finish();
+        key_page.write(0,payload).unwrap();
+        let result = key_page.finish();
 
         let mut check = [0u8; PAGE_SIZE];
         check[0 .. payload.len()].copy_from_slice(payload);
@@ -143,8 +200,8 @@ mod test {
         check[PAGE_SIZE -2] = (4711 / 256) as u8;
         assert_eq!(hex::encode(&result[..]), hex::encode(&check[..]));
 
-        let page2 = Page::from_buf(check);
-        assert_eq!(page.offset, page2.offset);
-        assert_eq!(hex::encode(&page.payload[..]), hex::encode(&page2.payload[..]));
+        let page2 = KeyPage::from_buf(check);
+        assert_eq!(key_page.offset, page2.offset);
+        assert_eq!(hex::encode(&key_page.page.payload[..]), hex::encode(&page2.page.payload[..]));
     }
 }

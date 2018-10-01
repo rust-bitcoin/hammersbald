@@ -20,7 +20,7 @@ use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
 use datafile::{DataFile, Content};
-use page::{Page, PageFile};
+use page::{Page, KeyPage, PageFile};
 use error::BCDBError;
 
 use std::sync::{Mutex,Arc};
@@ -86,8 +86,9 @@ impl BCDB {
         debug!("recover");
         for page in log.page_iter() {
             if !first {
-                debug!("recover BCDB: patch page {}", page.offset.as_u64());
-                self.table.patch_page(Arc::new(page))?;
+                let key_page = KeyPage::from(page);
+                debug!("recover BCDB: patch page {}", key_page.offset.as_u64());
+                self.table.patch_page(key_page)?;
             }
                 else {
                     let mut size = [0u8; 6];
@@ -144,7 +145,7 @@ impl BCDBAPI for BCDB {
         log.clear_cache();
         log.truncate(0)?;
 
-        let mut first = Page::new(Offset::from(0));
+        let mut first = Page::new();
         first.write(0, &[0xBC, 0x00]).unwrap();
         first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
         first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
