@@ -236,7 +236,7 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;40];
 
-        for _ in 0 .. 100 {
+        for _ in 0 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             check.insert(key, data);

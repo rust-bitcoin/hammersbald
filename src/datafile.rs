@@ -87,22 +87,19 @@ impl DataFile {
 
     fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCDBError> {
         let mut wrote = 0;
-        let mut wrote_on_this_page = 0;
         let mut pos = self.append_pos.in_page_pos();
         while wrote < slice.len() {
             let have = min(slice.len() - wrote, PAGE_SIZE - pos);
             self.page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
             pos += have;
             wrote += have;
-            wrote_on_this_page += have;
             if pos == PAGE_SIZE {
                 self.async_file.append_page(self.page.clone())?;
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
                 pos = 0;
-                wrote_on_this_page = 0;
             }
         }
-        self.append_pos = Offset::from(self.append_pos.as_u64() + wrote_on_this_page as u64);
+        self.append_pos = Offset::from(self.append_pos.as_u64() + slice.len() as u64);
         Ok(())
     }
 
