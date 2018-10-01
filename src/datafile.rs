@@ -125,6 +125,7 @@ impl PageFile for DataFile {
 
     fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         self.append_pos = Offset::from(len);
+        self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
         self.async_file.truncate(len)
     }
 
