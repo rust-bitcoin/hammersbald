@@ -27,7 +27,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::cmp::min;
 use std::sync::{Arc, Condvar, Mutex};
-use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::io::{Write, Read, Cursor};
 
@@ -154,12 +154,13 @@ struct DataPageFileInner {
     cache: Mutex<Cache>,
     flushed: Condvar,
     work: Condvar,
-    run: Mutex<Cell<bool>>
+    run: AtomicBool
 }
 
 impl DataPageFileInner {
     pub fn new (file: Box<PageFile>) -> DataPageFileInner {
-        DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::default()), flushed: Condvar::new(), work: Condvar::new(), run: Mutex::new(Cell::new(true)) }
+        DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::default()),
+            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true) }
     }
 }
 
@@ -172,9 +173,7 @@ impl DataPageFile {
     }
 
     fn background (inner: Arc<DataPageFileInner>) {
-        let mut run = true;
-        while run {
-            run = inner.run.lock().expect("run lock poisoned").get();
+        while inner.run.load(Ordering::Relaxed) {
             let mut cache = inner.cache.lock().expect("cache lock poisoned");
             if cache.is_empty() {
                 inner.flushed.notify_all();
@@ -199,7 +198,7 @@ impl DataPageFile {
     }
 
     pub fn shutdown (&mut self) {
-        self.inner.run.lock().unwrap().set(false);
+        self.inner.run.store(false, Ordering::Relaxed);
         self.inner.work.notify_one();
     }
 
