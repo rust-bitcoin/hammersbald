@@ -29,8 +29,6 @@ use std::cmp::min;
 use std::sync::{Arc, Condvar, Mutex};
 use std::cell::Cell;
 use std::thread;
-use std::time::{Duration, Instant};
-use std::cmp::Ordering;
 use std::io::{Write, Read, Cursor};
 
 
@@ -175,24 +173,14 @@ impl DataPageFile {
 
     fn background (inner: Arc<DataPageFileInner>) {
         let mut run = true;
-        let mut last_loop = Instant::now();
         while run {
             run = inner.run.lock().expect("run lock poisoned").get();
-            let mut writes = Vec::new();
             let mut cache = inner.cache.lock().expect("cache lock poisoned");
             if cache.is_empty() {
                 inner.flushed.notify_all();
             }
-            let time_spent = Instant::now() - last_loop;
-            if time_spent.cmp(&Duration::from_millis(2000)) == Ordering::Greater {
-                writes = cache.move_writes_to_wrote();
-            } else {
-                let (c, t) = inner.work.wait_timeout(cache, Duration::from_millis(2000) - time_spent).expect("cache lock poisoned while waiting for work");
-                if t.timed_out() {
-                    cache = c;
-                    writes = cache.move_writes_to_wrote();
-                }
-            }
+            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+            let mut writes = cache.move_writes_to_wrote();
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
                 let mut file = inner.file.lock().expect("file lock poisoned");
@@ -200,7 +188,6 @@ impl DataPageFile {
                     file.append_page(page.clone()).expect("can not extend data file");
                 }
             }
-            last_loop = Instant::now();
         }
     }
 
