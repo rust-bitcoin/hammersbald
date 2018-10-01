@@ -262,7 +262,7 @@ mod test {
         let mut key2 = [0x0u8;32];
         let mut data = [0x0u8;40];
 
-        for _ in 0 .. 10000 {
+        for _ in 0 .. 1000 {
             rng.fill_bytes(&mut key1);
             rng.fill_bytes(&mut key2);
             rng.fill_bytes(&mut data);
@@ -289,7 +289,7 @@ mod test {
         let mut data1 = [0x0u8;40];
         let mut data2 = [0x0u8;40];
 
-        for _ in 0 .. 100000 {
+        for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data1);
             rng.fill_bytes(&mut data2);
