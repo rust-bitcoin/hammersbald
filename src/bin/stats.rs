@@ -24,7 +24,9 @@ pub fn main () {
     let mut ll = 0;
     let mut llmax = 0;
     let mut llmin = <usize>::max_value();
-    let mut lllen = 0;
+    let mut lllmin = <usize>::max_value();
+    let mut lllmax = 0;
+    let mut llln = 0;
     for content in db.link_iterator() {
         match content {
             Content::Data(_, _) => {panic!("data in link file")},
@@ -42,12 +44,14 @@ pub fn main () {
                     if let Ok(Some((v, n))) = db.get_link(next) {
                         next = n;
                         lll += 1;
+                        llln += 1;
                     }
                     else {
                         panic!("broken link chain");
                     }
                 }
-                lllen = max(lllen, lll);
+                lllmax = max(lllmax, lll);
+                lllmin = min(lllmin, lll);
             },
         }
     }
@@ -58,7 +62,7 @@ pub fn main () {
             Content::Spillover(v, next) => {panic!("spillover in data file")},
         }
     }
-    println!("data {} link {} {}/{}/{}/{} ext {}", data, link, llmin, llmax, ll/link, lllen, ext);
+    println!("data {} link {} {}/{}/{}/{}/{}/{} ext {}", data, link, llmin, llmax, ll/link, lllmin, lllmax, llln/link, ext);
 
     db.shutdown();
 }
