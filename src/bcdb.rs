@@ -59,6 +59,9 @@ pub trait BCDBAPI {
     /// retrieve data offsets by key
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError>;
 
+    /// get a link
+    fn get_link(&self, offset: Offset) -> Result<Option<(Vec<Offset>, Offset)>, BCDBError>;
+
     /// retrieve single data by key
     fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError>;
 
@@ -199,6 +202,16 @@ impl BCDBAPI for BCDB {
     /// retrieve data by key
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
         self.table.get(key, &self.data, &self.bucket)
+    }
+
+    /// retrieve data by key
+    fn get_link(&self, offset: Offset) -> Result<Option<(Vec<Offset>, Offset)>, BCDBError> {
+        if let Some(Content::Spillover(links, next)) = self.bucket.get_content(offset)? {
+            let offsets = links.iter().fold(Vec::new(), |mut a, e|
+                {a.push(e.1); a });
+            return Ok(Some((offsets, next)))
+        }
+        Ok(None)
     }
 
     /// retreive the single data associated with this key

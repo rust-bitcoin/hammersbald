@@ -149,6 +149,10 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.get_unique(key)
     }
 
+    fn get_link(&self, offset: Offset) -> Result<Option<(Vec<Offset>, Offset)>, BCDBError> {
+        self.bcdb.get_link(offset)
+    }
+
     fn put_content(&mut self, data: Vec<u8>) -> Result<Offset, BCDBError> {
         self.bcdb.put_content(data)
     }
