@@ -92,7 +92,7 @@ impl KeyFile {
                 bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
             }
 
-            self.store_to_bucket(bucket, vec![(hash, vec![offset])], bucket_file)?;
+            self.store_to_bucket(bucket, hash, offset, bucket_file)?;
         }
 
         if thread_rng().next_u32() % 16 == 0 && self.step < <u32>::max_value() {
@@ -138,7 +138,7 @@ impl KeyFile {
                 }
                 match bucket_file.get_content(spill_offset)? {
                     Some(Content::Spillover(spills, next)) => {
-                        current_spillovers.push(spills);
+                        current_spillovers.extend(spills);
                         spill_offset = next;
                         if spill_offset.is_valid() {
                             rewrite = true;
@@ -150,39 +150,30 @@ impl KeyFile {
             // process in reverse order to ensure latest put takes precedence in the new bucket
             current_spillovers.reverse();
 
-            let mut remaining_spillovers = HashMap::new();
-            for spill in current_spillovers {
-                for s in spill.iter() {
-                    let hash = s.0;
-                    let mut same_hash_spill = s.1.clone();
-                    let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-                    if new_bucket != bucket {
-                        // store to new bucket
-                        self.store_to_bucket(new_bucket, vec![(hash, same_hash_spill)], bucket_file)?;
-                        if let Some(bp) = self.read_page(bucket_offset.this_page())? {
-                            bucket_page = bp;
-                        }
-                        rewrite = true;
-                    } else {
-                        // merge spillovers of same hash
-                        remaining_spillovers.entry(hash).or_insert(Vec::new()).extend(
-                            same_hash_spill.iter());
+            let mut remaining_spillovers = Vec::new();
+            for (hash, offset)  in current_spillovers {
+                let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                if new_bucket != bucket {
+                    // store to new bucket
+                    self.store_to_bucket(new_bucket, hash, offset, bucket_file)?;
+                    if let Some(bp) = self.read_page(bucket_offset.this_page())? {
+                        bucket_page = bp;
                     }
+                    rewrite = true;
+                } else {
+                    // merge spillovers of same hash
+                    remaining_spillovers.push((hash, offset));
                 }
             }
 
             if rewrite {
+                remaining_spillovers.sort_unstable_by(|a, b|{
+                    //reverse
+                    u64::cmp(&b.1.as_u64(), &a.1.as_u64())
+                });
                 let mut next = Offset::invalid();
-                let spills: Vec<(u32, Vec<Offset>)> =
-                    remaining_spillovers.iter().map(|(h, s)| {
-                        let mut offsets = s.clone();
-                        offsets.sort_unstable();
-                        offsets.reverse();
-                        (*h, offsets)
-                    }).collect();
-                for spill in spills.chunks(255).rev() {
-                    let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
-                    next = so;
+                for spill in remaining_spillovers.chunks(255).rev() {
+                    next = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
                 }
                 bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
                 self.write_page(bucket_page)?;
@@ -206,7 +197,6 @@ impl KeyFile {
             let mut spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
 
             let mut remaining_spillovers = HashMap::new();
-            let mut original_spillovers = Vec::new();
             loop {
                 if !spill_offset.is_valid() {
                     break;
@@ -215,11 +205,10 @@ impl KeyFile {
                     Some(Content::Spillover(spills, next)) => {
                         for s in &spills {
                             let h = s.0;
-                            let mut spills = s.1.clone();
+                            let offset = s.1;
                             // merge spillovers of same hash
-                            remaining_spillovers.entry(h).or_insert(Vec::new()).extend(spills.iter());
+                            remaining_spillovers.entry(h).or_insert(Vec::new()).push(offset);
                         }
-                        original_spillovers.push(spills);
                         spill_offset = next;
                     },
                     _ => return Err(BCDBError::Corrupted("unknown content at dedup".to_string()))
@@ -235,30 +224,24 @@ impl KeyFile {
                     Vec::new()
                 });
             }
-            let mut rewrite = false;
-            for v in original_spillovers {
-                for (hash, s) in v {
-                    if let Some(sl) = remaining_spillovers.get(&hash) {
-                        if *sl != s {
-                            rewrite = true;
-                        }
-                    } else {
-                        rewrite = true;
+
+            let mut pairs = Vec::new ();
+            for hash in remaining_spillovers.keys() {
+                for v in remaining_spillovers.get(hash) {
+                    for offset in v {
+                        pairs.push((*hash, *offset));
                     }
                 }
             }
 
-            if rewrite {
-                let mut next = Offset::invalid();
-                let spills: Vec<(u32, Vec<Offset>)> = remaining_spillovers.iter().map(|(h, s)| (*h, s.clone())).collect();
-                for spill in spills.chunks(255).rev() {
-                    if !spill.is_empty() {
-                        let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
-                        next = so;
-                    }
+            let mut next = Offset::invalid();
+            for spill in pairs.chunks(255).rev() {
+                if !spill.is_empty() {
+                    let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
+                    next = so;
                 }
-                bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             }
+            bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
             self.write_page(bucket_page)?;
         }
         else {
@@ -267,14 +250,14 @@ impl KeyFile {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u32, spill: Vec<(u32, Vec<Offset>)>, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket);
         if let Some(mut bucket_page) = self.read_page(bucket_offset.this_page())? {
             let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
             // prepend spillover chain
             // this logically overwrites previous key association in the spillover chain
             // since search stops at first key match
-            let so = bucket_file.append_content(Content::Spillover(spill, spill_offset))?;
+            let so = bucket_file.append_content(Content::Spillover(vec!((hash, offset)), spill_offset))?;
             bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
             self.write_page(bucket_page)?;
         }
@@ -301,19 +284,17 @@ impl KeyFile {
                     Some(Content::Spillover(spills, next)) => {
                         for s in spills {
                             let h = s.0;
-                            let offsets = s.1;
+                            let offset = s.1;
                             if h == hash {
-                                for current in offsets {
-                                    match data_file.get_content(current)? {
-                                        Some(Content::Data(data_key, data)) => {
-                                            for k in data_key {
-                                                if k == key {
-                                                    return Ok(Some(data));
-                                                }
+                                match data_file.get_content(offset)? {
+                                    Some(Content::Data(data_key, data)) => {
+                                        for k in data_key {
+                                            if k == key {
+                                                return Ok(Some(data));
                                             }
-                                        },
-                                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
-                                    }
+                                        }
+                                    },
+                                    _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
                                 }
                             }
                         }
@@ -344,17 +325,15 @@ impl KeyFile {
                     Some(Content::Spillover(spills, next)) => {
                         for s in spills {
                             let h = s.0;
-                            let offsets = s.1;
+                            let offset = s.1;
                             if h == hash {
-                                for current in offsets {
-                                    match data_file.get_content(current)? {
-                                        Some(Content::Data(data_key, _)) => {
-                                            if data_key.iter().any(|k| k.as_slice() == key) {
-                                                result.push(current);
-                                            }
-                                        },
-                                        _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
-                                    }
+                                match data_file.get_content(offset)? {
+                                    Some(Content::Data(data_key, _)) => {
+                                        if data_key.iter().any(|k| k.as_slice() == key) {
+                                            result.push(offset);
+                                        }
+                                    },
+                                    _ => return Err(BCDBError::Corrupted("spillover should point to data".to_string()))
                                 }
                             }
                         }

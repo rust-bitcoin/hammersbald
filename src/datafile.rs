@@ -319,7 +319,7 @@ impl<'file> Iterator for DataPageIterator<'file> {
 /// content of the db
 pub enum Content {
     /// spillover
-    Spillover(Vec<(u32, Vec<Offset>)>, Offset),
+    Spillover(Vec<(u32, Offset)>, Offset),
     /// regular data referred in index
     Data(Vec<Vec<u8>>, Vec<u8>),
     /// data referred by data, not in index
@@ -380,19 +380,18 @@ impl DataEntry {
         DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
-    pub fn new_spillover (spills: Vec<(u32, Vec<Offset>)>, next: Offset) -> DataEntry {
+    pub fn new_spillover (spills: Vec<(u32, Offset)>, next: Offset) -> DataEntry {
         let mut sp = Vec::new();
         sp.write_u8(spills.len() as u8).unwrap();
-        for s in &spills {
-            let hash = s.0;
-            let spill = s.1.clone();
-            sp.write_u32::<BigEndian>(hash).unwrap();
-            sp.write_u8(spill.len() as u8).unwrap();
-            for offset in spill {
-                sp.extend(offset.to_vec());
-            }
-        }
-        sp.extend(next.to_vec());
+        sp.extend( spills.iter().fold(Vec::new(), |mut buf, s| {
+            buf.write_u32::<BigEndian>(s.0).unwrap();
+            buf
+        }));
+        sp.extend( spills.iter().fold(Vec::new(), |mut buf, s| {
+            buf.write_u48::<BigEndian>(s.1.as_u64()).unwrap();
+            buf
+        }));
+        sp.write_u48::<BigEndian>(next.as_u64()).unwrap();
         DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
     }
 }
@@ -489,17 +488,21 @@ impl<'file> Iterator for DataIterator<'file> {
                     if let Some(buf) = self.read_sized() {
                         let mut cursor = Cursor::new(buf);
                         let m = cursor.read_u8().unwrap() as usize;
-                        let mut spills = Vec::new();
+                        let mut hashes = Vec::new();
                         for _ in 0..m {
-                            let hash = cursor.read_u32::<BigEndian>().unwrap();
-                            let n = cursor.read_u8().unwrap() as usize;
-                            let mut offsets = Vec::new();
-                            for _ in 0..n {
-                                offsets.push(cursor.read_offset())
-                            }
-                            spills.push((hash, offsets));
+                            hashes.push(cursor.read_u32::<BigEndian>().unwrap());
+                        }
+                        let mut offsets = Vec::new();
+                        for _ in 0..m {
+                            offsets.push(Offset::from(cursor.read_u48::<BigEndian>().unwrap()));
                         }
                         let next = cursor.read_offset();
+                        let mut oi = offsets.iter();
+                        let mut spills = Vec::new();
+                        for h in hashes {
+                            let o = *oi.next().unwrap();
+                            spills.push((h, o));
+                        }
                         return Some(Content::Spillover(spills, next));
                     }
                 }
