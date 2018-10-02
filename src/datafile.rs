@@ -451,19 +451,15 @@ impl<'file> Iterator for DataIterator<'file> {
         if self.current.is_none() {
             self.current = self.page_iterator.next();
         }
-        if let Some(mut current) = self.current.clone() {
+        if let Some(current) = self.current.clone() {
             loop {
-                if self.pos == PAGE_SIZE {
-                    if let Some(c) = self.page_iterator.next() {
-                        current = c;
-                        self.pos = 0;
-                    }
-                    else {
-                        return None;
-                    }
+                let data_type;
+                if let Some(t) = self.read(1) {
+                    data_type = DataType::from(t[0]);
                 }
-                let data_type = DataType::from(current.payload[self.pos]);
-                self.pos += 1;
+                else {
+                    return None;
+                }
                 if data_type == DataType::AppData {
                     if let Some(buf) = self.read_sized() {
                         let mut cursor = Cursor::new(buf);
