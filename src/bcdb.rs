@@ -19,7 +19,7 @@
 use types::Offset;
 use logfile::LogFile;
 use keyfile::KeyFile;
-use datafile::{DataFile, Content};
+use datafile::{DataFile, LinkFile, Content};
 use page::{Page, KeyPage, PageFile};
 use error::BCDBError;
 
@@ -34,7 +34,7 @@ pub trait BCDBFactory {
 /// The blockchain db
 pub struct BCDB {
     table: KeyFile,
-    bucket: DataFile,
+    bucket: LinkFile,
     data: DataFile,
     log: Arc<Mutex<LogFile>>
 }
@@ -59,15 +59,12 @@ pub trait BCDBAPI {
     /// retrieve data offsets by key
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError>;
 
-    /// get a link
-    fn get_link(&self, offset: Offset) -> Result<Option<(Vec<Offset>, Offset)>, BCDBError>;
-
     /// retrieve single data by key
     fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError>;
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
-    fn put_content(&mut self, content: Vec<u8>) -> Result<Offset, BCDBError>;
+    fn put_content(&mut self, content: &[u8]) -> Result<Offset, BCDBError>;
 
     /// get some content at a known offset
     fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError>;
@@ -75,7 +72,7 @@ pub trait BCDBAPI {
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(table: KeyFile, data: DataFile, bucket: DataFile) -> Result<BCDB, BCDBError> {
+    pub fn new(table: KeyFile, data: DataFile, bucket: LinkFile) -> Result<BCDB, BCDBError> {
         let log = table.log_file();
         let mut db = BCDB { table, bucket, data, log };
         db.recover()?;
@@ -112,14 +109,19 @@ impl BCDB {
         Ok(())
     }
 
-    /// get a data iterator
-    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=Content> + 'a {
+    /// get data iterator
+    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=(Option<Vec<Vec<u8>>>, Vec<u8>)> + 'a {
         self.data.iter()
     }
 
-    /// get a link iterator
-    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=Content> + 'a {
+    /// get link iterator
+    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Vec<Offset>, Offset)> + 'a {
         self.bucket.iter()
+    }
+
+    /// get a link
+    pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
+        self.bucket.get_link(offset)
     }
 }
 
@@ -190,7 +192,7 @@ impl BCDBAPI for BCDB {
             }
         }
 
-        let offset = self.data.append_content(Content::Data(keys.clone(), data.to_vec()))?;
+        let offset = self.data.append_data(keys.clone(), data)?;
         self.table.put(keys, offset, &mut self.bucket)?;
         Ok(offset)
     }
@@ -204,16 +206,6 @@ impl BCDBAPI for BCDB {
         self.table.get(key, &self.data, &self.bucket)
     }
 
-    /// retrieve data by key
-    fn get_link(&self, offset: Offset) -> Result<Option<(Vec<Offset>, Offset)>, BCDBError> {
-        if let Some(Content::Spillover(links, next)) = self.bucket.get_content(offset)? {
-            let offsets = links.iter().fold(Vec::new(), |mut a, e|
-                {a.push(e.1); a });
-            return Ok(Some((offsets, next)))
-        }
-        Ok(None)
-    }
-
     /// retreive the single data associated with this key
     fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
         self.table.get_unique(key, &self.data, &self.bucket)
@@ -221,8 +213,8 @@ impl BCDBAPI for BCDB {
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
-    fn put_content(&mut self, data: Vec<u8>) -> Result<Offset, BCDBError> {
-        return self.data.append_content(Content::Extension(data));
+    fn put_content(&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
+        self.data.append_data_extension(data)
     }
 
     /// get some content at a known offset

@@ -31,28 +31,216 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::io::{Write, Read, Cursor};
 
-
-/// The key file
+/// file storing data and data extensions
 pub struct DataFile {
+    im: DataFileImpl
+}
+
+impl DataFile {
+    /// create new file
+    pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCDBError> {
+        Ok(DataFile{im: DataFileImpl::new(rw, "data")?})
+    }
+
+    /// initialize
+    pub fn init(&mut self) -> Result<(), BCDBError> {
+        self.im.init ([0xBC, 0xDA])
+    }
+
+    /// shutdown
+    pub fn shutdown (&mut self) {
+        self.im.shutdown()
+    }
+
+    /// get an iterator of data
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Option<Vec<Vec<u8>>>, Vec<u8>)> + 'a {
+        DataFileIterator::new(DataIterator::new(
+            DataPageIterator::new(&self.im, 0), 2))
+    }
+
+    /// get a stored content at offset
+    pub fn get_content(&self, offset: Offset) -> Result<Option<Content>, BCDBError> {
+        self.im.get_content(offset)
+    }
+
+    /// append data
+    pub fn append_data (&mut self, keys: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
+        self.im.append(DataEntry::new_data(keys, data))
+    }
+
+    /// append extension
+    pub fn append_data_extension (&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
+        self.im.append(DataEntry::new_data_extension(data))
+    }
+
+    /// clear cache
+    pub fn clear_cache(&mut self, len: u64) {
+        self.im.async_file.clear_cache(len);
+    }
+
+    /// truncate file
+    pub fn truncate(&mut self, offset: u64) -> Result<(), BCDBError> {
+        self.im.truncate (offset)
+    }
+
+    /// flush buffers
+    pub fn flush (&mut self) -> Result<(), BCDBError> {
+        self.im.flush()
+    }
+
+    /// sync file on file system
+    pub fn sync (&self) -> Result<(), BCDBError> {
+        self.im.sync()
+    }
+
+    /// get file length
+    pub fn len (&self) -> Result<u64, BCDBError> {
+        self.im.len()
+    }
+}
+
+struct DataFileIterator<'a> {
+    inner: DataIterator<'a>
+}
+
+impl<'a> DataFileIterator<'a> {
+    fn new (inner: DataIterator) -> DataFileIterator {
+        DataFileIterator{inner}
+    }
+}
+
+impl<'a> Iterator for DataFileIterator<'a> {
+    type Item = (Option<Vec<Vec<u8>>>, Vec<u8>);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.inner.next() {
+            Some(Content::Data(k, v)) => Some((Some(k), v)),
+            Some(Content::Extension(d)) => Some((None, d)),
+            Some(_) => None,
+            None => None
+        }
+    }
+}
+
+/// file storing data link chains from hash table to data
+pub struct LinkFile {
+    im: DataFileImpl
+}
+
+impl LinkFile {
+    /// create new file
+    pub fn new(rw: Box<PageFile>) -> Result<LinkFile, BCDBError> {
+        Ok(LinkFile{im: DataFileImpl::new(rw, "link")?})
+    }
+
+    /// initialize
+    pub fn init(&mut self) -> Result<(), BCDBError> {
+        self.im.init ([0xBC, 0xDB])
+    }
+
+    /// shutdown
+    pub fn shutdown (&mut self) {
+        self.im.shutdown()
+    }
+
+    /// get an iterator of links
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Vec<Offset>, Offset)> + 'a {
+        LinkFileIterator::new(DataIterator::new(
+            DataPageIterator::new(&self.im, 0), 2))
+    }
+
+
+    /// get a stored content at offset
+    pub fn get_content(&self, offset: Offset) -> Result<Option<Content>, BCDBError> {
+        self.im.get_content(offset)
+    }
+
+    /// append data
+    pub fn append_link (&mut self, links: Vec<(u32, Offset)>, next: Offset) -> Result<Offset, BCDBError> {
+        self.im.append(DataEntry::new_spillover(links, next))
+    }
+
+    /// get a link
+    pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
+        match self.im.get_content(offset)? {
+            Some(Content::Spillover(current, next)) => Ok((
+                current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next)),
+            Some(_) | None => Err(BCDBError::Corrupted(format!("can not find link {}", offset)))
+        }
+    }
+
+    /// clear cache
+    pub fn clear_cache(&mut self, len: u64) {
+        self.im.async_file.clear_cache(len);
+    }
+
+    /// truncate file
+    pub fn truncate(&mut self, offset: u64) -> Result<(), BCDBError> {
+        self.im.truncate (offset)
+    }
+
+    /// flush buffers
+    pub fn flush (&mut self) -> Result<(), BCDBError> {
+        self.im.flush()
+    }
+
+    /// sync file on file system
+    pub fn sync (&self) -> Result<(), BCDBError> {
+        self.im.sync()
+    }
+
+    /// get file length
+    pub fn len (&self) -> Result<u64, BCDBError> {
+        self.im.len()
+    }
+}
+
+struct LinkFileIterator<'a> {
+    inner: DataIterator<'a>
+}
+
+impl<'a> LinkFileIterator<'a> {
+    fn new (inner: DataIterator) -> LinkFileIterator {
+        LinkFileIterator{inner}
+    }
+}
+
+impl<'a> Iterator for LinkFileIterator<'a> {
+    type Item = (Vec<Offset>, Offset);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.inner.next() {
+            Some(Content::Spillover(current, next)) => {
+                Some (
+                    (current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next))
+            },
+            Some(_) => None,
+            None => None
+        }
+    }
+}
+
+/// the data file
+pub struct DataFileImpl {
     async_file: DataPageFile,
     append_pos: Offset,
     page: Page,
     role: String,
 }
 
-impl DataFile {
+impl DataFileImpl {
     /// create a new data file
-    pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFile, BCDBError> {
+    pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFileImpl, BCDBError> {
         let file = DataPageFile::new(rw)?;
         let append_pos = Offset::from(file.len()?);
-        Ok(DataFile{async_file: file,
+        Ok(DataFileImpl {async_file: file,
             append_pos,
             page: Page::new(), role: role.to_string()})
     }
 
     /// initialize
-    pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.append_slice(&[0xBC, 0xDA])?;
+    pub fn init(&mut self, magic: [u8; 2]) -> Result<(), BCDBError> {
+        self.append_slice(&magic)?;
         Ok(())
     }
 
@@ -63,23 +251,14 @@ impl DataFile {
 
     /// get an iterator of data
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=Content> + 'a {
-        DataIterator::new_fetch(DataPageIterator::new(&self, 0), 2)
+        DataIterator::new(DataPageIterator::new(&self, 0), 2)
     }
 
     /// get a stored content at offset
     pub fn get_content(&self, offset: Offset) -> Result<Option<Content>, BCDBError> {
-        let mut fetch_iterator = DataIterator::new_fetch(
+        let mut fetch_iterator = DataIterator::new(
             DataPageIterator::new(&self, offset.page_number()), offset.in_page_pos());
         Ok(fetch_iterator.next())
-    }
-
-    /// append content
-    pub fn append_content(&mut self, content: Content) -> Result<Offset, BCDBError> {
-        match content {
-            Content::Data(k, d) => self.append(DataEntry::new_data(k, d.as_slice())),
-            Content::Extension(d) => self.append(DataEntry::new_data_extension(d.as_slice())),
-            Content::Spillover(spills, next) => self.append(DataEntry::new_spillover(spills, next))
-        }
     }
 
     fn append (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
@@ -116,13 +295,12 @@ impl DataFile {
         Ok(())
     }
 
-    /// clear cache
-    pub fn clear_cache(&mut self, len: u64) {
+    fn clear_cache(&mut self, len: u64) {
         self.async_file.clear_cache(len);
     }
 }
 
-impl PageFile for DataFile {
+impl PageFile for DataFileImpl {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             let page = self.page.clone();
@@ -290,13 +468,13 @@ impl PageFile for DataPageFile {
 struct DataPageIterator<'file> {
     /// the current page of the iterator
     pub pagenumber: u64,
-    file: &'file DataFile
+    file: &'file DataFileImpl
 }
 
 /// page iterator
 impl<'file> DataPageIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file DataFile, pagenumber: u64) -> DataPageIterator {
+    pub fn new (file: &'file DataFileImpl, pagenumber: u64) -> DataPageIterator {
         DataPageIterator{pagenumber, file}
     }
 }
@@ -403,7 +581,7 @@ struct DataIterator<'file> {
 }
 
 impl<'file> DataIterator<'file> {
-    pub fn new_fetch (page_iterator: DataPageIterator<'file>, pos: usize) -> DataIterator {
+    pub fn new(page_iterator: DataPageIterator<'file>, pos: usize) -> DataIterator {
         DataIterator{page_iterator, pos, current: None}
     }
 

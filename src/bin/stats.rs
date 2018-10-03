@@ -7,10 +7,8 @@ use blockchain_store::infile::InFile;
 use blockchain_store::bcdb::BCDBFactory;
 use blockchain_store::bcdb::BCDBAPI;
 
-use rand::{thread_rng, Rng};
 use blockchain_store::datafile::Content;
 
-use std::time::{Instant};
 use std::cmp::{max, min};
 
 pub fn main () {
@@ -27,39 +25,35 @@ pub fn main () {
     let mut lllmin = <usize>::max_value();
     let mut lllmax = 0;
     let mut llln = 0;
-    for content in db.link_iterator() {
-        match content {
-            Content::Data(_, _) => {panic!("data in link file")},
-            Content::Extension(_) => {panic!("extension in link file")},
-            Content::Spillover(v, mut next) => {
-                link += 1;
-                ll += v.len();
-                llmax=max(llmax, v.len());
-                llmin=min(llmin, v.len());
-                let mut lll = 1;
-                loop {
-                    if !next.is_valid() {
-                        break;
-                    }
-                    if let Ok(Some((v, n))) = db.get_link(next) {
-                        next = n;
-                        lll += 1;
-                        llln += 1;
-                    }
-                    else {
-                        panic!("broken link chain");
-                    }
-                }
-                lllmax = max(lllmax, lll);
-                lllmin = min(lllmin, lll);
-            },
+    for (keys, _) in db.data_iterator() {
+        if let Some(keys) = keys {
+            data += 1;
+        }
+        else {
+            ext += 1;
         }
     }
-    for content in db.data_iterator() {
-        match content {
-            Content::Data(_, _) => {data += 1; },
-            Content::Extension(_) => {ext += 1; },
-            Content::Spillover(v, next) => {panic!("spillover in data file")},
+    for (v, mut next) in db.link_iterator() {
+        loop {
+            link += 1;
+            ll += v.len();
+            llmax = max(llmax, v.len());
+            llmin = min(llmin, v.len());
+            let mut lll = 1;
+            loop {
+                if !next.is_valid() {
+                    break;
+                }
+                if let Ok((v, n)) = db.get_link(next) {
+                    next = n;
+                    lll += 1;
+                    llln += 1;
+                } else {
+                    panic!("broken link chain");
+                }
+            }
+            lllmax = max(lllmax, lll);
+            lllmin = min(lllmin, lll);
         }
     }
     println!("data {} link {} {}/{}/{}/{}/{}/{} ext {}", data, link, llmin, llmax, ll/link, lllmin, lllmax, llln/link, ext);

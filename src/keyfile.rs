@@ -19,7 +19,7 @@
 //!
 
 use logfile::LogFile;
-use datafile::{DataFile, Content};
+use datafile::{DataFile, LinkFile, Content};
 use page::{Page, KeyPage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
@@ -84,7 +84,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn put (&mut self, keys: Vec<Vec<u8>>, offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError>{
+    pub fn put (&mut self, keys: Vec<Vec<u8>>, offset: Offset, bucket_file: &mut LinkFile) -> Result<(), BCDBError>{
         for key in keys {
             let hash = self.hash(key.as_slice());
             let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
@@ -124,7 +124,7 @@ impl KeyFile {
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn rehash_bucket(&mut self, bucket: u32, bucket_file: &mut LinkFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket);
 
         if let Some(mut bucket_page) = self.read_page(bucket_offset.this_page())? {
@@ -173,7 +173,7 @@ impl KeyFile {
                 });
                 let mut next = Offset::invalid();
                 for spill in remaining_spillovers.chunks(255).rev() {
-                    next = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
+                    next = bucket_file.append_link(spill.to_vec(), next)?;
                 }
                 bucket_page.write_offset(bucket_offset.in_page_pos(), next)?;
                 self.write_page(bucket_page)?;
@@ -185,7 +185,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn dedup(&mut self, key: &[u8], bucket_file: &mut DataFile, data_file: &DataFile) -> Result<(), BCDBError> {
+    pub fn dedup(&mut self, key: &[u8], bucket_file: &mut LinkFile, data_file: &DataFile) -> Result<(), BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -237,7 +237,7 @@ impl KeyFile {
             let mut next = Offset::invalid();
             for spill in pairs.chunks(255).rev() {
                 if !spill.is_empty() {
-                    let so = bucket_file.append_content(Content::Spillover(spill.to_vec(), next))?;
+                    let so = bucket_file.append_link(spill.to_vec(), next)?;
                     next = so;
                 }
             }
@@ -250,14 +250,14 @@ impl KeyFile {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset, bucket_file: &mut DataFile) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset, bucket_file: &mut LinkFile) -> Result<(), BCDBError> {
         let bucket_offset = Self::bucket_offset(bucket);
         if let Some(mut bucket_page) = self.read_page(bucket_offset.this_page())? {
             let spill_offset = bucket_page.read_offset(bucket_offset.in_page_pos())?;
             // prepend spillover chain
             // this logically overwrites previous key association in the spillover chain
             // since search stops at first key match
-            let so = bucket_file.append_content(Content::Spillover(vec!((hash, offset)), spill_offset))?;
+            let so = bucket_file.append_link(vec!((hash, offset)), spill_offset)?;
             bucket_page.write_offset(bucket_offset.in_page_pos(), so)?;
             self.write_page(bucket_page)?;
         }
@@ -267,7 +267,7 @@ impl KeyFile {
         Ok(())
     }
 
-    pub fn get_unique (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
+    pub fn get_unique (&self, key: &[u8], data_file: &DataFile, bucket_file: &LinkFile) -> Result<Option<Vec<u8>>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -307,7 +307,7 @@ impl KeyFile {
         Ok(None)
     }
 
-    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &DataFile) -> Result<Vec<Offset>, BCDBError> {
+    pub fn get (&self, key: &[u8], data_file: &DataFile, bucket_file: &LinkFile) -> Result<Vec<Offset>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -346,6 +346,10 @@ impl KeyFile {
         else {
             return Err(BCDBError::Corrupted(format!("missing hash table page {} in get", bucket_offset)));
         }
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
+        BucketIterator{file: self, n:0}
     }
 
     pub fn patch_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
@@ -412,6 +416,24 @@ impl KeyFile {
 
     fn write_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
         self.async_file.write_page(page.offset, page.page)
+    }
+}
+
+struct BucketIterator<'a> {
+    file: &'a KeyFile,
+    n: u32
+}
+
+impl<'a> Iterator for BucketIterator<'a> {
+    type Item = Offset;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        let bucket_offset = KeyFile::bucket_offset(self.n);
+        if let Ok(Some(page)) = self.file.read_page(bucket_offset.this_page()) {
+            self.n += 1;
+            return Some(page.read_offset(bucket_offset.in_page_pos()).unwrap())
+        }
+        None
     }
 }
 
