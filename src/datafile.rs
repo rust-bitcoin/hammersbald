@@ -519,9 +519,11 @@ impl DataEntry {
             result.push(offsets.len() as u8);
             let first = offsets.first().unwrap();
             result.extend(first.to_vec());
+            let mut prev = first;
             for offset in offsets.iter().skip(1) {
-                let diff = first.as_u64() - offset.as_u64 ();
+                let diff = prev.as_u64() - offset.as_u64 ();
                 Self::write_diff(diff, &mut result);
+                prev = offset;
             }
         }
         result
@@ -597,9 +599,12 @@ impl<'file> DataIterator<'file> {
         let n = cursor.read_u8().unwrap();
         let init_offset = cursor.read_offset();
         result.push(init_offset);
+        let mut prev = init_offset;
         for _ in 0 .. n-1 {
             let d = Self::read_diff(cursor);
-            result.push (Offset::from(init_offset.as_u64() - d));
+            let next = Offset::from(prev.as_u64() - d);
+            result.push (next);
+            prev = next;
         }
         return Some(result);
     }
