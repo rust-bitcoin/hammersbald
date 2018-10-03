@@ -37,6 +37,7 @@ struct BitcoinAdapter {
     bcdb: BCDB
 }
 
+#[allow(dead_code)]
 impl BitcoinAdapter {
     pub fn new(bcdb: BCDB) -> BitcoinAdapter {
         BitcoinAdapter { bcdb }
@@ -161,7 +162,6 @@ impl BCDBAPI for BitcoinAdapter {
     }
 }
 
-
 fn decode<T: ? Sized>(data: Vec<u8>) -> Result<T, BCDBError>
     where T: ConsensusDecodable<RawDecoder<Cursor<Vec<u8>>>> {
     let mut decoder: RawDecoder<Cursor<Vec<u8>>> = RawDecoder::new(Cursor::new(data));
@@ -192,6 +192,7 @@ mod test {
         db.put(
             vec!(encode(&Sha256dHash::default()).unwrap()), encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap();
         assert_eq!(Some(decode(db.get_unique(encode(&Sha256dHash::default()).unwrap().as_slice()).unwrap().unwrap()).unwrap()), Some(Sha256dHash::default()));
+        db.shutdown();
     }
 
     #[test]
@@ -212,5 +213,6 @@ mod test {
         db.insert_block(&block, &extra).unwrap();
         db.batch().unwrap();
         assert_eq!(db.fetch_block(&block.bitcoin_hash()).unwrap().unwrap(), (block, extra.clone()));
+        db.shutdown();
     }
 }

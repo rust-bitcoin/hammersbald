@@ -36,7 +36,7 @@ extern crate byteorder;
 
 mod page;
 mod logfile;
-mod keyfile;
+mod table;
 mod cache;
 mod rolled;
 pub mod bcdb;

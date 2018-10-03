@@ -18,7 +18,7 @@
 //!
 use types::Offset;
 use logfile::LogFile;
-use keyfile::KeyFile;
+use table::TableFile;
 use datafile::{DataFile, LinkFile, Content};
 use page::{Page, KeyPage, PageFile};
 use error::BCDBError;
@@ -33,8 +33,8 @@ pub trait BCDBFactory {
 
 /// The blockchain db
 pub struct BCDB {
-    table: KeyFile,
-    bucket: LinkFile,
+    table: TableFile,
+    link: LinkFile,
     data: DataFile,
     log: Arc<Mutex<LogFile>>
 }
@@ -72,9 +72,9 @@ pub trait BCDBAPI {
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(table: KeyFile, data: DataFile, bucket: LinkFile) -> Result<BCDB, BCDBError> {
+    pub fn new(table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
         let log = table.log_file();
-        let mut db = BCDB { table, bucket, data, log };
+        let mut db = BCDB { table, link: link, data, log };
         db.recover()?;
         db.batch()?;
         Ok(db)
@@ -100,10 +100,10 @@ impl BCDB {
                     self.table.truncate(table_len)?;
 
                     page.read(14, &mut size)?;
-                    let bucket_len = Offset::from(&size[..]).as_u64();
-                    self.bucket.truncate(bucket_len)?;
+                    let link_len = Offset::from(&size[..]).as_u64();
+                    self.link.truncate(link_len)?;
                     first = false;
-                    debug!("recover BCDB: set lengths to table: {} link: {} data: {}", bucket_len, table_len, data_len);
+                    debug!("recover BCDB: set lengths to table: {} link: {} data: {}", link_len, table_len, data_len);
                 }
         }
         Ok(())
@@ -116,12 +116,12 @@ impl BCDB {
 
     /// get link iterator - this also includes no longer used links
     pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Vec<Offset>, Offset)> + 'a {
-        self.bucket.iter()
+        self.link.iter()
     }
 
     /// get a link
     pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
-        self.bucket.get_link(offset)
+        self.link.get_link(offset)
     }
 
     /// get current content iterator
@@ -135,7 +135,7 @@ impl BCDBAPI for BCDB {
     fn init (&mut self) -> Result<(), BCDBError> {
         self.table.init()?;
         self.data.init()?;
-        self.bucket.init()?;
+        self.link.init()?;
         self.log.lock().unwrap().init()?;
         Ok(())
     }
@@ -149,11 +149,11 @@ impl BCDBAPI for BCDB {
         let data_len = self.data.len()?;
         self.data.clear_cache(data_len);
         debug!("data length {}", data_len);
-        self.bucket.flush()?;
-        self.bucket.sync()?;
-        let bucket_len = self.bucket.len()?;
-        self.bucket.clear_cache(bucket_len);
-        debug!("link length {}", bucket_len);
+        self.link.flush()?;
+        self.link.sync()?;
+        let link_len = self.link.len()?;
+        self.link.clear_cache(link_len);
+        debug!("link length {}", link_len);
         self.table.flush()?;
         self.table.sync()?;
         let table_len = self.table.len()?;
@@ -168,7 +168,7 @@ impl BCDBAPI for BCDB {
         first.write(0, &[0xBC, 0x00]).unwrap();
         first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
         first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
-        first.write(14, Offset::from(bucket_len).to_vec().as_slice()).unwrap();
+        first.write(14, Offset::from(link_len).to_vec().as_slice()).unwrap();
 
         log.tbl_len = table_len;
         log.append_page(first)?;
@@ -182,7 +182,7 @@ impl BCDBAPI for BCDB {
     /// stop background writer
     fn shutdown (&mut self) {
         self.data.shutdown();
-        self.bucket.shutdown();
+        self.link.shutdown();
         self.table.shutdown();
     }
 
@@ -198,22 +198,22 @@ impl BCDBAPI for BCDB {
         }
 
         let offset = self.data.append_data(keys.clone(), data)?;
-        self.table.put(keys, offset, &mut self.bucket)?;
+        self.table.put(keys, offset, &mut self.link)?;
         Ok(offset)
     }
 
     fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
-        self.table.dedup(key, &mut self.bucket, &self.data)
+        self.table.dedup(key, &mut self.link, &self.data)
     }
 
     /// retrieve data by key
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
-        self.table.get(key, &self.data, &self.bucket)
+        self.table.get(key, &self.data, &self.link)
     }
 
     /// retreive the single data associated with this key
     fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
-        self.table.get_unique(key, &self.data, &self.bucket)
+        self.table.get_unique(key, &self.data, &self.link)
     }
 
     /// append some content without key

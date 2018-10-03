@@ -157,13 +157,13 @@ impl LinkFile {
 
     /// append data
     pub fn append_link (&mut self, links: Vec<(u32, Offset)>, next: Offset) -> Result<Offset, BCDBError> {
-        self.im.append(DataEntry::new_spillover(links, next))
+        self.im.append(DataEntry::new_link(links, next))
     }
 
     /// get a link
     pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
         match self.im.get_content(offset)? {
-            Some(Content::Spillover(current, next)) => Ok((
+            Some(Content::Link(current, next)) => Ok((
                 current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next)),
             Some(_) | None => Err(BCDBError::Corrupted(format!("can not find link {}", offset)))
         }
@@ -210,7 +210,7 @@ impl<'a> Iterator for LinkFileIterator<'a> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.inner.next() {
-            Some(Content::Spillover(current, next)) => {
+            Some(Content::Link(current, next)) => {
                 Some (
                     (current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next))
             },
@@ -496,8 +496,8 @@ impl<'file> Iterator for DataPageIterator<'file> {
 
 /// content of the db
 pub enum Content {
-    /// spillover
-    Spillover(Vec<(u32, Offset)>, Offset),
+    /// link
+    Link(Vec<(u32, Offset)>, Offset),
     /// regular data referred in index
     Data(Vec<Vec<u8>>, Vec<u8>),
     /// data referred by data, not in index
@@ -558,14 +558,14 @@ impl DataEntry {
         DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
     }
 
-    pub fn new_spillover (spills: Vec<(u32, Offset)>, next: Offset) -> DataEntry {
+    pub fn new_link (links: Vec<(u32, Offset)>, next: Offset) -> DataEntry {
         let mut sp = Vec::new();
-        sp.write_u8(spills.len() as u8).unwrap();
-        sp.extend( spills.iter().fold(Vec::new(), |mut buf, s| {
+        sp.write_u8(links.len() as u8).unwrap();
+        sp.extend( links.iter().fold(Vec::new(), |mut buf, s| {
             buf.write_u32::<BigEndian>(s.0).unwrap();
             buf
         }));
-        sp.extend( spills.iter().fold(Vec::new(), |mut buf, s| {
+        sp.extend( links.iter().fold(Vec::new(), |mut buf, s| {
             buf.write_u48::<BigEndian>(s.1.as_u64()).unwrap();
             buf
         }));
@@ -671,12 +671,12 @@ impl<'file> Iterator for DataIterator<'file> {
                     }
                     let next = cursor.read_offset();
                     let mut oi = offsets.iter();
-                    let mut spills = Vec::new();
+                    let mut links = Vec::new();
                     for h in hashes {
                         let o = *oi.next().unwrap();
-                        spills.push((h, o));
+                        links.push((h, o));
                     }
-                    return Some(Content::Spillover(spills, next));
+                    return Some(Content::Link(links, next));
                 }
             }
         }

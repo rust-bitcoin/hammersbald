@@ -21,7 +21,7 @@
 use error::BCDBError;
 use logfile::LogFile;
 use bcdb::{BCDBFactory, BCDB};
-use keyfile::KeyFile;
+use table::TableFile;
 use datafile::{DataFile, LinkFile};
 use types::Offset;
 use page::{PageFile,Page,PAGE_SIZE};
@@ -55,7 +55,7 @@ impl InMemory {
 impl BCDBFactory for InMemory {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
-        let table = KeyFile::new(Box::new(InMemory::new(false)), log)?;
+        let table = TableFile::new(Box::new(InMemory::new(false)), log)?;
         let data = DataFile::new(Box::new(InMemory::new(true)))?;
         let bucket = LinkFile::new(Box::new(InMemory::new(true)))?;
 
