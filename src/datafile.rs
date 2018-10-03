@@ -375,8 +375,8 @@ impl DataPageFile {
                 }
                 if inner.flushing.swap(false, Ordering::AcqRel) == false {
                     cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                    writes = cache.move_writes_to_wrote();
                 }
-                writes = cache.move_writes_to_wrote();
             }
             if !writes.is_empty() {
                 writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));

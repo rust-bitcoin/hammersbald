@@ -483,9 +483,9 @@ impl TablePageFile {
                 }
                 if !just_flushed {
                     cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-                }
-                if inner.flushing.load(Ordering::Acquire) || cache.new_writes > 1000 {
-                    writes = cache.move_writes_to_wrote();
+                    if inner.flushing.load(Ordering::Acquire) || cache.new_writes > 1000 {
+                        writes = cache.move_writes_to_wrote();
+                    }
                 }
             }
             if !writes.is_empty() {
