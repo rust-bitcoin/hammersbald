@@ -367,7 +367,7 @@ impl DataPageFile {
 
     fn background (inner: Arc<DataPageFileInner>) {
         while inner.run.load(Ordering::Relaxed) {
-            let mut writes;
+            let mut writes = Vec::new();
             {
                 let mut cache = inner.cache.lock().expect("cache lock poisoned");
                 if cache.is_empty() {
