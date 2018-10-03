@@ -22,7 +22,8 @@ use error::BCDBError;
 use logfile::LogFile;
 use bcdb::{BCDBFactory, BCDB};
 use table::TableFile;
-use datafile::{DataFile, LinkFile};
+use datafile::DataFile;
+use linkfile::LinkFile;
 use types::Offset;
 use page::{PageFile,Page,PAGE_SIZE};
 

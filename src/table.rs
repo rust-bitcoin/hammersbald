@@ -19,7 +19,8 @@
 //!
 
 use logfile::LogFile;
-use datafile::{DataFile, LinkFile, Content};
+use datafile::{DataFile, Content};
+use linkfile::LinkFile;
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
