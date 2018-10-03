@@ -94,17 +94,17 @@ impl PageFile for InMemory {
         Ok(Some(Page::from_buf(buffer)))
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.finish()[..])?;
-        Ok(())
+        Ok(inner.data.len() as u64)
     }
 
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.write(&page.finish()[..])?;
-        Ok(())
+        Ok(inner.data.len() as u64)
     }
 }
 

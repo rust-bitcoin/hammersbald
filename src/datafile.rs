@@ -282,7 +282,7 @@ impl DataFileImpl {
             self.append_pos = Offset::from(self.append_pos.as_u64() + have as u64);
             if self.append_pos.this_page() == self.append_pos {
                 let page = self.page.clone();
-                self.append_page(page)?;
+                self.append_pos = Offset::from(self.append_page(page)?);
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
             }
         }
@@ -298,11 +298,8 @@ impl PageFile for DataFileImpl {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             let page = self.page.clone();
-            self.append_page(page)?;
+            self.append_pos = Offset::from(self.append_page(page)?);
             self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-            if self.append_pos != self.append_pos.this_page() {
-                self.append_pos = Offset::from(self.append_pos.this_page().as_u64() + PAGE_SIZE as u64);
-            }
         }
         self.async_file.flush()
     }
@@ -328,11 +325,11 @@ impl PageFile for DataFileImpl {
         self.async_file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         self.async_file.append_page(page)
     }
 
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
         unimplemented!()
     }
 }
@@ -454,13 +451,13 @@ impl PageFile for DataPageFile {
         Ok(None)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        self.inner.cache.lock().unwrap().append(page);
+    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        let len = self.inner.cache.lock().unwrap().append(page);
         self.inner.work.notify_one();
-        Ok(())
+        Ok(len)
     }
 
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
         unimplemented!()
     }
 }

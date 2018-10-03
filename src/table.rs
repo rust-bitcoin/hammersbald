@@ -352,7 +352,7 @@ impl TableFile {
         BucketIterator{file: self, n:0}
     }
 
-    pub fn patch_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
         self.async_file.patch_page(page)
     }
 
@@ -414,7 +414,7 @@ impl TableFile {
         Ok(None)
     }
 
-    fn write_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
+    fn write_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
         self.async_file.write_page(page.offset, page.page)
     }
 }
@@ -516,7 +516,7 @@ impl TablePageFile {
         }
     }
 
-    pub fn patch_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
         self.inner.file.lock().unwrap().write_page(page.offset, page.page)
     }
 
@@ -582,14 +582,14 @@ impl PageFile for TablePageFile {
         Ok(None)
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, _: Page) -> Result<u64, BCDBError> {
         unimplemented!()
     }
 
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<(), BCDBError> {
-        self.inner.cache.lock().unwrap().write(offset, page);
+    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
+        let len = self.inner.cache.lock().unwrap().write(offset, page);
         self.inner.work.notify_one();
-        Ok(())
+        Ok(len)
 
     }
 }

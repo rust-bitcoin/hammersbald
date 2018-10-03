@@ -57,16 +57,17 @@ impl Cache {
         }
     }
 
-    pub fn write (&mut self, offset: Offset, page: Page) {
+    pub fn write (&mut self, offset: Offset, page: Page) -> u64 {
         let page = Arc::new(page);
         if self.wrote.insert(offset, page.clone()).is_none() {
             self.new_writes += 1;
         }
         self.writes.insert(offset, page);
         self.len = max(self.len, offset.as_u64() + PAGE_SIZE as u64);
+        self.len
     }
 
-    pub fn append (&mut self, page: Page) {
+    pub fn append (&mut self, page: Page) ->u64 {
         let len = self.len;
         self.write(Offset::from(len), page)
     }

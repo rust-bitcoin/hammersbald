@@ -55,7 +55,7 @@ impl LogFile {
         LogPageIterator::new(self, 0)
     }
 
-    pub fn append_key_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
+    pub fn append_key_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
         self.logged.insert(page.offset);
         self.append_page(page.page)
     }
@@ -82,11 +82,11 @@ impl PageFile for LogFile {
         self.rw.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         self.rw.append_page(page)
     }
 
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<(), BCDBError> {
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
         unimplemented!()
     }
 }
