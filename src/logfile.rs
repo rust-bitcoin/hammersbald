@@ -20,7 +20,7 @@
 //! this set.
 //!
 
-use page::{Page, KeyPage, PageFile, PAGE_SIZE};
+use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
 
@@ -55,7 +55,7 @@ impl LogFile {
         LogPageIterator::new(self, 0)
     }
 
-    pub fn append_key_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
+    pub fn append_key_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
         self.logged.insert(page.offset);
         self.append_page(page.page)
     }

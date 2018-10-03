@@ -122,28 +122,28 @@ pub trait PageFile : Send + Sync {
 
 /// a page of the hash table
 #[derive(Clone)]
-pub struct KeyPage {
+pub struct TablePage {
     pub page: Page,
     pub offset: Offset
 }
 
-impl From<Page> for KeyPage {
+impl From<Page> for TablePage {
     fn from(page: Page) -> Self {
         let offset = Offset::from(&page.payload[PAGE_SIZE-6 ..]);
-        KeyPage {page, offset}
+        TablePage {page, offset}
     }
 }
 
-impl KeyPage {
+impl TablePage {
     /// create a new hash table page at offset
-    pub fn new (offset: Offset) -> KeyPage {
+    pub fn new (offset: Offset) -> TablePage {
         let mut page = Page::new();
         page.payload[PAGE_SIZE - 6 ..].copy_from_slice(offset.to_vec().as_slice());
-        KeyPage {page, offset}
+        TablePage {page, offset}
     }
 
-    pub fn from_buf (payload: [u8; PAGE_SIZE]) -> KeyPage {
-        KeyPage {page: Page::from_buf(payload), offset: Offset::from(&payload[PAGE_SIZE-6 ..])}
+    pub fn from_buf (payload: [u8; PAGE_SIZE]) -> TablePage {
+        TablePage {page: Page::from_buf(payload), offset: Offset::from(&payload[PAGE_SIZE-6 ..])}
     }
 
     /// append some data
@@ -189,7 +189,7 @@ mod test {
     use super::*;
     #[test]
     fn form_test () {
-        let mut key_page = KeyPage::new(Offset::from(4711));
+        let mut key_page = TablePage::new(Offset::from(4711));
         let payload: &[u8] = "hello world".as_bytes();
         key_page.write(0,payload).unwrap();
         let result = key_page.finish();
@@ -200,7 +200,7 @@ mod test {
         check[PAGE_SIZE -2] = (4711 / 256) as u8;
         assert_eq!(hex::encode(&result[..]), hex::encode(&check[..]));
 
-        let page2 = KeyPage::from_buf(check);
+        let page2 = TablePage::from_buf(check);
         assert_eq!(key_page.offset, page2.offset);
         assert_eq!(hex::encode(&key_page.page.payload[..]), hex::encode(&page2.page.payload[..]));
     }

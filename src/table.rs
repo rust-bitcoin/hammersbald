@@ -20,7 +20,7 @@
 
 use logfile::LogFile;
 use datafile::{DataFile, LinkFile, Content};
-use page::{Page, KeyPage, PageFile, PAGE_SIZE};
+use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
 use cache::Cache;
@@ -43,7 +43,7 @@ const BUCKET_SIZE: u64 = 6;
 
 /// The key file
 pub struct TableFile {
-    async_file: KeyPageFile,
+    async_file: TablePageFile,
     step: u32,
     buckets: u32,
     log_mod: u32,
@@ -54,7 +54,7 @@ pub struct TableFile {
 impl TableFile {
     pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> Result<TableFile, BCDBError> {
         let mut rng = thread_rng();
-        Ok(TableFile {async_file: KeyPageFile::new(rw, log_file)?, step: 0,
+        Ok(TableFile {async_file: TablePageFile::new(rw, log_file)?, step: 0,
             buckets: INIT_BUCKETS as u32, log_mod: INIT_LOGMOD as u32,
         sip0: rng.next_u64(), sip1: rng.next_u64() })
     }
@@ -72,7 +72,7 @@ impl TableFile {
             info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
         }
         else {
-            let mut fp = KeyPage::new(Offset::from(0));
+            let mut fp = TablePage::new(Offset::from(0));
             fp.write_offset(0, Offset::from(self.buckets as u64))?;
             fp.write_offset(6, Offset::from(self.step as u64))?;
             fp.write_u64(12, self.sip0)?;
@@ -110,7 +110,7 @@ impl TableFile {
 
             self.buckets += 1;
             if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
-                let page = KeyPage::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
+                let page = TablePage::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
                 self.write_page(page)?;
             }
 
@@ -352,7 +352,7 @@ impl TableFile {
         BucketIterator{file: self, n:0}
     }
 
-    pub fn patch_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
         self.async_file.patch_page(page)
     }
 
@@ -403,9 +403,9 @@ impl TableFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Option<KeyPage>, BCDBError> {
+    fn read_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
         if let Some(page) = self.async_file.read_page(offset)? {
-            let key_page = KeyPage::from(page);
+            let key_page = TablePage::from(page);
             if key_page.offset.as_u64() != offset.as_u64() {
                 return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset)));
             }
@@ -414,7 +414,7 @@ impl TableFile {
         Ok(None)
     }
 
-    fn write_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
+    fn write_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
         self.async_file.write_page(page.offset, page.page)
     }
 }
@@ -437,11 +437,11 @@ impl<'a> Iterator for BucketIterator<'a> {
     }
 }
 
-struct KeyPageFile {
-    inner: Arc<KeyPageFileInner>
+struct TablePageFile {
+    inner: Arc<TablePageFileInner>
 }
 
-struct KeyPageFileInner {
+struct TablePageFileInner {
     file: Mutex<Box<PageFile>>,
     log: Arc<Mutex<LogFile>>,
     cache: Mutex<Cache>,
@@ -451,10 +451,10 @@ struct KeyPageFileInner {
     flushing: AtomicBool
 }
 
-impl KeyPageFileInner {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<KeyPageFileInner, BCDBError> {
+impl TablePageFileInner {
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TablePageFileInner, BCDBError> {
         let len = file.len()?;
-        Ok(KeyPageFileInner { file: Mutex::new(file), log,
+        Ok(TablePageFileInner { file: Mutex::new(file), log,
             cache: Mutex::new(Cache::new(len)), flushed: Condvar::new(),
             work: Condvar::new(),
             run: AtomicBool::new(true),
@@ -463,15 +463,15 @@ impl KeyPageFileInner {
     }
 }
 
-impl KeyPageFile {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<KeyPageFile, BCDBError> {
-        let inner = Arc::new(KeyPageFileInner::new(file, log)?);
+impl TablePageFile {
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TablePageFile, BCDBError> {
+        let inner = Arc::new(TablePageFileInner::new(file, log)?);
         let inner2 = inner.clone();
-        thread::spawn(move || { KeyPageFile::background(inner2) });
-        Ok(KeyPageFile { inner })
+        thread::spawn(move || { TablePageFile::background(inner2) });
+        Ok(TablePageFile { inner })
     }
 
-    fn background (inner: Arc<KeyPageFileInner>) {
+    fn background (inner: Arc<TablePageFileInner>) {
         while inner.run.load(Ordering::Relaxed) {
             let mut writes = Vec::new();
             {
@@ -516,7 +516,7 @@ impl KeyPageFile {
         }
     }
 
-    pub fn patch_page(&mut self, page: KeyPage) -> Result<(), BCDBError> {
+    pub fn patch_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
         self.inner.file.lock().unwrap().write_page(page.offset, page.page)
     }
 
@@ -541,7 +541,7 @@ impl KeyPageFile {
     }
 }
 
-impl PageFile for KeyPageFile {
+impl PageFile for TablePageFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();

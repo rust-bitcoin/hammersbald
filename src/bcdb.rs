@@ -20,7 +20,7 @@ use types::Offset;
 use logfile::LogFile;
 use table::TableFile;
 use datafile::{DataFile, LinkFile, Content};
-use page::{Page, KeyPage, PageFile};
+use page::{Page, TablePage, PageFile};
 use error::BCDBError;
 
 use std::sync::{Mutex,Arc};
@@ -86,7 +86,7 @@ impl BCDB {
         debug!("recover");
         for page in log.page_iter() {
             if !first {
-                let key_page = KeyPage::from(page);
+                let key_page = TablePage::from(page);
                 self.table.patch_page(key_page)?;
             }
                 else {
