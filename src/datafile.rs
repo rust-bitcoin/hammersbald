@@ -75,7 +75,7 @@ impl DataFile {
 
     /// clear cache
     pub fn clear_cache(&mut self, len: u64) {
-        self.im.async_file.clear_cache(len);
+        self.im.clear_cache(len);
     }
 
     /// truncate file
@@ -171,7 +171,7 @@ impl LinkFile {
 
     /// clear cache
     pub fn clear_cache(&mut self, len: u64) {
-        self.im.async_file.clear_cache(len);
+        self.im.clear_cache(len);
     }
 
     /// truncate file
