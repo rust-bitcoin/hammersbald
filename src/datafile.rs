@@ -354,14 +354,16 @@ struct DataPageFileInner {
     cache: Mutex<Cache>,
     flushed: Condvar,
     work: Condvar,
-    run: AtomicBool
+    run: AtomicBool,
+    flushing: AtomicBool
 }
 
 impl DataPageFileInner {
     pub fn new (file: Box<PageFile>) -> Result<DataPageFileInner, BCDBError> {
         let len = file.len()?;
         Ok(DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
-            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true) })
+            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true),
+            flushing: AtomicBool::new(false) })
     }
 }
 
@@ -381,7 +383,9 @@ impl DataPageFile {
                 if cache.is_empty() {
                     inner.flushed.notify_all();
                 }
-                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                if inner.flushing.swap(false, Ordering::AcqRel) == false {
+                    cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                }
                 writes = cache.move_writes_to_wrote();
             }
             if !writes.is_empty() {
@@ -422,6 +426,7 @@ impl PageFile for DataPageFile {
         let mut cache = self.inner.cache.lock().unwrap();
         if !cache.is_empty() {
             self.inner.work.notify_one();
+            self.inner.flushing.store(true, Ordering::Release);
             cache = self.inner.flushed.wait(cache)?;
         }
         self.inner.file.lock().unwrap().flush()
