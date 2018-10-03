@@ -66,7 +66,7 @@ pub fn main () {
     }
     elapsed = now.elapsed().as_secs();
     if elapsed > 0 {
-        println!("Read {} million transactions in {} seconds, {} read/second ", ntx / 1000000, elapsed, ntx / elapsed);
+        println!("Read {} million transactions in {} seconds, {} read/second ", (ntx/100) / 1000000, elapsed, (ntx/100) / elapsed);
     }
 
     db.shutdown();
