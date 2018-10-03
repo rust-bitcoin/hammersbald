@@ -307,7 +307,9 @@ impl PageFile for DataFileImpl {
             let page = self.page.clone();
             self.append_page(page)?;
             self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-            self.append_pos = Offset::from(self.append_pos.this_page().as_u64() + PAGE_SIZE as u64);
+            if self.append_pos != self.append_pos.this_page() {
+                self.append_pos = Offset::from(self.append_pos.this_page().as_u64() + PAGE_SIZE as u64);
+            }
         }
         self.async_file.flush()
     }
