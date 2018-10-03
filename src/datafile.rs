@@ -225,6 +225,7 @@ pub struct DataFileImpl {
     async_file: DataPageFile,
     append_pos: Offset,
     page: Page,
+    #[allow(dead_code)]
     role: String,
 }
 
