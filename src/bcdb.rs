@@ -109,12 +109,12 @@ impl BCDB {
         Ok(())
     }
 
-    /// get data iterator
+    /// get data iterator - this also includes no longer referenced data
     pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=(Option<Vec<Vec<u8>>>, Vec<u8>)> + 'a {
         self.data.iter()
     }
 
-    /// get link iterator
+    /// get link iterator - this also includes no longer used links
     pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Vec<Offset>, Offset)> + 'a {
         self.bucket.iter()
     }
@@ -122,6 +122,11 @@ impl BCDB {
     /// get a link
     pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
         self.bucket.get_link(offset)
+    }
+
+    /// get current content iterator
+    pub fn iter<'a> (&'a self) -> impl Iterator<Item=Offset> +'a {
+        self.table.iter()
     }
 }
 
