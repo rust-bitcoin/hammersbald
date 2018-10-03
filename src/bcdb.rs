@@ -67,7 +67,7 @@ pub trait BCDBAPI {
     fn put_content(&mut self, content: &[u8]) -> Result<Offset, BCDBError>;
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError>;
+    fn get_content(&self, offset: Offset) -> Result<(Option<Vec<Vec<u8>>>, Vec<u8>), BCDBError>;
 }
 
 impl BCDB {
@@ -223,9 +223,10 @@ impl BCDBAPI for BCDB {
     }
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
+    fn get_content(&self, offset: Offset) -> Result<(Option<Vec<Vec<u8>>>, Vec<u8>), BCDBError> {
         match self.data.get_content(offset)? {
-            Some(Content::Extension(data)) => return Ok(data),
+            Some(Content::Extension(data)) => return Ok((None, data)),
+            Some(Content::Data(keys, data)) => return Ok((Some(keys), data)),
             _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset)))
         }
     }
