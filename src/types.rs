@@ -27,7 +27,7 @@ use std::cmp::Ordering;
 use std::fmt;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
-/// Pointer to persistent data. Limited to 2^48
+/// Pointer to persistent data. Limited to 2^44
 pub struct Offset(u64);
 
 impl Ord for Offset {
@@ -44,7 +44,7 @@ impl PartialOrd for Offset {
 
 impl From<u64> for Offset {
     fn from(n: u64) -> Self {
-        Offset(n & 0xffffffffffffu64)
+        Offset(n & 0xfffffffffffu64)
     }
 }
 
@@ -87,7 +87,7 @@ impl Offset {
 
     /// is this a valid offset?
     pub fn is_valid (&self) -> bool {
-        self.0 > 0 && self.0 < (1 << 47)
+        self.0 > 0 && self.0 < (1 << 43)
     }
 
     /// convert to a number

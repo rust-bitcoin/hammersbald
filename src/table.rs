@@ -35,6 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::hash::Hasher;
 use std::collections::HashMap;
+use std::time::Duration;
 
 const FIRST_PAGE_HEAD:u64 = 28;
 const INIT_BUCKETS: u64 = 512;
@@ -235,6 +236,9 @@ impl TableFile {
                     }
                 }
             }
+            pairs.sort_by(|a, b| {
+                u64::cmp(&b.1.as_u64(), &a.1.as_u64())
+            });
 
             let mut next = Offset::invalid();
             for link in pairs.chunks(255).rev() {
@@ -489,14 +493,15 @@ impl TablePageFile {
         while inner.run.load(Ordering::Relaxed) {
             let mut writes = Vec::new();
             {
-                let mut cache = inner.cache.lock().expect("cache lock poisoned");
+                let cache = inner.cache.lock().expect("cache lock poisoned");
                 let mut just_flushed = false;
                 if cache.is_empty() {
                     inner.flushed.notify_all();
                     just_flushed = inner.flushing.swap(false, Ordering::AcqRel);
                 }
                 if !just_flushed {
-                    cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+                    // TODO: timeout is just a workaround here
+                    let (mut cache, _) = inner.work.wait_timeout(cache, Duration::from_millis(100)).expect("cache lock poisoned while waiting for work");
                     if inner.flushing.load(Ordering::Acquire) || cache.new_writes > 1000 {
                         writes = cache.move_writes_to_wrote();
                     }

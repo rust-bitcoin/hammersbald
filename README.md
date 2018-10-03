@@ -43,7 +43,7 @@ The persistent storage should be opened by only one process.
 
 The store is a peristent hash map using [Linear Hashing](https://en.wikipedia.org/wiki/Linear_hashing).
 
-The data storage size is limited to 2^48 (256 TiB) due to the use of 6 byte persistent
+The data storage size is limited to 2^44 (16 TiB) due to the use of 5.5 byte persistent
 pointers. A data element can not exceed 2^24 (16MiB) in length. 
 
 Key length is limited to 255 bytes. Content can be associated to most 255 keys, 
