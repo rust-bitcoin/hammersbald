@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::cmp::max;
 
 // read cache size
-pub const READ_CACHE_PAGES: usize = 1000;
+pub const READ_CACHE_PAGES: usize = 100000;
 
 pub struct Cache {
     writes: HashMap<Offset, Arc<Page>>,

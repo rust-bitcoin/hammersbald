@@ -97,7 +97,7 @@ impl TableFile {
             self.store_to_bucket(bucket, hash, key_offset, link_file)?;
         }
 
-        if thread_rng().next_u32() % 16 == 0 && self.step < <u32>::max_value() {
+        if thread_rng().next_u32() % 4 == 0 && self.step < <u32>::max_value() {
 
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
