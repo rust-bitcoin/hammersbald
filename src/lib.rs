@@ -40,6 +40,7 @@ mod table;
 mod cache;
 mod rolled;
 mod linkfile;
+mod keyfile;
 pub mod bcdb;
 pub mod datafile;
 pub mod error;

@@ -53,7 +53,7 @@ impl DataFile {
     }
 
     /// get an iterator of data
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Option<Vec<Vec<u8>>>, Vec<u8>)> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Vec<u8>> + 'a {
         DataFileIterator::new(DataIterator::new(
             DataPageIterator::new(&self.im, 0), 2))
     }
@@ -64,8 +64,8 @@ impl DataFile {
     }
 
     /// append data
-    pub fn append_data (&mut self, keys: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
-        self.im.append(DataEntry::new_data(keys, data))
+    pub fn append_data (&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
+        self.im.append(DataEntry::new_data(data))
     }
 
     /// append extension
@@ -110,12 +110,12 @@ impl<'a> DataFileIterator<'a> {
 }
 
 impl<'a> Iterator for DataFileIterator<'a> {
-    type Item = (Option<Vec<Vec<u8>>>, Vec<u8>);
+    type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.inner.next() {
-            Some(Content::Data(k, v)) => Some((Some(k), v)),
-            Some(Content::Extension(d)) => Some((None, d)),
+            Some(Content::Data(d)) => Some(d),
+            Some(Content::Extension(d)) => Some(d),
             Some(_) => None,
             None => None
         }
@@ -164,6 +164,16 @@ impl DataFileImpl {
         let mut pack = Vec::new();
         pack.write_u8(entry.data_type.to_u8())?;
         pack.write_u24::<BigEndian>(entry.data.len() as u32)?;
+        pack.extend(entry.data);
+        self.append_slice(pack.as_slice())?;
+        return Ok(start);
+    }
+
+    pub(crate) fn append_byte_sized (&mut self, entry: DataEntry) -> Result<Offset, BCDBError> {
+        let start= self.append_pos;
+        let mut pack = Vec::new();
+        pack.write_u8(entry.data_type.to_u8())?;
+        pack.write_u8(entry.data.len() as u8)?;
         pack.extend(entry.data);
         self.append_slice(pack.as_slice())?;
         return Ok(start);
@@ -393,10 +403,12 @@ impl<'file> Iterator for DataPageIterator<'file> {
 pub enum Content {
     /// link
     Link(Vec<(u32, Offset)>, Offset),
-    /// regular data referred in index
-    Data(Vec<Vec<u8>>, Vec<u8>),
+    /// regular data
+    Data(Vec<u8>),
     /// data referred by data, not in index
-    Extension(Vec<u8>)
+    Extension(Vec<u8>),
+    /// Key
+    Key(Vec<u8>, Offset)
 }
 
 /// types of data stored in the data file
@@ -405,19 +417,22 @@ pub(crate) enum DataType {
     /// no data, just padding the storage pages with zero bytes
     Padding,
     /// application defined data
-    AppData,
+    Data,
     /// Spillover bucket of the hash table
-    TableSpillOver,
+    Link,
     /// Application data extension without key
-    AppDataExtension
+    Extension,
+    /// key
+    Key
 }
 
 impl DataType {
     pub fn from (data_type: u8) -> DataType {
         match data_type {
-            1 => DataType::AppData,
-            2 => DataType::TableSpillOver,
-            3 => DataType::AppDataExtension,
+            1 => DataType::Data,
+            2 => DataType::Link,
+            3 => DataType::Extension,
+            4 => DataType::Key,
             _ => DataType::Padding
         }
     }
@@ -425,9 +440,10 @@ impl DataType {
     pub fn to_u8 (&self) -> u8 {
         match *self {
             DataType::Padding => 0,
-            DataType::AppData => 1,
-            DataType::TableSpillOver => 2,
-            DataType::AppDataExtension => 3
+            DataType::Data => 1,
+            DataType::Link => 2,
+            DataType::Extension => 3,
+            DataType::Key => 4
         }
     }
 }
@@ -439,18 +455,19 @@ pub(crate) struct DataEntry {
 }
 
 impl DataEntry {
-    pub fn new_data (keys: Vec<Vec<u8>>, data: &[u8]) -> DataEntry {
-        let mut d = Vec::new();
-        d.push(keys.len() as u8);
-        for key in keys {
-            d.push(key.len() as u8);
-            d.extend(key.to_vec());
-        }
-        d.extend(data.to_vec());
-        DataEntry{data_type: DataType::AppData, data: d}
+    pub fn new_data (data: &[u8]) -> DataEntry {
+        DataEntry{data_type: DataType::Data, data: data.to_vec()}
     }
+
+    pub fn new_key(key: &[u8], offset: Offset) -> DataEntry {
+        let mut d = Vec::new();
+        d.extend(offset.to_vec());
+        d.extend(key);
+        DataEntry{data_type: DataType::Key, data: d}
+    }
+
     pub fn new_data_extension (data: &[u8]) -> DataEntry {
-        DataEntry{data_type: DataType::AppDataExtension, data: data.to_vec()}
+        DataEntry{data_type: DataType::Extension, data: data.to_vec()}
     }
 
     pub fn new_link (links: Vec<(u32, Offset)>, next: Offset) -> DataEntry {
@@ -465,7 +482,7 @@ impl DataEntry {
             buf
         }));
         sp.write_u48::<BigEndian>(next.as_u64()).unwrap();
-        DataEntry{data_type: DataType::TableSpillOver, data: sp.to_vec()}
+        DataEntry{data_type: DataType::Link, data: sp.to_vec()}
     }
 }
 
@@ -484,6 +501,17 @@ impl<'file> DataIterator<'file> {
         if let Some(size) = self.read(3) {
             let mut c = Cursor::new(size);
             let len = c.read_u24::<BigEndian>().unwrap();
+            if let Some(buf) = self.read(len as usize) {
+                return Some(buf);
+            }
+        }
+        None
+    }
+
+    fn read_byte_sized(&mut self) -> Option<Vec<u8>> {
+        if let Some(size) = self.read(1) {
+            let mut c = Cursor::new(size);
+            let len = c.read_u8().unwrap();
             if let Some(buf) = self.read(len as usize) {
                 return Some(buf);
             }
@@ -532,27 +560,15 @@ impl<'file> Iterator for DataIterator<'file> {
             else {
                 return None;
             }
-            if data_type == DataType::AppData {
+            if data_type == DataType::Data {
                 if let Some(buf) = self.read_sized() {
-                    let mut cursor = Cursor::new(buf);
-                    let n_keys = cursor.read_u8().unwrap();
-                    let mut keys = Vec::new();
-                    for _ in 0..n_keys {
-                        let key_len = cursor.read_u8().unwrap() as usize;
-                        let mut key = vec!(0u8; key_len);
-                        cursor.read(&mut key).unwrap();
-                        keys.push(key);
-                    }
-                    let pos = cursor.position() as usize;
-                    let v = cursor.into_inner();
-                    let (_, data) = v.split_at(pos);
-                    return Some(Content::Data(keys, data.to_vec()));
+                    return Some(Content::Data(buf));
                 }
-            } else if data_type == DataType::AppDataExtension {
+            } else if data_type == DataType::Extension {
                 if let Some(buf) = self.read_sized() {
                     return Some(Content::Extension(buf));
                 }
-            } else if data_type == DataType::TableSpillOver {
+            } else if data_type == DataType::Link {
                 if let Some(buf) = self.read_sized() {
                     let mut cursor = Cursor::new(buf);
                     let m = cursor.read_u8().unwrap() as usize;
@@ -572,6 +588,14 @@ impl<'file> Iterator for DataIterator<'file> {
                         links.push((h, o));
                     }
                     return Some(Content::Link(links, next));
+                }
+            } else if data_type == DataType::Key {
+                if let Some(buf) = self.read_byte_sized() {
+                    let mut cursor = Cursor::new(buf);
+                    let offset = cursor.read_offset();
+                    let mut key = Vec::new();
+                    cursor.read_to_end(&mut key).unwrap();
+                    return Some(Content::Key(key, offset));
                 }
             }
         }

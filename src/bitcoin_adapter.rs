@@ -66,7 +66,7 @@ impl BitcoinAdapter {
             let mut extension = Vec::new();
             for _ in 0 .. next {
                 let offset = data.read_offset();
-                let (_, e) = self.bcdb.get_content(offset)?;
+                let e = self.bcdb.get_content(offset)?;
                 extension.push(e);
             }
 
@@ -102,11 +102,11 @@ impl BitcoinAdapter {
             let txdata_offset = Offset::from(data.read_u48::<BigEndian>()?);
             let mut txdata: Vec<Transaction> = Vec::new();
             if txdata_offset.is_valid() {
-                let (_, offsets) = self.get_content(txdata_offset)?;
+                let offsets = self.get_content(txdata_offset)?;
                 let mut oc = Cursor::new(offsets);
                 while let Ok(o) = oc.read_u48::<BigEndian>() {
                     let offset = Offset::from(o);
-                    let (_, tx) = self.bcdb.get_content(offset)?;
+                    let tx = self.bcdb.get_content(offset)?;
                     txdata.push(decode(tx)?);
                 }
             }
@@ -114,7 +114,7 @@ impl BitcoinAdapter {
             let mut extension = Vec::new();
             for _ in 0 .. next {
                 let offset = data.read_offset();
-                let (_, e) = self.bcdb.get_content(offset)?;
+                let e = self.bcdb.get_content(offset)?;
                 extension.push(e);
             }
 
@@ -157,7 +157,7 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.put_content(data)
     }
 
-    fn get_content(&self, offset: Offset) -> Result<(Option<Vec<Vec<u8>>>, Vec<u8>), BCDBError> {
+    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
         self.bcdb.get_content(offset)
     }
 }

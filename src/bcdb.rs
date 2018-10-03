@@ -21,6 +21,7 @@ use logfile::LogFile;
 use table::TableFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
+use keyfile::KeyFile;
 use page::{Page, TablePage, PageFile};
 use error::BCDBError;
 
@@ -37,6 +38,7 @@ pub struct BCDB {
     table: TableFile,
     link: LinkFile,
     data: DataFile,
+    key: KeyFile,
     log: Arc<Mutex<LogFile>>
 }
 
@@ -68,14 +70,14 @@ pub trait BCDBAPI {
     fn put_content(&mut self, content: &[u8]) -> Result<Offset, BCDBError>;
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<(Option<Vec<Vec<u8>>>, Vec<u8>), BCDBError>;
+    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError>;
 }
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
+    pub fn new(table: TableFile, data: DataFile, link: LinkFile, key: KeyFile) -> Result<BCDB, BCDBError> {
         let log = table.log_file();
-        let mut db = BCDB { table, link: link, data, log };
+        let mut db = BCDB { table, link: link, data, key, log };
         db.recover()?;
         db.batch()?;
         Ok(db)
@@ -103,15 +105,19 @@ impl BCDB {
                     page.read(14, &mut size)?;
                     let link_len = Offset::from(&size[..]).as_u64();
                     self.link.truncate(link_len)?;
+
+                    page.read(22, &mut size)?;
+                    let key_len = Offset::from(&size[..]).as_u64();
+                    self.key.truncate(key_len)?;
                     first = false;
-                    debug!("recover BCDB: set lengths to table: {} link: {} data: {}", link_len, table_len, data_len);
+                    debug!("recover BCDB: set lengths to table: {} link: {} data: {} key: {}", link_len, table_len, data_len, key_len);
                 }
         }
         Ok(())
     }
 
     /// get data iterator - this also includes no longer referenced data
-    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=(Option<Vec<Vec<u8>>>, Vec<u8>)> + 'a {
+    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=Vec<u8>> + 'a {
         self.data.iter()
     }
 
@@ -137,6 +143,7 @@ impl BCDBAPI for BCDB {
         self.table.init()?;
         self.data.init()?;
         self.link.init()?;
+        self.key.init()?;
         self.log.lock().unwrap().init()?;
         Ok(())
     }
@@ -155,6 +162,11 @@ impl BCDBAPI for BCDB {
         let link_len = self.link.len()?;
         self.link.clear_cache(link_len);
         debug!("link length {}", link_len);
+        self.key.flush()?;
+        self.key.sync()?;
+        let key_len = self.key.len()?;
+        self.key.clear_cache(key_len);
+        debug!("key length {}", link_len);
         self.table.flush()?;
         self.table.sync()?;
         let table_len = self.table.len()?;
@@ -170,6 +182,7 @@ impl BCDBAPI for BCDB {
         first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
         first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
         first.write(14, Offset::from(link_len).to_vec().as_slice()).unwrap();
+        first.write(22, Offset::from(key_len).to_vec().as_slice()).unwrap();
 
         log.tbl_len = table_len;
         log.append_page(first)?;
@@ -184,6 +197,7 @@ impl BCDBAPI for BCDB {
     fn shutdown (&mut self) {
         self.data.shutdown();
         self.link.shutdown();
+        self.key.shutdown();
         self.table.shutdown();
     }
 
@@ -198,23 +212,23 @@ impl BCDBAPI for BCDB {
             }
         }
 
-        let offset = self.data.append_data(keys.clone(), data)?;
-        self.table.put(keys, offset, &mut self.link)?;
-        Ok(offset)
+        let data_offset = self.data.append_data(data)?;
+        self.table.put(keys, data_offset, &mut self.link, &mut self.key)?;
+        Ok(data_offset)
     }
 
     fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
-        self.table.dedup(key, &mut self.link, &self.data)
+        self.table.dedup(key, &mut self.link, &self.key)
     }
 
     /// retrieve data by key
     fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
-        self.table.get(key, &self.data, &self.link)
+        self.table.get(key, &self.key, &self.link)
     }
 
     /// retreive the single data associated with this key
     fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
-        self.table.get_unique(key, &self.data, &self.link)
+        self.table.get_unique(key, &self.key, &self.link, &self.data)
     }
 
     /// append some content without key
@@ -224,10 +238,10 @@ impl BCDBAPI for BCDB {
     }
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<(Option<Vec<Vec<u8>>>, Vec<u8>), BCDBError> {
+    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
         match self.data.get_content(offset)? {
-            Some(Content::Extension(data)) => return Ok((None, data)),
-            Some(Content::Data(keys, data)) => return Ok((Some(keys), data)),
+            Some(Content::Extension(data)) => return Ok(data),
+            Some(Content::Data(data)) => return Ok(data),
             _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset)))
         }
     }

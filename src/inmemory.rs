@@ -24,6 +24,7 @@ use bcdb::{BCDBFactory, BCDB};
 use table::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
+use keyfile::KeyFile;
 use types::Offset;
 use page::{PageFile,Page,PAGE_SIZE};
 
@@ -58,9 +59,10 @@ impl BCDBFactory for InMemory {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
         let table = TableFile::new(Box::new(InMemory::new(false)), log)?;
         let data = DataFile::new(Box::new(InMemory::new(true)))?;
-        let bucket = LinkFile::new(Box::new(InMemory::new(true)))?;
+        let link = LinkFile::new(Box::new(InMemory::new(true)))?;
+        let key = KeyFile::new(Box::new(InMemory::new(true)))?;
 
-        BCDB::new(table, data, bucket)
+        BCDB::new(table, data, link, key)
     }
 }
 

@@ -21,6 +21,7 @@
 use logfile::LogFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
+use keyfile::KeyFile;
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use types::Offset;
@@ -85,15 +86,15 @@ impl TableFile {
         Ok(())
     }
 
-    pub fn put (&mut self, keys: Vec<Vec<u8>>, offset: Offset, link_file: &mut LinkFile) -> Result<(), BCDBError>{
+    pub fn put (&mut self, keys: Vec<Vec<u8>>, data_offset: Offset, link_file: &mut LinkFile, key_file: &mut KeyFile) -> Result<(), BCDBError>{
         for key in keys {
             let hash = self.hash(key.as_slice());
             let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
             if bucket < self.step {
                 bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
             }
-
-            self.store_to_bucket(bucket, hash, offset, link_file)?;
+            let mut key_offset= key_file.append_key(key.as_slice(), data_offset)?;
+            self.store_to_bucket(bucket, hash, key_offset, link_file)?;
         }
 
         if thread_rng().next_u32() % 16 == 0 && self.step < <u32>::max_value() {
@@ -186,7 +187,7 @@ impl TableFile {
         Ok(())
     }
 
-    pub fn dedup(&mut self, key: &[u8], link_file: &mut LinkFile, data_file: &DataFile) -> Result<(), BCDBError> {
+    pub fn dedup(&mut self, key: &[u8], link_file: &mut LinkFile, key_file: &KeyFile) -> Result<(), BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -219,7 +220,7 @@ impl TableFile {
             {
                 let ds = remaining_links.entry(hash).or_insert(Vec::new());
                 ds.dedup_by_key(|offset| {
-                    if let Ok(Some(Content::Data(k, _))) = data_file.get_content(*offset) {
+                    if let Ok((k, _)) = key_file.get_key(*offset) {
                         return k;
                     }
                     Vec::new()
@@ -283,7 +284,7 @@ impl TableFile {
         Ok(())
     }
 
-    pub fn get_unique (&self, key: &[u8], data_file: &DataFile, link_file: &LinkFile) -> Result<Option<Vec<u8>>, BCDBError> {
+    pub fn get_unique (&self, key: &[u8], key_file: &KeyFile, link_file: &LinkFile, data_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -302,15 +303,13 @@ impl TableFile {
                             let h = s.0;
                             let offset = s.1;
                             if h == hash {
-                                match data_file.get_content(offset)? {
-                                    Some(Content::Data(data_key, data)) => {
-                                        for k in data_key {
-                                            if k == key {
-                                                return Ok(Some(data));
-                                            }
-                                        }
-                                    },
-                                    _ => return Err(BCDBError::Corrupted("link should point to data".to_string()))
+                                let (data_key, data_offset) = key_file.get_key(offset)?;
+                                if data_key == key {
+                                    if let Some(Content::Data(data)) = data_file.get_content(data_offset)? {
+                                        return Ok(Some(data));
+                                    } else {
+                                        return Err(BCDBError::Corrupted("key should point to data".to_string()))
+                                    }
                                 }
                             }
                         }
@@ -323,7 +322,7 @@ impl TableFile {
         Ok(None)
     }
 
-    pub fn get (&self, key: &[u8], data_file: &DataFile, link_file: &LinkFile) -> Result<Vec<Offset>, BCDBError> {
+    pub fn get (&self, key: &[u8], key_file: &KeyFile, link_file: &LinkFile) -> Result<Vec<Offset>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -343,13 +342,12 @@ impl TableFile {
                             let h = s.0;
                             let offset = s.1;
                             if h == hash {
-                                match data_file.get_content(offset)? {
-                                    Some(Content::Data(data_key, _)) => {
-                                        if data_key.iter().any(|k| k.as_slice() == key) {
-                                            result.push(offset);
-                                        }
-                                    },
-                                    _ => return Err(BCDBError::Corrupted("link should point to data".to_string()))
+                                let (data_key, data_offset) = key_file.get_key(offset)?;
+                                if data_key == key {
+                                    result.push(data_offset);
+                                }
+                                else {
+                                    return Err(BCDBError::Corrupted("key should point to data".to_string()))
                                 }
                             }
                         }

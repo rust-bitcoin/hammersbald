@@ -61,28 +61,16 @@ pub fn main () {
         if what == "data" {
             let mut data = 0;
             let mut data_len = 0;
-            let mut n_keys = 0;
-            let mut key_len = 0;
             let mut ext = 0;
             let mut ext_len = 0;
 
-            for (keys, d) in db.data_iterator() {
-                if let Some(keys) = keys {
-                    data += 1;
-                    data_len += d.len();
-                    n_keys += 1;
-                    key_len += keys.iter().fold(0, |mut a, e| {
-                        a += e.len();
-                        a
-                    })
-                } else {
-                    ext += 1;
-                    ext_len += d.len();
-                }
+            for d in db.data_iterator() {
+                data += 1;
+                data_len += d.len();
+                // TODO: fix extensions
             }
             println!("stored key accessible data elements: {}, total {} bytes", data, data_len);
             println!("stored data extensions: {}, total {} bytes", ext, ext_len);
-            println!("stored keys {} total {} bytes", n_keys, key_len);
         }
 
 
@@ -145,24 +133,15 @@ pub fn main () {
                             shortest_link_vec = min(shortest_link_vec, links.len() as u8);
                             longest_link_vec = max(longest_link_vec, links.len() as u8);
 
+                            /* TODO
                             for (_, data_offset) in links {
                                 first_active_data = min(first_active_data, *data_offset);
                                 last_active_data = max(last_active_data, *data_offset);
-                                let (keys, d) = db.get_content(*data_offset).unwrap();
-                                if let Some(keys) = keys {
-                                    data += 1;
-                                    data_len += d.len();
-                                    n_keys += 1;
-                                    key_len += keys.iter().fold(0, |mut a, e| {
-                                        a += e.len();
-                                        a
-                                    })
-                                } else {
-                                    ext += 1;
-                                    ext_len += d.len();
-                                }
+                                let d = db.get_content(*data_offset).unwrap();
+                                data += 1;
+                                data_len += d.len();
                             }
-
+                            */
                             link_offset = next;
 
                         } else {
