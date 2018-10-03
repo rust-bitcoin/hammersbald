@@ -145,11 +145,9 @@ pub fn main () {
                             shortest_link_vec = min(shortest_link_vec, links.len() as u8);
                             longest_link_vec = max(longest_link_vec, links.len() as u8);
 
-                            for data_offset in links {
-                                for data_offset in links {
-                                    first_active_data = min(first_active_data, *data_offset);
-                                    last_active_data = max(last_active_data, *data_offset);
-                                }
+                            for (_, data_offset) in links {
+                                first_active_data = min(first_active_data, *data_offset);
+                                last_active_data = max(last_active_data, *data_offset);
                                 let (keys, d) = db.get_content(*data_offset).unwrap();
                                 if let Some(keys) = keys {
                                     data += 1;

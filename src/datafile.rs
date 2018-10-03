@@ -161,10 +161,9 @@ impl LinkFile {
     }
 
     /// get a link
-    pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
+    pub fn get_link(&self, offset: Offset) -> Result<(Vec<(u32, Offset)>, Offset), BCDBError> {
         match self.im.get_content(offset)? {
-            Some(Content::Link(current, next)) => Ok((
-                current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next)),
+            Some(Content::Link(current, next)) => Ok((current, next)),
             Some(_) | None => Err(BCDBError::Corrupted(format!("can not find link {}", offset)))
         }
     }

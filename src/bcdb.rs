@@ -120,7 +120,7 @@ impl BCDB {
     }
 
     /// get a link
-    pub fn get_link(&self, offset: Offset) -> Result<(Vec<Offset>, Offset), BCDBError> {
+    pub fn get_link(&self, offset: Offset) -> Result<(Vec<(u32, Offset)>, Offset), BCDBError> {
         self.link.get_link(offset)
     }
 
