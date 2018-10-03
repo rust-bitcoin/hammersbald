@@ -254,11 +254,26 @@ impl TableFile {
         let table_offset = Self::table_offset(bucket);
         if let Some(mut table_page) = self.read_page(table_offset.this_page())? {
             let link_offset = table_page.read_offset(table_offset.in_page_pos())?;
-            // prepend link chain
-            // this logically overwrites previous key association in the link chain
-            // since search stops at first key match
-            let so = link_file.append_link(vec!((hash, offset)), link_offset)?;
-            table_page.write_offset(table_offset.in_page_pos(), so)?;
+
+            if link_offset.is_valid() {
+                let (mut current_links, next) = link_file.get_link(link_offset)?;
+                if current_links.len() == 255 {
+                    // prepend with new
+                    let so = link_file.append_link(vec!((hash, offset)), link_offset)?;
+                    table_page.write_offset(table_offset.in_page_pos(), so)?;
+                } else {
+                    // clone and extend current
+                    current_links.insert(0, (hash, offset));
+                    let so = link_file.append_link(current_links, next)?;
+                    table_page.write_offset(table_offset.in_page_pos(), so)?;
+                }
+            }
+            else {
+                // create new
+                let so = link_file.append_link(vec!((hash, offset)), Offset::invalid())?;
+                table_page.write_offset(table_offset.in_page_pos(), so)?;
+            }
+
             self.write_page(table_page)?;
         }
         else {
