@@ -274,25 +274,18 @@ impl DataFileImpl {
 
     fn append_slice (&mut self, slice: &[u8]) -> Result<(), BCDBError> {
         let mut wrote = 0;
-        let mut pos = self.append_pos.in_page_pos();
         while wrote < slice.len() {
+            let pos = self.append_pos.in_page_pos();
             let have = min(slice.len() - wrote, PAGE_SIZE - pos);
             self.page.payload[pos..pos + have].copy_from_slice(&slice[wrote..wrote + have]);
-            pos += have;
             wrote += have;
-            if pos == PAGE_SIZE && wrote < slice.len() {
+            self.append_pos = Offset::from(self.append_pos.as_u64() + have as u64);
+            if self.append_pos.this_page() == self.append_pos {
                 let page = self.page.clone();
                 self.append_page(page)?;
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-                pos = 0;
             }
         }
-        if pos == PAGE_SIZE {
-            let page = self.page.clone();
-            self.append_page(page)?;
-            self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-        }
-        self.append_pos = Offset::from(self.append_pos.as_u64() + slice.len() as u64);
         Ok(())
     }
 
