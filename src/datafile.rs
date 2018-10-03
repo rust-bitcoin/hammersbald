@@ -629,59 +629,56 @@ impl<'file> Iterator for DataIterator<'file> {
         if self.current.is_none() {
             self.current = self.page_iterator.next();
         }
-        if let Some(current) = self.current.clone() {
-            loop {
-                let data_type;
-                if let Some(t) = self.read(1) {
-                    data_type = DataType::from(t[0]);
+        loop {
+            let data_type;
+            if let Some(t) = self.read(1) {
+                data_type = DataType::from(t[0]);
+            }
+            else {
+                return None;
+            }
+            if data_type == DataType::AppData {
+                if let Some(buf) = self.read_sized() {
+                    let mut cursor = Cursor::new(buf);
+                    let n_keys = cursor.read_u8().unwrap();
+                    let mut keys = Vec::new();
+                    for _ in 0..n_keys {
+                        let key_len = cursor.read_u8().unwrap() as usize;
+                        let mut key = vec!(0u8; key_len);
+                        cursor.read(&mut key).unwrap();
+                        keys.push(key);
+                    }
+                    let pos = cursor.position() as usize;
+                    let v = cursor.into_inner();
+                    let (_, data) = v.split_at(pos);
+                    return Some(Content::Data(keys, data.to_vec()));
                 }
-                else {
-                    return None;
+            } else if data_type == DataType::AppDataExtension {
+                if let Some(buf) = self.read_sized() {
+                    return Some(Content::Extension(buf));
                 }
-                if data_type == DataType::AppData {
-                    if let Some(buf) = self.read_sized() {
-                        let mut cursor = Cursor::new(buf);
-                        let n_keys = cursor.read_u8().unwrap();
-                        let mut keys = Vec::new();
-                        for _ in 0..n_keys {
-                            let key_len = cursor.read_u8().unwrap() as usize;
-                            let mut key = vec!(0u8; key_len);
-                            cursor.read(&mut key).unwrap();
-                            keys.push(key);
-                        }
-                        let pos = cursor.position() as usize;
-                        let v = cursor.into_inner();
-                        let (_, data) = v.split_at(pos);
-                        return Some(Content::Data(keys, data.to_vec()));
+            } else if data_type == DataType::TableSpillOver {
+                if let Some(buf) = self.read_sized() {
+                    let mut cursor = Cursor::new(buf);
+                    let m = cursor.read_u8().unwrap() as usize;
+                    let mut hashes = Vec::new();
+                    for _ in 0..m {
+                        hashes.push(cursor.read_u32::<BigEndian>().unwrap());
                     }
-                } else if data_type == DataType::AppDataExtension {
-                    if let Some(buf) = self.read_sized() {
-                        return Some(Content::Extension(buf));
+                    let mut offsets = Vec::new();
+                    for _ in 0..m {
+                        offsets.push(Offset::from(cursor.read_u48::<BigEndian>().unwrap()));
                     }
-                } else if data_type == DataType::TableSpillOver {
-                    if let Some(buf) = self.read_sized() {
-                        let mut cursor = Cursor::new(buf);
-                        let m = cursor.read_u8().unwrap() as usize;
-                        let mut hashes = Vec::new();
-                        for _ in 0..m {
-                            hashes.push(cursor.read_u32::<BigEndian>().unwrap());
-                        }
-                        let mut offsets = Vec::new();
-                        for _ in 0..m {
-                            offsets.push(Offset::from(cursor.read_u48::<BigEndian>().unwrap()));
-                        }
-                        let next = cursor.read_offset();
-                        let mut oi = offsets.iter();
-                        let mut spills = Vec::new();
-                        for h in hashes {
-                            let o = *oi.next().unwrap();
-                            spills.push((h, o));
-                        }
-                        return Some(Content::Spillover(spills, next));
+                    let next = cursor.read_offset();
+                    let mut oi = offsets.iter();
+                    let mut spills = Vec::new();
+                    for h in hashes {
+                        let o = *oi.next().unwrap();
+                        spills.push((h, o));
                     }
+                    return Some(Content::Spillover(spills, next));
                 }
             }
         }
-        None
     }
 }
