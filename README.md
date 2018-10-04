@@ -3,11 +3,11 @@ A very fast persistent blockchain store.
 
 ## Motivation
 Generic databases and key-value stores offer much more functionality 
-than needed to store and process a blockchain. Superflous functionality (for a blockchain)
+than needed to store and process a blockchain. Superfluous functionality (for a blockchain)
 comes at a high cost in speed. 
 
 ## Status
-It works, but still moving. Not yet released.
+Work in progress. Not yet released, do not send PRs yet.
 
 
 ## API
@@ -38,10 +38,10 @@ Only one process should open the same db.
 
 Since header and block have the same id, only the block will be accessible if inserted after the header. 
 
-## Imlementation
+## Implementation
 The persistent storage should be opened by only one process. 
 
-The store is a peristent hash map using [Linear Hashing](https://en.wikipedia.org/wiki/Linear_hashing).
+The store is a persistent hash map using [Linear Hashing](https://en.wikipedia.org/wiki/Linear_hashing).
 
 The data storage size is limited to 2^44 (16 TiB) due to the use of 5.5 byte persistent
 pointers. A data element can not exceed 2^24 (16MiB) in length. 
