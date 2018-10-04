@@ -41,6 +41,7 @@ mod cache;
 mod rolled;
 mod linkfile;
 mod keyfile;
+mod memtable;
 pub mod bcdb;
 pub mod datafile;
 pub mod error;
