@@ -51,18 +51,16 @@ impl MemTable {
             if let Some(bucket_index) = offset_to_bucket.get(&self_offset) {
                 let mut hashes = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.0); a});
                 let mut offsets = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.1.as_u64()); a});
-                {
-                    let bucket = self.buckets.get_mut(*bucket_index).unwrap();
-                    if bucket.is_none() {
-                        *bucket = Some(Bucket::default());
-                    }
-                    if let Some(ref mut b) = bucket {
-                        hashes.extend(b.hashes.iter());
-                        offsets.extend(b.offsets.iter());
-                        b.hashes = hashes;
-                        b.offsets = offsets;
-                    }
-
+                let bucket = self.buckets.get_mut(*bucket_index).unwrap();
+                if bucket.is_none() {
+                    *bucket = Some(Bucket::default());
+                }
+                if let Some(ref mut b) = bucket {
+                    // prepend as next links are always on lower offsets
+                    hashes.extend(b.hashes.iter());
+                    offsets.extend(b.offsets.iter());
+                    b.hashes = hashes;
+                    b.offsets = offsets;
                 }
             }
         }
@@ -95,7 +93,7 @@ impl MemTable {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub struct Bucket {
     hashes: Vec<u32>,
     offsets: Vec<u64>
