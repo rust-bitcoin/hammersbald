@@ -21,6 +21,7 @@
 use error::BCDBError;
 use bcdb::BCDB;
 use offset::Offset;
+use datafile::{DataFile, Content};
 
 use siphasher::sip::SipHasher;
 
@@ -68,7 +69,7 @@ impl MemTable {
     }
 
     /// retrieve data offsets by key
-    fn get(&mut self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
+    fn get(&self, key: &[u8], data_file: &DataFile) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket_number = (hash & (!0u32 >> (32 - self.log_mod))) as usize; // hash % 2^(log_mod)
         if bucket_number < self.step as usize {
@@ -76,10 +77,17 @@ impl MemTable {
         }
         let mut result = Vec::new();
 
-        if let Some(Some(bucket)) = self.buckets.get_mut(bucket_number) {
+        if let Some(Some(bucket)) = self.buckets.get(bucket_number) {
             for (n, h) in bucket.hashes.iter().enumerate() {
                 if *h == hash {
-                    result.push(Offset::from(*bucket.offsets.get(n).unwrap()));
+                    let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
+                    if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
+                        if keys.iter().any(|k| k.as_slice() == key) {
+                            result.push((data_offset, keys, data));
+                        }
+                    } else {
+                        return Err(BCDBError::Corrupted("bucket should point to data".to_string()))
+                    }
                 }
             }
         }
@@ -119,15 +127,16 @@ mod test {
 
         let mut rng = thread_rng();
         let mut key = [0x0u8;32];
-        let data = [0x0u8;40];
+        let mut data = [0x0u8;40];
         let mut check = HashMap::new();
 
         for _ in 0 .. 10000{
             rng.fill_bytes(&mut key);
+            rng.fill_bytes(&mut data);
             let mut k = Vec::new();
             k.push(key.to_vec());
             let o = db.put(k.clone(), &data).unwrap();
-            check.insert(key, o);
+            check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();
 
@@ -135,8 +144,8 @@ mod test {
         let mut memtable = MemTable::new(step, buckets, log_mod, sip0, sip1);
         memtable.load(&mut db).unwrap();
 
-        for (k, o) in check {
-            assert_eq!(memtable.get(&k[..]).unwrap(), vec!(o));
+        for (k, (o, data)) in check {
+            assert_eq!(memtable.get(&k[..], &db.data).unwrap(), vec!((o, vec!(k.to_vec()), data)));
         }
     }
 }

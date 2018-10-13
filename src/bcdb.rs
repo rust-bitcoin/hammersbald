@@ -36,7 +36,8 @@ pub trait BCDBFactory {
 pub struct BCDB {
     table: TableFile,
     link: LinkFile,
-    data: DataFile,
+    // TODO: pub temporary
+    pub(crate) data: DataFile,
     log: Arc<Mutex<LogFile>>
 }
 
