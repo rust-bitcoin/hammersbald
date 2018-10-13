@@ -115,7 +115,7 @@ pub fn main () {
             let mut key_len = 0;
             let mut ext = 0;
             let mut ext_len = 0;
-            for offset in db.iter() {
+            for offset in db.bucket_iterator() {
                 let mut link_offset = offset;
                 let mut current_depth = 0;
                 if link_offset.is_valid() {

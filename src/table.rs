@@ -87,6 +87,10 @@ impl TableFile {
         Ok(())
     }
 
+    pub fn get_parameters(&self) -> (u32, u32, u32, u64, u64) {
+        (self.step, self.buckets, self.log_mod, self.sip0, self.sip1)
+    }
+
     pub fn put (&mut self, keys: Vec<Vec<u8>>, data_offset: Offset, link_file: &mut LinkFile, key_file: &mut KeyFile) -> Result<(), BCDBError>{
         for key in keys {
             let hash = self.hash(key.as_slice());

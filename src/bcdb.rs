@@ -116,6 +116,7 @@ impl BCDB {
         Ok(())
     }
 
+
     /// get data iterator - this also includes no longer referenced data
     pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=Vec<u8>> + 'a {
         self.data.iter()
@@ -131,9 +132,14 @@ impl BCDB {
         self.link.get_link(offset)
     }
 
-    /// get current content iterator
-    pub fn iter<'a> (&'a self) -> impl Iterator<Item=Offset> +'a {
+    /// get hash table bucket iterator
+    pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=Offset> +'a {
         self.table.iter()
+    }
+
+    /// get hash table parameters
+    pub fn get_parameters(&self) -> (u32, u32, u32, u64, u64) {
+        self.table.get_parameters()
     }
 }
 
