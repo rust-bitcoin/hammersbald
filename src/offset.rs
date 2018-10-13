@@ -44,6 +44,13 @@ impl PartialOrd for Offset {
 
 impl From<u64> for Offset {
     fn from(n: u64) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            if n > 0xfffffffffffu64 {
+                panic!("offset {} greater than 2^44-1", n);
+            }
+        }
+
         Offset(n & 0xfffffffffffu64)
     }
 }

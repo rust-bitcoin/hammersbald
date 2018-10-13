@@ -21,7 +21,7 @@
 //!
 
 use error::BCDBError;
-use types::Offset;
+use offset::Offset;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 

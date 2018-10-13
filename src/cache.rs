@@ -20,7 +20,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use types::Offset;
+use offset::Offset;
 
 use std::collections::{HashMap,VecDeque};
 use std::sync::Arc;

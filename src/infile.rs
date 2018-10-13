@@ -23,15 +23,14 @@ use logfile::LogFile;
 use table::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
-use keyfile::KeyFile;
 use bcdb::{BCDBFactory, BCDB};
-use types::Offset;
+use offset::Offset;
 use page::{PageFile,Page};
 use rolled::RolledFile;
 
 use std::sync::{Mutex,Arc};
 
-const KEY_CHUNK_SIZE: u64 = 128*1024*1024;
+const TABLE_CHUNK_SIZE: u64 = 1024*1024*1024;
 const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
 const LOG_CHUNK_SIZE: u64 = 1024*1024*1024;
 
@@ -52,13 +51,12 @@ impl BCDBFactory for InFile {
         let log = Arc::new(Mutex::new(LogFile::new(Box::new(
             RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))));
         let table = TableFile::new(Box::new(InFile::new(
-            RolledFile::new(name.to_string(), "tb".to_string(), false, KEY_CHUNK_SIZE)?
+            RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?
         )), log)?;
         let link = LinkFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
         let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?;
-        let key = KeyFile::new(Box::new(RolledFile::new(name.to_string(), "bk".to_string(), true, DATA_CHUNK_SIZE)?))?;
 
-        BCDB::new(table, data, link, key)
+        BCDB::new(table, data, link)
     }
 }
 

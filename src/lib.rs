@@ -40,12 +40,11 @@ mod table;
 mod cache;
 mod rolled;
 mod linkfile;
-mod keyfile;
 mod memtable;
 pub mod bcdb;
 pub mod datafile;
 pub mod error;
-pub mod types;
+pub mod offset;
 pub mod inmemory;
 pub mod infile;
 #[cfg(feature="bitcoin_support")]

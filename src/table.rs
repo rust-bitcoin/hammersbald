@@ -21,10 +21,9 @@
 use logfile::LogFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
-use keyfile::KeyFile;
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
-use types::Offset;
+use offset::Offset;
 use cache::Cache;
 
 use rand::{thread_rng, RngCore};
@@ -40,7 +39,7 @@ use std::time::Duration;
 const FIRST_PAGE_HEAD:u64 = 28;
 const INIT_BUCKETS: u64 = 512;
 const INIT_LOGMOD :u64 = 8;
-const FIRST_BUCKETS_PER_PAGE:u64 = 677;
+const BUCKETS_FIRST_PAGE:u64 = 677;
 const BUCKETS_PER_PAGE:u64 = 681;
 const BUCKET_SIZE: u64 = 6;
 
@@ -91,43 +90,45 @@ impl TableFile {
         (self.step, self.buckets, self.log_mod, self.sip0, self.sip1)
     }
 
-    pub fn put (&mut self, keys: Vec<Vec<u8>>, data_offset: Offset, link_file: &mut LinkFile, key_file: &mut KeyFile) -> Result<(), BCDBError>{
+    pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset, link_file: &mut LinkFile) -> Result<(), BCDBError>{
+
+        let step = self.step;
+
         for key in keys {
             let hash = self.hash(key.as_slice());
             let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
             if bucket < self.step {
                 bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
             }
-            let mut key_offset= key_file.append_key(key.as_slice(), data_offset)?;
-            self.store_to_bucket(bucket, hash, key_offset, link_file)?;
+            self.store_to_bucket(bucket, hash, data_offset, link_file)?;
+
+            if thread_rng().next_u32() % 4 == 0 && self.step < <u32>::max_value() {
+                if self.step < (1 << self.log_mod) {
+                    let step = self.step;
+                    self.rehash_bucket(step, link_file)?;
+                }
+
+                self.step += 1;
+                if self.step > (1 << (self.log_mod + 1)) && (self.buckets - BUCKETS_FIRST_PAGE as u32) % BUCKETS_PER_PAGE as u32 == 0 {
+                    self.log_mod += 1;
+                    self.step = 0;
+                }
+
+                self.buckets += 1;
+                if self.buckets as u64 >= BUCKETS_FIRST_PAGE && (self.buckets as u64 - BUCKETS_FIRST_PAGE) % BUCKETS_PER_PAGE == 0 {
+                    let page = TablePage::new(Offset::from(((self.buckets as u64 - BUCKETS_FIRST_PAGE) / BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
+                    self.write_page(page)?;
+                }
+            }
         }
 
-        if thread_rng().next_u32() % 4 == 0 && self.step < <u32>::max_value() {
-
-            if self.step < (1 << self.log_mod) {
-                let step = self.step;
-                self.rehash_bucket(step, link_file)?;
-            }
-
-            self.step += 1;
-            if self.step > (1 << (self.log_mod + 1)) && (self.buckets - FIRST_BUCKETS_PER_PAGE as u32) % BUCKETS_PER_PAGE as u32 == 0 {
-                self.log_mod += 1;
-                self.step = 0;
-            }
-
-            self.buckets += 1;
-            if self.buckets as u64 >= FIRST_BUCKETS_PER_PAGE && (self.buckets as u64 - FIRST_BUCKETS_PER_PAGE) % BUCKETS_PER_PAGE == 0 {
-                let page = TablePage::new(Offset::from(((self.buckets as u64 - FIRST_BUCKETS_PER_PAGE)/ BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
-                self.write_page(page)?;
-            }
-
+        if step != self.step {
             if let Some(mut first_page) = self.read_page(Offset::from(0))? {
                 first_page.write_offset(0, Offset::from(self.buckets as u64))?;
                 first_page.write_offset(6, Offset::from(self.step as u64))?;
                 self.write_page(first_page)?;
             }
         }
-
         Ok(())
     }
 
@@ -192,7 +193,7 @@ impl TableFile {
         Ok(())
     }
 
-    pub fn dedup(&mut self, key: &[u8], link_file: &mut LinkFile, key_file: &KeyFile) -> Result<(), BCDBError> {
+    pub fn dedup(&mut self, key: &[u8], link_file: &mut LinkFile, data_file: &DataFile) -> Result<(), BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -225,8 +226,10 @@ impl TableFile {
             {
                 let ds = remaining_links.entry(hash).or_insert(Vec::new());
                 ds.dedup_by_key(|offset| {
-                    if let Ok((k, _)) = key_file.get_key(*offset) {
-                        return k;
+                    if let Ok(Some(Content::Data(keys, _))) = data_file.get_content(*offset) {
+                        if let Some(k) = keys.iter().find(|k| k.as_slice() == key) {
+                            return k.clone();
+                        }
                     }
                     Vec::new()
                 });
@@ -292,7 +295,7 @@ impl TableFile {
         Ok(())
     }
 
-    pub fn get_unique (&self, key: &[u8], key_file: &KeyFile, link_file: &LinkFile, data_file: &DataFile) -> Result<Option<Vec<u8>>, BCDBError> {
+    pub fn get_unique (&self, key: &[u8], link_file: &LinkFile, data_file: &DataFile) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -309,15 +312,14 @@ impl TableFile {
                     Some(Content::Link(links, next)) => {
                         for s in links {
                             let h = s.0;
-                            let offset = s.1;
+                            let data_offset = s.1;
                             if h == hash {
-                                let (data_key, data_offset) = key_file.get_key(offset)?;
-                                if data_key == key {
-                                    if let Some(Content::Data(data)) = data_file.get_content(data_offset)? {
-                                        return Ok(Some(data));
-                                    } else {
-                                        return Err(BCDBError::Corrupted("key should point to data".to_string()))
+                                if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
+                                    if keys.iter().any(|k| k.as_slice() == key) {
+                                        return Ok(Some((data_offset, keys, data)));
                                     }
+                                } else {
+                                    return Err(BCDBError::Corrupted("bucket should point to data".to_string()))
                                 }
                             }
                         }
@@ -330,7 +332,7 @@ impl TableFile {
         Ok(None)
     }
 
-    pub fn get (&self, key: &[u8], key_file: &KeyFile, link_file: &LinkFile) -> Result<Vec<Offset>, BCDBError> {
+    pub fn get (&self, key: &[u8], data_file: &DataFile, link_file: &LinkFile) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
         let hash = self.hash(key);
         let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
         if bucket < self.step {
@@ -348,14 +350,14 @@ impl TableFile {
                     Some(Content::Link(links, next)) => {
                         for s in links {
                             let h = s.0;
-                            let offset = s.1;
+                            let data_offset = s.1;
                             if h == hash {
-                                let (data_key, data_offset) = key_file.get_key(offset)?;
-                                if data_key == key {
-                                    result.push(data_offset);
-                                }
-                                else {
-                                    return Err(BCDBError::Corrupted("key should point to data".to_string()))
+                                if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
+                                    if keys.iter().any(|k| k.as_slice() == key) {
+                                        result.push((data_offset, keys, data));
+                                    }
+                                } else {
+                                    return Err(BCDBError::Corrupted("bucket should point to data".to_string()))
                                 }
                             }
                         }
@@ -391,12 +393,12 @@ impl TableFile {
     }
 
     fn table_offset (bucket: u32) -> Offset {
-        if (bucket as u64) < FIRST_BUCKETS_PER_PAGE {
-            Offset::from((bucket as u64 / FIRST_BUCKETS_PER_PAGE) * PAGE_SIZE as u64
-                + (bucket as u64 % FIRST_BUCKETS_PER_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
+        if (bucket as u64) < BUCKETS_FIRST_PAGE {
+            Offset::from((bucket as u64 / BUCKETS_FIRST_PAGE) * PAGE_SIZE as u64
+                + (bucket as u64 % BUCKETS_FIRST_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
         }
         else {
-            Offset::from((((bucket as u64 - FIRST_BUCKETS_PER_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
+            Offset::from((((bucket as u64 - BUCKETS_FIRST_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
                 + (bucket as u64 % BUCKETS_PER_PAGE) * BUCKET_SIZE)
         }
     }

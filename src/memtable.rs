@@ -20,7 +20,7 @@
 //!
 use error::BCDBError;
 use bcdb::BCDB;
-use types::Offset;
+use offset::Offset;
 
 use siphasher::sip::SipHasher;
 use std::hash::Hasher;

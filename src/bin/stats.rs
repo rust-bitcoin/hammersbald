@@ -7,7 +7,7 @@ use blockchain_store::infile::InFile;
 use blockchain_store::bcdb::BCDBFactory;
 use blockchain_store::bcdb::BCDBAPI;
 
-use blockchain_store::types::Offset;
+use blockchain_store::offset::Offset;
 
 use log::Level;
 
@@ -64,7 +64,7 @@ pub fn main () {
             let mut ext = 0;
             let mut ext_len = 0;
 
-            for d in db.data_iterator() {
+            for (_, _, d) in db.data_iterator() {
                 data += 1;
                 data_len += d.len();
                 // TODO: fix extensions
@@ -81,7 +81,7 @@ pub fn main () {
             let mut lvlen = 0;
             let mut first_link_offset = Offset::invalid();
             let mut last_link_offset = Offset::from(0);
-            for (v, _) in db.link_iterator() {
+            for (_, v, _) in db.link_iterator() {
                 link += 1;
                 lvlen += v.len();
                 lvnmax = max(lvnmax, v.len());

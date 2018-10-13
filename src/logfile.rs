@@ -22,7 +22,7 @@
 
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
-use types::Offset;
+use offset::Offset;
 
 use std::collections::HashSet;
 

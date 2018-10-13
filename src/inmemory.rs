@@ -24,8 +24,7 @@ use bcdb::{BCDBFactory, BCDB};
 use table::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
-use keyfile::KeyFile;
-use types::Offset;
+use offset::Offset;
 use page::{PageFile,Page,PAGE_SIZE};
 
 use std::io::Read;
@@ -60,9 +59,8 @@ impl BCDBFactory for InMemory {
         let table = TableFile::new(Box::new(InMemory::new(false)), log)?;
         let data = DataFile::new(Box::new(InMemory::new(true)))?;
         let link = LinkFile::new(Box::new(InMemory::new(true)))?;
-        let key = KeyFile::new(Box::new(InMemory::new(true)))?;
 
-        BCDB::new(table, data, link, key)
+        BCDB::new(table, data, link)
     }
 }
 

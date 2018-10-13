@@ -19,7 +19,7 @@
 //! A file that is split into chunks
 //!
 use error::BCDBError;
-use types::Offset;
+use offset::Offset;
 use page::{PageFile, Page, PAGE_SIZE};
 
 use std::collections::HashMap;

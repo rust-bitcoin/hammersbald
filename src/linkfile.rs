@@ -20,7 +20,7 @@
 
 use page::PageFile;
 use error::BCDBError;
-use types::Offset;
+use offset::Offset;
 use datafile::{DataFileImpl, DataIterator, DataPageIterator, DataEntry, Content};
 
 /// file storing data link chains from hash table to data
@@ -36,7 +36,7 @@ impl LinkFile {
 
     /// initialize
     pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.im.init ([0xBC, 0xDC])
+        self.im.init ([0xBC, 0xDB])
     }
 
     /// shutdown
@@ -45,7 +45,7 @@ impl LinkFile {
     }
 
     /// get an iterator of links
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Vec<Offset>, Offset)> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<Offset>, Offset)> + 'a {
         LinkFileIterator::new(DataIterator::new(
             DataPageIterator::new(&self.im, 0), 2))
     }
@@ -106,13 +106,13 @@ impl<'a> LinkFileIterator<'a> {
 }
 
 impl<'a> Iterator for LinkFileIterator<'a> {
-    type Item = (Vec<Offset>, Offset);
+    type Item = (Offset, Vec<Offset>, Offset);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.inner.next() {
-            Some(Content::Link(current, next)) => {
+            Some((offset, Content::Link(current, next))) => {
                 Some (
-                    (current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next))
+                    (offset, current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next))
             },
             Some(_) => None,
             None => None

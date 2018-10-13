@@ -16,12 +16,11 @@
 //!
 //! # The blockchain db
 //!
-use types::Offset;
+use offset::Offset;
 use logfile::LogFile;
 use table::TableFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
-use keyfile::KeyFile;
 use page::{Page, TablePage, PageFile};
 use error::BCDBError;
 
@@ -38,7 +37,6 @@ pub struct BCDB {
     table: TableFile,
     link: LinkFile,
     data: DataFile,
-    key: KeyFile,
     log: Arc<Mutex<LogFile>>
 }
 
@@ -60,24 +58,24 @@ pub trait BCDBAPI {
     fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError>;
 
     /// retrieve data offsets by key
-    fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError>;
+    fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError>;
 
     /// retrieve single data by key
-    fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError>;
+    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError>;
 
     /// append some content without key
     /// only the returned offset can be used to retrieve
     fn put_content(&mut self, content: &[u8]) -> Result<Offset, BCDBError>;
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError>;
+    fn get_content(&self, offset: Offset) -> Result<(Vec<Vec<u8>>, Vec<u8>), BCDBError>;
 }
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(table: TableFile, data: DataFile, link: LinkFile, key: KeyFile) -> Result<BCDB, BCDBError> {
+    pub fn new(table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
         let log = table.log_file();
-        let mut db = BCDB { table, link: link, data, key, log };
+        let mut db = BCDB { table, link: link, data, log };
         db.recover()?;
         db.batch()?;
         Ok(db)
@@ -89,8 +87,8 @@ impl BCDB {
         debug!("recover");
         for page in log.page_iter() {
             if !first {
-                let key_page = TablePage::from(page);
-                self.table.patch_page(key_page)?;
+                let table_page = TablePage::from(page);
+                self.table.patch_page(table_page)?;
             }
                 else {
                     let mut size = [0u8; 6];
@@ -106,11 +104,8 @@ impl BCDB {
                     let link_len = Offset::from(&size[..]).as_u64();
                     self.link.truncate(link_len)?;
 
-                    page.read(22, &mut size)?;
-                    let key_len = Offset::from(&size[..]).as_u64();
-                    self.key.truncate(key_len)?;
                     first = false;
-                    debug!("recover BCDB: set lengths to table: {} link: {} data: {} key: {}", link_len, table_len, data_len, key_len);
+                    debug!("recover BCDB: set lengths to table: {} link: {} data: {}", link_len, table_len, data_len);
                 }
         }
         Ok(())
@@ -118,12 +113,12 @@ impl BCDB {
 
 
     /// get data iterator - this also includes no longer referenced data
-    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=Vec<u8>> + 'a {
+    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
         self.data.iter()
     }
 
     /// get link iterator - this also includes no longer used links
-    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Vec<Offset>, Offset)> + 'a {
+    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<Offset>, Offset)> + 'a {
         self.link.iter()
     }
 
@@ -149,7 +144,6 @@ impl BCDBAPI for BCDB {
         self.table.init()?;
         self.data.init()?;
         self.link.init()?;
-        self.key.init()?;
         self.log.lock().unwrap().init()?;
         Ok(())
     }
@@ -168,11 +162,6 @@ impl BCDBAPI for BCDB {
         let link_len = self.link.len()?;
         self.link.clear_cache(link_len);
         debug!("link length {}", link_len);
-        self.key.flush()?;
-        self.key.sync()?;
-        let key_len = self.key.len()?;
-        self.key.clear_cache(key_len);
-        debug!("key length {}", link_len);
         self.table.flush()?;
         self.table.sync()?;
         let table_len = self.table.len()?;
@@ -188,7 +177,6 @@ impl BCDBAPI for BCDB {
         first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
         first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
         first.write(14, Offset::from(link_len).to_vec().as_slice()).unwrap();
-        first.write(22, Offset::from(key_len).to_vec().as_slice()).unwrap();
 
         log.tbl_len = table_len;
         log.append_page(first)?;
@@ -203,7 +191,6 @@ impl BCDBAPI for BCDB {
     fn shutdown (&mut self) {
         self.data.shutdown();
         self.link.shutdown();
-        self.key.shutdown();
         self.table.shutdown();
     }
 
@@ -218,23 +205,23 @@ impl BCDBAPI for BCDB {
             }
         }
 
-        let data_offset = self.data.append_data(data)?;
-        self.table.put(keys, data_offset, &mut self.link, &mut self.key)?;
+        let data_offset = self.data.append_data(keys.clone(), data)?;
+        self.table.put(keys, data_offset, &mut self.link)?;
         Ok(data_offset)
     }
 
     fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
-        self.table.dedup(key, &mut self.link, &self.key)
+        self.table.dedup(key, &mut self.link, &self.data)
     }
 
     /// retrieve data by key
-    fn get(&self, key: &[u8]) -> Result<Vec<Offset>, BCDBError> {
-        self.table.get(key, &self.key, &self.link)
+    fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+        self.table.get(key, &self.data, &self.link)
     }
 
-    /// retreive the single data associated with this key
-    fn get_unique(&self, key: &[u8]) -> Result<Option<Vec<u8>>, BCDBError> {
-        self.table.get_unique(key, &self.key, &self.link, &self.data)
+    /// retrieve the single data associated with this key
+    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+        self.table.get_unique(key,  &self.link, &self.data)
     }
 
     /// append some content without key
@@ -244,10 +231,10 @@ impl BCDBAPI for BCDB {
     }
 
     /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<Vec<u8>, BCDBError> {
+    fn get_content(&self, offset: Offset) -> Result<(Vec<Vec<u8>>, Vec<u8>), BCDBError> {
         match self.data.get_content(offset)? {
-            Some(Content::Extension(data)) => return Ok(data),
-            Some(Content::Data(data)) => return Ok(data),
+            Some(Content::Extension(data)) => return Ok((Vec::new(), data)),
+            Some(Content::Data(keys, data)) => return Ok((keys, data)),
             _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset)))
         }
     }
@@ -276,18 +263,18 @@ mod test {
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;40];
 
-        for _ in 0 .. 100000 {
+        for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            check.insert(key, data);
             let mut k = Vec::new();
             k.push(key.to_vec());
-            db.put(k.clone(), &data).unwrap();
+            let offset = db.put(k.clone(), &data).unwrap();
+            check.insert(key, (offset, data));
         }
         db.batch().unwrap();
 
-        for (k, v) in check.iter() {
-            assert_eq!(db.get_unique(k).unwrap(), Some(v.to_vec()));
+        for (k, (o, v)) in check.iter() {
+            assert_eq!(db.get_unique(k).unwrap(), Some((*o, vec!(k.to_vec()), v.to_vec())));
         }
         db.shutdown();
     }
@@ -335,29 +322,24 @@ mod test {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data1);
             rng.fill_bytes(&mut data2);
-            let o1 = db.put(vec!(key.to_vec()), &data1).unwrap();
-            let o2 = db.put(vec!(key.to_vec()), &data2).unwrap();
-            let mut os = vec!(o1, o2);
-            os.sort_unstable();
-            check.insert(key, os);
+            db.put(vec!(key.to_vec()), &data1).unwrap();
+            db.put(vec!(key.to_vec()), &data2).unwrap();
+            check.insert(key, data2);
         }
         db.batch().unwrap();
         // check logical overwrite
-        for (k, _) in &check {
+        for (k, d) in &check {
             let mut os = db.get(k).unwrap();
-            assert!(os[0] > os[1]);
+            assert!(os[0].0 > os[1].0);
+            assert_eq!(os[0].2.as_slice(), &d[..])
         }
-        // check same result
-        for (k, v) in &check {
-            let mut os = db.get(k).unwrap();
-            os.sort_unstable();
-            assert_eq!(os, *v);
-        }
+
         // check dedup leaves most recent in place
         for (k, v) in &check {
             db.dedup(k).unwrap();
             let mut os = db.get(k).unwrap();
-            assert_eq!(os, vec!(v[1]));
+            assert_eq!(os.len(), 1);
+            assert_eq!(os[0].2.as_slice(), &v[..]);
         }
         db.shutdown();
     }
