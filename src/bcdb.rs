@@ -118,7 +118,7 @@ impl BCDB {
     }
 
     /// get link iterator - this also includes no longer used links
-    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<Offset>, Offset)> + 'a {
+    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<(u32, Offset)>, Offset)> + 'a {
         self.link.iter()
     }
 

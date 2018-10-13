@@ -87,8 +87,8 @@ pub fn main () {
                 lvnmax = max(lvnmax, v.len());
                 lvmin = min(lvmin, v.len());
                 for link_offset in v {
-                    first_link_offset = min(first_link_offset, link_offset);
-                    last_link_offset = max(last_link_offset, link_offset);
+                    first_link_offset = min(first_link_offset, link_offset.1);
+                    last_link_offset = max(last_link_offset, link_offset.1);
                 }
             }
             print!("stored links {} ", link);

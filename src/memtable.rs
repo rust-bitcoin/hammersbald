@@ -23,7 +23,9 @@ use bcdb::BCDB;
 use offset::Offset;
 
 use siphasher::sip::SipHasher;
+
 use std::hash::Hasher;
+use std::collections::HashMap;
 
 pub struct MemTable {
     step: u32,
@@ -35,28 +37,33 @@ pub struct MemTable {
 
 impl MemTable {
     pub fn new (step: u32, buckets: u32, log_mod: u32, sip0: u64, sip1: u64) -> MemTable {
-        MemTable {log_mod, step, sip0, sip1, buckets: Vec::with_capacity(buckets as usize)}
+        MemTable {log_mod, step, sip0, sip1, buckets: vec!(None; buckets as usize)}
     }
 
     pub fn load (&mut self, bcdb: &mut BCDB) -> Result<(), BCDBError>{
-        for bucket in bcdb.bucket_iterator() {
+        let mut offset_to_bucket = HashMap::with_capacity(self.buckets.len());
+        for (n, bucket) in bcdb.bucket_iterator().enumerate() {
             if bucket.is_valid() {
-                let mut next = bucket;
-                let mut hashes = Vec::new();
-                let mut offsets = Vec::new();
-                loop {
-                    let (links, n) = bcdb.get_link(next)?;
-                    hashes.extend(links.iter().fold(Vec::new(), |mut a, e| { a.push (e.0); a}));
-                    offsets.extend(links.iter().fold(Vec::new(), |mut a, e| { a.push (e.1.as_u64()); a}));
-                    next = n;
-                    if !next.is_valid() {
-                        break;
-                    }
-                }
-                self.buckets.push(Some(Bucket{hashes, offsets}));
+                offset_to_bucket.insert(bucket, n);
             }
-            else {
-                self.buckets.push(None);
+        }
+        for (self_offset, links, _) in bcdb.link_iterator() {
+            if let Some(bucket_index) = offset_to_bucket.get(&self_offset) {
+                let mut hashes = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.0); a});
+                let mut offsets = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.1.as_u64()); a});
+                {
+                    let bucket = self.buckets.get_mut(*bucket_index).unwrap();
+                    if bucket.is_none() {
+                        *bucket = Some(Bucket::default());
+                    }
+                    if let Some(ref mut b) = bucket {
+                        hashes.extend(b.hashes.iter());
+                        offsets.extend(b.offsets.iter());
+                        b.hashes = hashes;
+                        b.offsets = offsets;
+                    }
+
+                }
             }
         }
         Ok(())
@@ -88,7 +95,7 @@ impl MemTable {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct Bucket {
     hashes: Vec<u32>,
     offsets: Vec<u64>
@@ -117,7 +124,7 @@ mod test {
         let data = [0x0u8;40];
         let mut check = HashMap::new();
 
-        for _ in 0 .. 2 {
+        for _ in 0 .. 10000{
             rng.fill_bytes(&mut key);
             let mut k = Vec::new();
             k.push(key.to_vec());

@@ -45,7 +45,7 @@ impl LinkFile {
     }
 
     /// get an iterator of links
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<Offset>, Offset)> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<(u32, Offset)>, Offset)> + 'a {
         LinkFileIterator::new(DataIterator::new(
             DataPageIterator::new(&self.im, 0), 2))
     }
@@ -106,13 +106,13 @@ impl<'a> LinkFileIterator<'a> {
 }
 
 impl<'a> Iterator for LinkFileIterator<'a> {
-    type Item = (Offset, Vec<Offset>, Offset);
+    type Item = (Offset, Vec<(u32, Offset)>, Offset);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.inner.next() {
             Some((offset, Content::Link(current, next))) => {
                 Some (
-                    (offset, current.iter().fold(Vec::new(), |mut a, e| {a.push(e.1); a}), next))
+                    (offset, current.iter().fold(Vec::new(), |mut a, e| {a.push((e.0, e.1)); a}), next))
             },
             Some(_) => None,
             None => None

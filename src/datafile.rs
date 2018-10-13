@@ -619,7 +619,7 @@ impl<'file> Iterator for DataIterator<'file> {
         }
         loop {
             let data_type;
-            let offset = Offset::from(self.pos as u64 + self.page_iterator.pagenumber * PAGE_SIZE as u64);
+            let offset = Offset::from(self.pos as u64 + (self.page_iterator.pagenumber-1) * PAGE_SIZE as u64);
             if let Some(t) = self.read(1) {
                 data_type = DataType::from(t[0]);
             }
