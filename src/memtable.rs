@@ -22,26 +22,29 @@ use error::{BCDBError, MayFailIterator};
 use bcdb::BCDB;
 use offset::Offset;
 use datafile::{DataFile, Content};
+use table::TableFile;
 
 use siphasher::sip::SipHasher;
 use rand::{thread_rng, RngCore};
 
 use std::hash::Hasher;
 use std::collections::HashMap;
+use std::fmt;
 
 const BUCKET_FILL_TARGET: u32 = 128;
 
 pub struct MemTable {
-    step: u32,
+    step: usize,
     log_mod: u32,
     sip0: u64,
     sip1: u64,
-    buckets: Vec<Option<Bucket>>
+    buckets: Vec<Option<Bucket>>,
+    dirty: Dirty
 }
 
 impl MemTable {
-    pub fn new (step: u32, buckets: u32, log_mod: u32, sip0: u64, sip1: u64) -> MemTable {
-        MemTable {log_mod, step, sip0, sip1, buckets: vec!(None; buckets as usize)}
+    pub fn new (step: usize, buckets: usize, log_mod: u32, sip0: u64, sip1: u64) -> MemTable {
+        MemTable {log_mod, step, sip0, sip1, buckets: vec!(None; buckets), dirty: Dirty::new(buckets)}
     }
 
     pub fn load (&mut self, bcdb: &mut BCDB) -> Result<(), BCDBError>{
@@ -72,10 +75,7 @@ impl MemTable {
     pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset) -> Result<(), BCDBError>{
         for key in keys {
             let hash = self.hash(key.as_slice());
-            let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
-            if bucket < self.step {
-                bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-            }
+            let bucket = self.bucket_for_hash(hash);
             self.store_to_bucket(bucket, hash, data_offset)?;
 
             if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
@@ -91,12 +91,13 @@ impl MemTable {
                 }
 
                 self.buckets.push(None);
+                self.dirty.append(true);
             }
         }
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: usize, hash: u32, offset: Offset) -> Result<(), BCDBError> {
         if let Some(some) = self.buckets.get_mut(bucket as usize) {
             if let Some(bucket) = some {
                 bucket.hashes.push(hash);
@@ -107,16 +108,17 @@ impl MemTable {
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
+        self.dirty.set(bucket, true);
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: u32) -> Result<(), BCDBError> {
+    fn rehash_bucket(&mut self, bucket: usize) -> Result<(), BCDBError> {
         let mut rewrite = false;
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
         if let Some(Some(b)) = self.buckets.get(bucket as usize) {
             for (hash, offset) in b.hashes.iter().zip(b.offsets.iter()) {
-                let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
+                let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
                     moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, Offset::from(*offset)));
                     rewrite = true;
@@ -132,18 +134,20 @@ impl MemTable {
                     self.store_to_bucket(bucket, hash, offset)?;
                 }
             }
-            self.buckets[bucket as usize] = Some(new_bucket_store);
+            self.buckets[bucket] = Some(new_bucket_store);
+            self.dirty.set(bucket, true);
         }
         Ok(())
+    }
+
+    pub fn flush (table_file: &mut TableFile) {
+        unimplemented!()
     }
 
     /// retrieve data offsets by key
     pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> impl MayFailIterator<(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
         let hash = self.hash(key);
-        let mut bucket_number = (hash & (!0u32 >> (32 - self.log_mod))) as usize; // hash % 2^(log_mod)
-        if bucket_number < self.step as usize {
-            bucket_number = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
-        }
+        let bucket_number = self.bucket_for_hash(hash);
         let mut offsets = Vec::new();
 
         if let Some(Some(bucket)) = self.buckets.get(bucket_number) {
@@ -156,10 +160,86 @@ impl MemTable {
         GetIterator::new(key.to_vec(), offsets, data_file)
     }
 
+    // get the data last associated with the key
+    pub fn get_unique(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+        let hash = self.hash(key);
+        let bucket_number = self.bucket_for_hash(hash);
+        if let Some(Some(bucket)) = self.buckets.get(bucket_number) {
+            for (n, h) in bucket.hashes.iter().enumerate().rev() {
+                if *h == hash {
+                    let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
+                    if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
+                        if keys.iter().any(|k| *k == key) {
+                            return Ok(Some((data_offset, keys, data)));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn bucket_for_hash(&self, hash: u32) -> usize {
+        let mut bucket = (hash & (!0u32 >> (32 - self.log_mod))) as usize; // hash % 2^(log_mod)
+        if bucket < self.step {
+            bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
+        }
+        bucket
+    }
+
     fn hash (&self, key: &[u8]) -> u32 {
         let mut hasher = SipHasher::new_with_keys(self.sip0, self.sip1);
         hasher.write(key);
         hasher.finish() as u32
+    }
+}
+
+struct Dirty {
+    bits: Vec<u64>,
+    used: usize
+}
+
+impl fmt::Debug for Dirty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        for b in &self.bits {
+            write!(f, "{:064b}", b)?;
+        }
+        Ok(())
+    }
+}
+
+impl Dirty {
+    pub fn new (n: usize) -> Dirty {
+        Dirty{bits: vec!(0u64; (n >> 6) + 1), used: n}
+    }
+
+    pub fn set(&mut self, n: usize, bit: bool) {
+        if bit {
+            self.bits[n >> 6] |= 1 << (n & 0x3f);
+        } else {
+            self.bits[n >> 6] &= !(1 << (n & 0x3f));
+        }
+    }
+
+    pub fn get(&self, n: usize) -> bool {
+        (self.bits[n >> 6] & 1 << (n & 0x3f)) != 0
+    }
+
+    pub fn clear(&mut self) {
+        for s in &mut self.bits {
+            *s = 0;
+        }
+    }
+
+    pub fn append(&mut self, bit: bool) {
+        self.used += 1;
+        if self.used >= (self.bits.len() << 6) {
+            self.bits.push(bit as u64);
+        }
+        else {
+            let next = self.used;
+            self.set(next, bit);
+        }
     }
 }
 
@@ -245,6 +325,30 @@ mod test {
     use self::rand::RngCore;
 
     #[test]
+    fn test_dirty() {
+        let mut dirty = Dirty::new(63);
+        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000000");
+        dirty.set(0,true);
+        assert!(dirty.get(0));
+        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000001");
+        dirty.set(3,true);
+        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000001001");
+        dirty.set(3,false);
+        assert!(!dirty.get(3));
+        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000001");
+        dirty.set(4,false);
+        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000001");
+        dirty.append(true);
+        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001");
+        dirty.append(true);
+        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000011");
+        assert!(dirty.get(65));
+        dirty.append(false);
+        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000011");
+        assert!(!dirty.get(66));
+    }
+
+        #[test]
     fn test() {
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
@@ -265,7 +369,7 @@ mod test {
         db.batch().unwrap();
 
         let (step, buckets, log_mod, sip0, sip1) = db.get_parameters();
-        let mut memtable = MemTable::new(step, buckets, log_mod, sip0, sip1);
+        let mut memtable = MemTable::new(step as usize, buckets as usize, log_mod, sip0, sip1);
         memtable.load(&mut db).unwrap();
 
         for (k, (o, data)) in &check {
@@ -283,7 +387,7 @@ mod test {
             check.insert(key, (o, data.to_vec()));
         }
         for (k, (o, data)) in check {
-            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap().unwrap(), (o, vec!(k.to_vec()), data));
+            assert_eq!(memtable.get_unique(&k[..], &db.data).unwrap().unwrap(), (o, vec!(k.to_vec()), data));
         }
     }
 }
