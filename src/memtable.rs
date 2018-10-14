@@ -29,7 +29,7 @@ use rand::{thread_rng, RngCore};
 use std::hash::Hasher;
 use std::collections::HashMap;
 
-const BUCKET_FILL_TARGET: u32 = 2;
+const BUCKET_FILL_TARGET: u32 = 128;
 
 pub struct MemTable {
     step: u32,
@@ -114,7 +114,7 @@ impl MemTable {
         let mut rewrite = false;
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
-        if let Some(Some(b)) = self.buckets.get_mut(bucket as usize) {
+        if let Some(Some(b)) = self.buckets.get(bucket as usize) {
             for (hash, offset) in b.hashes.iter().zip(b.offsets.iter()) {
                 let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
@@ -138,40 +138,61 @@ impl MemTable {
     }
 
     /// retrieve data offsets by key
-    pub fn get(&self, key: &[u8], data_file: &DataFile) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+    pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> impl Iterator<Item=(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
         let hash = self.hash(key);
         let mut bucket_number = (hash & (!0u32 >> (32 - self.log_mod))) as usize; // hash % 2^(log_mod)
         if bucket_number < self.step as usize {
             bucket_number = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
         }
-        let mut result = Vec::new();
+        let mut offsets = Vec::new();
 
         if let Some(Some(bucket)) = self.buckets.get(bucket_number) {
-            let mut fih = false;
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
-                    fih = true;
-                    let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
-                    if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
-                        if keys.iter().any(|k| k.as_slice() == key) {
-                            result.push((data_offset, keys, data));
-                        }
-                    } else {
-                        return Err(BCDBError::Corrupted("bucket should point to data".to_string()))
-                    }
+                    offsets.push(Offset::from(*bucket.offsets.get(n).unwrap()));
                 }
             }
-            if !fih {
-                println!("not found in hash");
-            }
         }
-        Ok(result)
+        GetIterator::new(key.to_vec(), offsets, data_file)
     }
 
     fn hash (&self, key: &[u8]) -> u32 {
         let mut hasher = SipHasher::new_with_keys(self.sip0, self.sip1);
         hasher.write(key);
         hasher.finish() as u32
+    }
+}
+
+struct GetIterator<'data> {
+    key: Vec<u8>,
+    pos: usize,
+    offsets: Vec<Offset>,
+    data_file: &'data DataFile
+}
+
+impl<'data> GetIterator<'data> {
+    pub fn new (key: Vec<u8>, offsets: Vec<Offset>, data_file: &'data DataFile) -> GetIterator<'data> {
+        GetIterator{key, offsets, data_file, pos: 0}
+    }
+}
+
+impl<'data> Iterator for GetIterator<'data> {
+    type Item = (Offset, Vec<Vec<u8>>, Vec<u8>);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        while self.pos < self.offsets.len() {
+            let data_offset = self.offsets[self.pos];
+            self.pos += 1;
+            if let Ok(Some(Content::Data(keys, data))) = self.data_file.get_content(data_offset) {
+                if keys.iter().any(|key| *key == self.key) {
+                    return Some((data_offset, keys, data));
+                }
+            }
+            else {
+                // TODO: deal with corruption
+            }
+        }
+        None
     }
 }
 
@@ -219,7 +240,7 @@ mod test {
         memtable.load(&mut db).unwrap();
 
         for (k, (o, data)) in &check {
-            assert_eq!(memtable.get(&k[..], &db.data).unwrap(), vec!((*o, vec!(k.to_vec()), data.clone())));
+            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap(), (*o, vec!(k.to_vec()), data.clone()));
         }
 
         check.clear();
@@ -233,7 +254,7 @@ mod test {
             check.insert(key, (o, data.to_vec()));
         }
         for (k, (o, data)) in check {
-            assert_eq!(memtable.get(&k[..], &db.data).unwrap(), vec!((o, vec!(k.to_vec()), data)));
+            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap(), (o, vec!(k.to_vec()), data));
         }
     }
 }
