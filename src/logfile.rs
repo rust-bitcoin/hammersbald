@@ -24,31 +24,19 @@ use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use offset::Offset;
 
-use std::collections::HashSet;
-
 /// The buffer pool
 pub struct LogFile {
     rw: Box<PageFile>,
-    logged: HashSet<Offset>,
     pub tbl_len: u64
 }
 
 impl LogFile {
     pub fn new(rw: Box<PageFile>) -> LogFile {
-        LogFile { rw, logged: HashSet::new(), tbl_len: 0 }
+        LogFile { rw, tbl_len: 0 }
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
         Ok(())
-    }
-
-    pub fn is_logged (&self, offset: Offset) -> bool {
-        self.logged.contains(&offset)
-    }
-
-    /// empties the set of logged pages
-    pub fn clear_cache(&mut self) {
-        self.logged.clear();
     }
 
     pub fn page_iter (&self) -> LogPageIterator {
@@ -56,7 +44,6 @@ impl LogFile {
     }
 
     pub fn append_key_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.logged.insert(page.offset);
         self.append_page(page.page)
     }
 }

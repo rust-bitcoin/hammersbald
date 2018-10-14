@@ -22,12 +22,9 @@ use logfile::LogFile;
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use offset::Offset;
-use cache::Cache;
 
-use std::sync::{Mutex, Arc, Condvar};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-use std::time::Duration;
+use std::sync::{Mutex, Arc};
+use std::cmp::max;
 
 pub const FIRST_PAGE_HEAD:usize = 28;
 pub const BUCKETS_FIRST_PAGE:usize = 677;
@@ -36,38 +33,13 @@ pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
-    inner: Arc<TableFileInner>,
-}
-
-
-struct TableFileInner {
-    file: Mutex<Box<PageFile>>,
-    log: Arc<Mutex<LogFile>>,
-    cache: Mutex<Cache>,
-    flushed: Condvar,
-    work: Condvar,
-    run: AtomicBool,
-    flushing: AtomicBool
-}
-
-impl TableFileInner {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TableFileInner, BCDBError> {
-        let len = file.len()?;
-        Ok(TableFileInner { file: Mutex::new(file), log,
-            cache: Mutex::new(Cache::new(len)), flushed: Condvar::new(),
-            work: Condvar::new(),
-            run: AtomicBool::new(true),
-            flushing: AtomicBool::new(false)
-        })
-    }
+    file: Box<PageFile>,
+    log: Arc<Mutex<LogFile>>
 }
 
 impl TableFile {
     pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TableFile, BCDBError> {
-        let inner = Arc::new(TableFileInner::new(file, log)?);
-        let inner2 = inner.clone();
-        thread::spawn(move || { TableFile::background(inner2) });
-        Ok(TableFile { inner })
+        Ok(TableFile {file, log})
     }
 
     fn table_offset (bucket: u32) -> Offset {
@@ -85,74 +57,12 @@ impl TableFile {
         BucketIterator{file: self, n:0}
     }
 
-    fn background (inner: Arc<TableFileInner>) {
-        while inner.run.load(Ordering::Relaxed) {
-            let mut writes = Vec::new();
-            {
-                let cache = inner.cache.lock().expect("cache lock poisoned");
-                let mut just_flushed = false;
-                if cache.is_empty() {
-                    inner.flushed.notify_all();
-                    just_flushed = inner.flushing.swap(false, Ordering::AcqRel);
-                }
-                if !just_flushed {
-                    // TODO: timeout is just a workaround here
-                    let (mut cache, _) = inner.work.wait_timeout(cache, Duration::from_millis(100)).expect("cache lock poisoned while waiting for work");
-                    if inner.flushing.load(Ordering::Acquire) || cache.new_writes > 1000 {
-                        writes = cache.move_writes_to_wrote();
-                    }
-                }
-            }
-            if !writes.is_empty() {
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
-                let mut log = inner.log.lock().expect("log lock poisoned");
-                let mut file = inner.file.lock().expect("file lock poisoned");
-                let mut logged = false;
-                for write in &writes {
-                    let offset = write.0;
-                    if offset.as_u64() < log.tbl_len && !log.is_logged(offset) {
-                        if let Some(page) = file.read_page(offset).expect("can not read hash table file") {
-                            log.append_page(page).expect("can not write log file");
-                            logged = true;
-                        }
-                            else {
-                                panic!("can not find pre-image to log {}", offset);
-                            }
-                    }
-                }
-                if logged {
-                    log.flush().expect("can not flush log");
-                    log.sync().expect("can not sync log");
-                }
-                for (offset, page) in writes {
-                    file.write_page(offset, page.clone()).expect("write hash table failed");
-                }
-            }
-        }
-    }
-
     pub fn patch_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.inner.file.lock().unwrap().write_page(page.offset, page.page)
-    }
-
-    fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        if offset != offset.this_page () {
-            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset)))
-        }
-        self.inner.file.lock().unwrap().read_page(offset)
+        self.file.write_page(page.offset, page.page)
     }
 
     pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
-        self.inner.log.clone()
-    }
-
-    pub fn shutdown (&mut self) {
-        self.inner.run.store(false, Ordering::Relaxed);
-        self.inner.work.notify_one();
-    }
-
-    pub fn clear_cache(&mut self, len: u64) {
-        self.inner.cache.lock().unwrap().clear(len);
+        self.log.clone()
     }
 
     pub fn read_key_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
@@ -166,50 +76,49 @@ impl TableFile {
         Ok(None)
     }
 
-    pub fn write_key_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.write_page(page.offset, page.page)
+    pub fn write_key_pages(&mut self, pages: Vec<TablePage>) -> Result<u64, BCDBError> {
+        {
+            let mut log = self.log.lock()?;
+            for page in &pages {
+                let offset = page.offset;
+                if offset.as_u64() < log.tbl_len {
+                    if let Some(page) = self.read_page(offset)? {
+                        log.append_page(page)?;
+                    } else {
+                        return Err(BCDBError::Corrupted(format!("can not find pre-image to log {}", offset)));
+                    }
+                }
+            }
+            log.flush()?;
+            log.sync()?;
+        }
+        let mut len = self.len()?;
+        for page in pages {
+            len = max(len, self.write_page(page.offset, page.page)?);
+        }
+        Ok(len)
     }
 }
 
 impl PageFile for TableFile {
-    #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        if !cache.is_empty() {
-            self.inner.flushing.store(true, Ordering::Release);
-            self.inner.work.notify_one();
-            cache = self.inner.flushed.wait(cache)?;
-        }
-        self.inner.file.lock().unwrap().flush()
+        self.file.flush()
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
-        self.inner.file.lock().unwrap().len()
+        self.file.len()
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().truncate(new_len)
+        self.file.truncate(new_len)
     }
 
     fn sync(&self) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().sync()
+        self.file.sync()
     }
 
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        {
-            let cache = self.inner.cache.lock().unwrap();
-            if let Some(page) = cache.get(offset) {
-                return Ok(Some(page));
-            }
-        }
-        if let Some(page) = self.read_page_from_store(offset)? {
-            // write cache takes precedence therefore no problem if there was
-            // a write between above read and this lock
-            let mut cache = self.inner.cache.lock().unwrap();
-            cache.cache(offset, page.clone());
-            return Ok(Some(page));
-        }
-        Ok(None)
+        self.file.read_page(offset)
     }
 
     fn append_page(&mut self, _: Page) -> Result<u64, BCDBError> {
@@ -217,10 +126,7 @@ impl PageFile for TableFile {
     }
 
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        let len = self.inner.cache.lock().unwrap().write(offset, page);
-        self.inner.work.notify_one();
-        Ok(len)
-
+        self.file.write_page(offset, page)
     }
 }
 

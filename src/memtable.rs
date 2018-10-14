@@ -112,6 +112,7 @@ impl MemTable {
 
     pub fn flush (&mut self, table_file: &mut TableFile, link_file: &mut LinkFile) -> Result<(), BCDBError> {
         if self.dirty.is_dirty() {
+            let mut pages = Vec::new();
             // first page
             let mut page = TablePage::new(Offset::from(0));
             page.write_offset(0, Offset::from(self.buckets.len() as u64))?;
@@ -121,7 +122,7 @@ impl MemTable {
             for b in 0 .. min(self.buckets.len(), BUCKETS_FIRST_PAGE) {
                 Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b, FIRST_PAGE_HEAD)?;
             }
-            table_file.write_key_page(page)?;
+            pages.push(page);
 
             // other pages
             for (pn_1 /* page number - 1 */, dirty) in self.dirty.page_flags().skip(1).enumerate() {
@@ -132,11 +133,12 @@ impl MemTable {
                     for (n, b) in (start .. end).enumerate() {
                         Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n, 0)?;
                     }
-                    table_file.write_key_page(page)?;
+                    pages.push(page);
                 }
             }
 
             link_file.flush()?;
+            table_file.write_key_pages(pages)?;
             table_file.flush()?;
             self.dirty.clear();
         }

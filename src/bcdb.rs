@@ -157,11 +157,9 @@ impl BCDBAPI for BCDB {
         debug!("link length {}", link_len);
         self.table.sync()?;
         let table_len = self.table.len()?;
-        self.table.clear_cache(table_len);
         debug!("table length {}", table_len);
 
         let mut log = self.log.lock().unwrap();
-        log.clear_cache();
         log.truncate(0)?;
 
         let mut first = Page::new();
@@ -183,7 +181,6 @@ impl BCDBAPI for BCDB {
     fn shutdown (&mut self) {
         self.data.shutdown();
         self.link.shutdown();
-        self.table.shutdown();
     }
 
     /// store data with some keys
