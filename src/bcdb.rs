@@ -128,19 +128,13 @@ impl BCDB {
 
     /// get hash table bucket iterator
     pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=Offset> +'a {
-        self.table.iter()
-    }
-
-    /// get hash table parameters
-    pub fn get_parameters(&self) -> (u32, u32, u32, u64, u64) {
-        self.table.get_parameters()
+        self.mem.iter()
     }
 }
 
 impl BCDBAPI for BCDB {
     /// initialize a db
     fn init (&mut self) -> Result<(), BCDBError> {
-        self.table.init()?;
         self.data.init()?;
         self.link.init()?;
         self.log.lock().unwrap().init()?;

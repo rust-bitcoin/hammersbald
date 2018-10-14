@@ -19,290 +19,29 @@
 //!
 
 use logfile::LogFile;
-use datafile::{DataFile, Content};
-use linkfile::LinkFile;
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use offset::Offset;
 use cache::Cache;
 
-use rand::{thread_rng, RngCore};
-use siphasher::sip::SipHasher;
-
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::hash::Hasher;
 use std::time::Duration;
 
-const FIRST_PAGE_HEAD:u64 = 28;
-const INIT_BUCKETS: u64 = 512;
-const INIT_LOGMOD :u64 = 8;
-const BUCKETS_FIRST_PAGE:u64 = 677;
-const BUCKETS_PER_PAGE:u64 = 681;
-const BUCKET_SIZE: u64 = 6;
+pub const FIRST_PAGE_HEAD:usize = 28;
+pub const BUCKETS_FIRST_PAGE:usize = 677;
+pub const BUCKETS_PER_PAGE:usize = 681;
+pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
     async_file: TablePageFile,
-    step: u32,
-    buckets: u32,
-    log_mod: u32,
-    sip0: u64,
-    sip1: u64
 }
 
 impl TableFile {
     pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> Result<TableFile, BCDBError> {
-        let mut rng = thread_rng();
-        Ok(TableFile {async_file: TablePageFile::new(rw, log_file)?, step: 0,
-            buckets: INIT_BUCKETS as u32, log_mod: INIT_LOGMOD as u32,
-        sip0: rng.next_u64(), sip1: rng.next_u64() })
-    }
-
-    pub fn init (&mut self) -> Result<(), BCDBError> {
-        if let Some(first_page) = self.read_page(Offset::from(0))? {
-            let buckets = first_page.read_offset(0).unwrap().as_u64() as u32;
-            if buckets > 0 {
-                self.buckets = buckets;
-                self.step = first_page.read_offset(6).unwrap().as_u64() as u32;
-                self.log_mod = (32 - buckets.leading_zeros()) as u32 - 2;
-                self.sip0 = first_page.read_u64(12).unwrap();
-                self.sip1 = first_page.read_u64(20).unwrap();
-            }
-            info!("open BCDB. buckets {}, step {}, log_mod {}", buckets, self.step, self.log_mod);
-        }
-        else {
-            let mut fp = TablePage::new(Offset::from(0));
-            fp.write_offset(0, Offset::from(self.buckets as u64))?;
-            fp.write_offset(6, Offset::from(self.step as u64))?;
-            fp.write_u64(12, self.sip0)?;
-            fp.write_u64(20, self.sip1)?;
-            self.write_page(fp)?;
-            info!("open empty BCDB");
-        };
-
-        Ok(())
-    }
-
-    pub fn get_parameters(&self) -> (u32, u32, u32, u64, u64) {
-        (self.step, self.buckets, self.log_mod, self.sip0, self.sip1)
-    }
-
-    pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset, link_file: &mut LinkFile) -> Result<(), BCDBError>{
-
-        let step = self.step;
-
-        for key in keys {
-            let hash = self.hash(key.as_slice());
-            let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
-            if bucket < self.step {
-                bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-            }
-            self.store_to_bucket(bucket, hash, data_offset, link_file)?;
-
-            if thread_rng().next_u32() % 4 == 0 && self.step < <u32>::max_value() {
-                if self.step < (1 << self.log_mod) {
-                    let step = self.step;
-                    self.rehash_bucket(step, link_file)?;
-                }
-
-                self.step += 1;
-                if self.step > (1 << (self.log_mod + 1)) && (self.buckets - BUCKETS_FIRST_PAGE as u32) % BUCKETS_PER_PAGE as u32 == 0 {
-                    self.log_mod += 1;
-                    self.step = 0;
-                }
-
-                self.buckets += 1;
-                if self.buckets as u64 >= BUCKETS_FIRST_PAGE && (self.buckets as u64 - BUCKETS_FIRST_PAGE) % BUCKETS_PER_PAGE == 0 {
-                    let page = TablePage::new(Offset::from(((self.buckets as u64 - BUCKETS_FIRST_PAGE) / BUCKETS_PER_PAGE + 1) * PAGE_SIZE as u64));
-                    self.write_page(page)?;
-                }
-            }
-        }
-
-        if step != self.step {
-            if let Some(mut first_page) = self.read_page(Offset::from(0))? {
-                first_page.write_offset(0, Offset::from(self.buckets as u64))?;
-                first_page.write_offset(6, Offset::from(self.step as u64))?;
-                self.write_page(first_page)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn rehash_bucket(&mut self, bucket: u32, link_file: &mut LinkFile) -> Result<(), BCDBError> {
-        let table_offset = Self::table_offset(bucket);
-
-        if let Some(mut table_page) = self.read_page(table_offset.this_page())? {
-            let mut link_offset = table_page.read_offset(table_offset.in_page_pos())?;
-
-            let mut current_links = Vec::new();
-            let mut rewrite = false;
-            loop {
-                if !link_offset.is_valid() {
-                    break;
-                }
-                match link_file.get_content(link_offset)? {
-                    Some(Content::Link(links, next)) => {
-                        current_links.extend(links);
-                        link_offset = next;
-                        if link_offset.is_valid() {
-                            rewrite = true;
-                        }
-                    },
-                    _ => return Err(BCDBError::Corrupted(format!("expected link at rehash {}", link_offset).to_string()))
-                }
-            }
-            // process in reverse order to ensure latest put takes precedence in the new bucket
-            current_links.reverse();
-
-            let mut remaining_links = Vec::new();
-            for (hash, offset)  in current_links {
-                let new_bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-                if new_bucket != bucket {
-                    // store to new bucket
-                    self.store_to_bucket(new_bucket, hash, offset, link_file)?;
-                    if let Some(bp) = self.read_page(table_offset.this_page())? {
-                        table_page = bp;
-                    }
-                    rewrite = true;
-                } else {
-                    // merge links of same hash
-                    remaining_links.push((hash, offset));
-                }
-            }
-
-            if rewrite {
-                remaining_links.sort_unstable_by(|a, b|{
-                    //reverse
-                    u64::cmp(&b.1.as_u64(), &a.1.as_u64())
-                });
-                let mut next = Offset::invalid();
-                for link in remaining_links.chunks(255).rev() {
-                    next = link_file.append_link(link.to_vec(), next)?;
-                }
-                table_page.write_offset(table_offset.in_page_pos(), next)?;
-                self.write_page(table_page)?;
-            }
-        }
-        else {
-            return Err(BCDBError::Corrupted(format!("missing hash table page {} in rehash", table_offset)));
-        }
-        Ok(())
-    }
-
-    fn store_to_bucket(&mut self, bucket: u32, hash: u32, offset: Offset, link_file: &mut LinkFile) -> Result<(), BCDBError> {
-        let table_offset = Self::table_offset(bucket);
-        if let Some(mut table_page) = self.read_page(table_offset.this_page())? {
-            let link_offset = table_page.read_offset(table_offset.in_page_pos())?;
-
-            if link_offset.is_valid() {
-                let (mut current_links, next) = link_file.get_link(link_offset)?;
-                if current_links.len() == 255 {
-                    // prepend with new
-                    let so = link_file.append_link(vec!((hash, offset)), link_offset)?;
-                    table_page.write_offset(table_offset.in_page_pos(), so)?;
-                } else {
-                    // clone and extend current
-                    current_links.insert(0, (hash, offset));
-                    let so = link_file.append_link(current_links, next)?;
-                    table_page.write_offset(table_offset.in_page_pos(), so)?;
-                }
-            }
-            else {
-                // create new
-                let so = link_file.append_link(vec!((hash, offset)), Offset::invalid())?;
-                table_page.write_offset(table_offset.in_page_pos(), so)?;
-            }
-
-            self.write_page(table_page)?;
-        }
-        else {
-            return Err(BCDBError::Corrupted(format!("missing hash table page {} in store to bucket", table_offset)));
-        }
-        Ok(())
-    }
-
-    pub fn get_unique (&self, key: &[u8], link_file: &LinkFile, data_file: &DataFile) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
-        let hash = self.hash(key);
-        let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
-        if bucket < self.step {
-            bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-        }
-        let table_offset = Self::table_offset(bucket);
-        if let Some (table_page) = self.read_page(table_offset.this_page())? {
-            let mut link_offset = table_page.read_offset(table_offset.in_page_pos())?;
-            loop {
-                if !link_offset.is_valid() {
-                    return Ok(None);
-                }
-                match link_file.get_content(link_offset)? {
-                    Some(Content::Link(links, next)) => {
-                        for s in links {
-                            let h = s.0;
-                            let data_offset = s.1;
-                            if h == hash {
-                                if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
-                                    if keys.iter().any(|k| k.as_slice() == key) {
-                                        return Ok(Some((data_offset, keys, data)));
-                                    }
-                                } else {
-                                    return Err(BCDBError::Corrupted("bucket should point to data".to_string()))
-                                }
-                            }
-                        }
-                        link_offset = next;
-                    },
-                    _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    pub fn get (&self, key: &[u8], data_file: &DataFile, link_file: &LinkFile) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
-        let hash = self.hash(key);
-        let mut bucket = hash & (!0u32 >> (32 - self.log_mod)); // hash % 2^(log_mod)
-        if bucket < self.step {
-            bucket = hash & (!0u32 >> (32 - self.log_mod - 1)); // hash % 2^(log_mod + 1)
-        }
-        let table_offset = Self::table_offset(bucket);
-        if let Some(table_page) = self.read_page(table_offset.this_page())? {
-            let mut link_offset = table_page.read_offset(table_offset.in_page_pos())?;
-            let mut result = Vec::new();
-            loop {
-                if !link_offset.is_valid() {
-                    return Ok(result);
-                }
-                match link_file.get_content(link_offset)? {
-                    Some(Content::Link(links, next)) => {
-                        for s in links {
-                            let h = s.0;
-                            let data_offset = s.1;
-                            if h == hash {
-                                if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
-                                    if keys.iter().any(|k| k.as_slice() == key) {
-                                        result.push((data_offset, keys, data));
-                                    }
-                                } else {
-                                    return Err(BCDBError::Corrupted("bucket should point to data".to_string()))
-                                }
-                            }
-                        }
-                        link_offset = next;
-                    },
-                    _ => return Err(BCDBError::Corrupted("unexpected content".to_string()))
-                }
-            }
-        }
-        else {
-            return Err(BCDBError::Corrupted(format!("missing hash table page {} in get", table_offset)));
-        }
-    }
-
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
-        BucketIterator{file: self, n:0}
+        Ok(TableFile {async_file: TablePageFile::new(rw, log_file)?})
     }
 
     pub fn patch_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
@@ -322,20 +61,18 @@ impl TableFile {
     }
 
     fn table_offset (bucket: u32) -> Offset {
-        if (bucket as u64) < BUCKETS_FIRST_PAGE {
-            Offset::from((bucket as u64 / BUCKETS_FIRST_PAGE) * PAGE_SIZE as u64
-                + (bucket as u64 % BUCKETS_FIRST_PAGE) * BUCKET_SIZE + FIRST_PAGE_HEAD)
+        if (bucket as u64) < BUCKETS_FIRST_PAGE as u64 {
+            Offset::from((bucket as u64 / BUCKETS_FIRST_PAGE as u64) * PAGE_SIZE as u64
+                + (bucket as u64 % BUCKETS_FIRST_PAGE as u64) * BUCKET_SIZE as u64 + FIRST_PAGE_HEAD as u64)
         }
         else {
-            Offset::from((((bucket as u64 - BUCKETS_FIRST_PAGE) / BUCKETS_PER_PAGE) + 1) * PAGE_SIZE as u64
-                + (bucket as u64 % BUCKETS_PER_PAGE) * BUCKET_SIZE)
+            Offset::from((((bucket as u64 - BUCKETS_FIRST_PAGE as u64) / BUCKETS_PER_PAGE as u64) + 1) * PAGE_SIZE as u64
+                + (bucket as u64 % BUCKETS_PER_PAGE as u64) * BUCKET_SIZE as u64)
         }
     }
 
-    fn hash (&self, key: &[u8]) -> u32 {
-        let mut hasher = SipHasher::new_with_keys(self.sip0, self.sip1);
-        hasher.write(key);
-        hasher.finish() as u32
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
+        BucketIterator{file: self, n:0}
     }
 }
 

@@ -21,7 +21,7 @@
 use error::{BCDBError, MayFailIterator};
 use offset::Offset;
 use datafile::{DataFile, Content};
-use table::TableFile;
+use table::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
 use page::{PAGE_SIZE, TablePage};
 
@@ -34,13 +34,8 @@ use std::fmt;
 use std::cmp::min;
 
 const BUCKET_FILL_TARGET: u32 = 128;
-
-const FIRST_PAGE_HEAD:usize = 28;
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
-const BUCKETS_FIRST_PAGE:usize = 677;
-const BUCKETS_PER_PAGE:usize = 681;
-const BUCKET_SIZE: usize = 6;
 
 pub struct MemTable {
     step: usize,
@@ -160,6 +155,10 @@ impl MemTable {
             link = link_file.append_link(chunk.to_vec(), link)?;
         }
         page.write_offset(i * BUCKET_SIZE + head, link)
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
+        BucketIterator{file: self, n:0}
     }
 
     pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset) -> Result<(), BCDBError>{
@@ -326,6 +325,22 @@ impl Dirty {
         else {
             let next = self.used;
             self.set(next);
+        }
+    }
+}
+
+struct BucketIterator<'a> {
+    file: &'a MemTable,
+    n: u32
+}
+
+impl<'a> Iterator for BucketIterator<'a> {
+    type Item = Offset;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.file.buckets.get(self.n as usize) {
+            Some(n) => { self.n += 1; Some(n.link) },
+            None => None
         }
     }
 }
