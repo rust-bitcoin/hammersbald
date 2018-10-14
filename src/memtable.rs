@@ -73,26 +73,39 @@ impl MemTable {
             let mut bucket_to_link = HashMap::with_capacity(n_buckets as usize);
             for (n, bucket) in table_file.iter().enumerate() {
                 if bucket.is_valid() {
-                    // TODO: follow link next
                     bucket_to_link.insert(bucket, n);
                 }
             }
             let mut buckets = vec!(Bucket::default(); n_buckets as usize);
-            for (self_offset, links, _) in link_file.iter() {
+            for (self_offset, mut links, mut next) in link_file.iter() {
                 if let Some(bucket_index) = bucket_to_link.get(&self_offset) {
                     let bucket = &mut buckets[*bucket_index];
                     bucket.link = self_offset;
-                    // note that order is reverse of the link database
-                    let mut hashes = links.iter().fold(Vec::new(), |mut a, e| {
-                        a.push(e.0);
-                        a
-                    });
-                    let mut offsets = links.iter().fold(Vec::new(), |mut a, e| {
-                        a.push(e.1.as_u64());
-                        a
-                    });
-                    bucket.hashes.extend(hashes.iter().rev());
-                    bucket.offsets.extend(offsets.iter().rev());
+                    loop {
+
+                        let mut hashes = links.iter().fold(Vec::new(), |mut a, e| {
+                            a.push(e.0);
+                            a
+                        });
+                        hashes.extend(bucket.hashes.iter());
+                        bucket.hashes = hashes;
+
+                        let mut offsets = links.iter().fold(Vec::new(), |mut a, e| {
+                            a.push(e.1.as_u64());
+                            a
+                        });
+                        offsets.extend(bucket.offsets.iter());
+                        bucket.offsets = offsets;
+
+                        if !next.is_valid() {
+                            break;
+                        }
+
+                        let (l, n) = link_file.get_link(next)?;
+                        links = l;
+                        next = n;
+                    }
+
                 }
             }
             Ok(MemTable {log_mod, step, sip0, sip1, buckets, dirty: Dirty::new(n_buckets as usize) })
@@ -141,9 +154,7 @@ impl MemTable {
                     a
                 });
         for chunk in links.chunks(255) {
-            let mut links = chunk.to_vec();
-            links.reverse();
-            link = link_file.append_link(links, link)?;
+            link = link_file.append_link(chunk.to_vec(), link)?;
         }
         page.write_offset(i * BUCKET_SIZE + FIRST_PAGE_HEAD, link)
     }
@@ -462,7 +473,7 @@ mod test {
         let mut data = [0x0u8;40];
         let mut check = HashMap::new();
 
-        for _ in 0 .. 10000{
+        for _ in 0 .. 100000{
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             let mut k = Vec::new();
@@ -479,7 +490,7 @@ mod test {
         }
 
         check.clear();
-        for _ in 0 .. 10000 {
+        for _ in 0 .. 100000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             let mut k = Vec::new();
