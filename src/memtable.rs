@@ -91,7 +91,7 @@ impl MemTable {
                 }
 
                 self.buckets.push(None);
-                self.dirty.append(true);
+                self.dirty.append();
             }
         }
         Ok(())
@@ -108,7 +108,7 @@ impl MemTable {
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
-        self.dirty.set(bucket, true);
+        self.dirty.set(bucket);
         Ok(())
     }
 
@@ -135,7 +135,7 @@ impl MemTable {
                 }
             }
             self.buckets[bucket] = Some(new_bucket_store);
-            self.dirty.set(bucket, true);
+            self.dirty.set(bucket);
         }
         Ok(())
     }
@@ -213,16 +213,12 @@ impl Dirty {
         Dirty{bits: vec!(0u64; (n >> 6) + 1), used: n}
     }
 
-    pub fn set(&mut self, n: usize, bit: bool) {
-        if bit {
-            self.bits[n >> 6] |= 1 << (n & 0x3f);
-        } else {
-            self.bits[n >> 6] &= !(1 << (n & 0x3f));
-        }
+    pub fn set(&mut self, n: usize) {
+        self.bits[n >> 6] |= 1 << (n & 0x3f);
     }
 
     pub fn get(&self, n: usize) -> bool {
-        (self.bits[n >> 6] & 1 << (n & 0x3f)) != 0
+        (self.bits[n >> 6] & (1 << (n & 0x3f))) != 0
     }
 
     pub fn clear(&mut self) {
@@ -231,14 +227,14 @@ impl Dirty {
         }
     }
 
-    pub fn append(&mut self, bit: bool) {
+    pub fn append(&mut self) {
         self.used += 1;
         if self.used >= (self.bits.len() << 6) {
-            self.bits.push(bit as u64);
+            self.bits.push(1);
         }
         else {
             let next = self.used;
-            self.set(next, bit);
+            self.set(next);
         }
     }
 }
@@ -328,24 +324,16 @@ mod test {
     fn test_dirty() {
         let mut dirty = Dirty::new(63);
         assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000000");
-        dirty.set(0,true);
+        dirty.set(0);
         assert!(dirty.get(0));
         assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000001");
-        dirty.set(3,true);
+        dirty.set(3);
         assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000001001");
-        dirty.set(3,false);
-        assert!(!dirty.get(3));
-        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000001");
-        dirty.set(4,false);
-        assert_eq!(format!("{:?}", dirty), "0000000000000000000000000000000000000000000000000000000000000001");
-        dirty.append(true);
-        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001");
-        dirty.append(true);
-        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000011");
+        dirty.append();
+        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000010010000000000000000000000000000000000000000000000000000000000000001");
+        dirty.append();
+        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000010010000000000000000000000000000000000000000000000000000000000000011");
         assert!(dirty.get(65));
-        dirty.append(false);
-        assert_eq!(format!("{:?}", dirty), "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000011");
-        assert!(!dirty.get(66));
     }
 
         #[test]
