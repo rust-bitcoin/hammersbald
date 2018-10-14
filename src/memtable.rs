@@ -124,7 +124,7 @@ impl MemTable {
             page.write_u64(12, self.sip0)?;
             page.write_u64(20, self.sip1)?;
             for b in 0 .. min(self.buckets.len(), BUCKETS_FIRST_PAGE) {
-                Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b)?;
+                Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b, FIRST_PAGE_HEAD)?;
             }
             table_file.write_page(page)?;
 
@@ -135,7 +135,7 @@ impl MemTable {
                     let start = BUCKETS_PER_PAGE*pn_1 + BUCKETS_FIRST_PAGE;
                     let end = min(self.buckets.len(), (pn_1+1)*BUCKETS_PER_PAGE + BUCKETS_FIRST_PAGE);
                     for (n, b) in (start .. end).enumerate() {
-                        Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n)?;
+                        Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n, 0)?;
                     }
                     table_file.write_page(page)?;
                 }
@@ -148,7 +148,7 @@ impl MemTable {
         Ok(())
     }
 
-    fn write_offset_to_page(bucket: &mut Bucket, link_file: &mut LinkFile, page: &mut TablePage, i: usize) -> Result<(), BCDBError> {
+    fn write_offset_to_page(bucket: &mut Bucket, link_file: &mut LinkFile, page: &mut TablePage, i: usize, head: usize) -> Result<(), BCDBError> {
         let mut link = Offset::invalid();
         let links = bucket.hashes.iter().zip(bucket.offsets.iter())
             .fold(Vec::new(), |mut a, e|
@@ -159,7 +159,7 @@ impl MemTable {
         for chunk in links.chunks(255) {
             link = link_file.append_link(chunk.to_vec(), link)?;
         }
-        page.write_offset(i * BUCKET_SIZE + FIRST_PAGE_HEAD, link)
+        page.write_offset(i * BUCKET_SIZE + head, link)
     }
 
     pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset) -> Result<(), BCDBError>{

@@ -47,7 +47,7 @@ impl Error for BCDBError {
     fn description(&self) -> &str {
         match *self {
             BCDBError::InvalidOffset => "invalid offset",
-            BCDBError::DoesNotFit => "data does not fit into the block",
+            BCDBError::DoesNotFit => "data does not fit into the page",
             BCDBError::Corrupted (ref s) => s.as_str(),
             BCDBError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
