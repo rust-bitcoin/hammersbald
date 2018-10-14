@@ -42,7 +42,7 @@ pub fn main () {
         thread_rng().fill(&mut key[..]);
 
         let offset = db.put(vec!(key.to_vec()), &data).unwrap();
-        if i % 100 == 0 {
+        if i % 1000 == 0 {
             check.push ((offset, key.clone(), data.clone()));
         }
         n += 1;
@@ -67,7 +67,7 @@ pub fn main () {
     }
     elapsed = now.elapsed().as_secs();
     if elapsed > 0 {
-        println!("Read {} million transactions in {} seconds, {} read/second ", (ntx/100) / 1000000, elapsed, (ntx/100) / elapsed);
+        println!("Read {} transactions in {} seconds, {} read/second ", (ntx/1000), elapsed, (ntx/1000) / elapsed);
     }
 
     db.shutdown();

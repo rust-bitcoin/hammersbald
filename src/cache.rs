@@ -31,20 +31,18 @@ pub const READ_CACHE_PAGES: usize = 1000;
 
 pub struct Cache {
     writes: HashMap<Offset, Arc<Page>>,
-    wrote: HashMap<Offset, Arc<Page>>,
     reads: HashMap<Offset, Arc<Page>>,
     fifo: VecDeque<Offset>,
-    len: u64,
-    pub new_writes: usize
+    len: u64
 }
 
 impl Cache {
     pub fn new (len: u64) -> Cache {
-        Cache { writes: HashMap::new(), wrote: HashMap::new(), reads: HashMap::new(), fifo: VecDeque::new(), len, new_writes: 0 }
+        Cache { writes: HashMap::new(), reads: HashMap::new(), fifo: VecDeque::new(), len }
     }
 
     pub fn cache (&mut self, offset: Offset, page: Page) {
-        if !self.writes.contains_key(&offset) && !self.wrote.contains_key(&offset) {
+        if !self.writes.contains_key(&offset) {
             if self.reads.insert(offset, Arc::new(page)).is_none() {
                 self.fifo.push_back(offset);
                 if self.reads.len() >= READ_CACHE_PAGES {
@@ -58,9 +56,6 @@ impl Cache {
 
     pub fn write (&mut self, offset: Offset, page: Page) -> u64 {
         let page = Arc::new(page);
-        if self.wrote.insert(offset, page.clone()).is_none() {
-            self.new_writes += 1;
-        }
         self.writes.insert(offset, page);
         self.len = max(self.len, offset.as_u64() + PAGE_SIZE as u64);
         self.len
@@ -81,9 +76,6 @@ impl Cache {
         if let Some(content) = self.writes.get(&offset) {
             return Some(content.deref().clone())
         }
-        if let Some(content) = self.wrote.get(&offset) {
-            return Some(content.deref().clone())
-        }
         if let Some(content) = self.reads.get(&offset) {
             return Some(content.deref().clone())
         }
@@ -95,15 +87,12 @@ impl Cache {
 
         let writes = self.writes.iter().map(|(o, p)| (*o, p.deref().clone())).collect::<Vec<_>>();
         self.writes.clear();
-        self.new_writes = 0;
         writes
     }
 
     pub fn clear (&mut self, len: u64) {
         self.len = len;
-        self.new_writes = 0;
         self.writes.clear();
-        self.wrote.clear();
         self.reads.clear();
         self.fifo.clear();
     }
