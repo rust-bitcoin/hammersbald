@@ -52,29 +52,54 @@ pub struct MemTable {
 }
 
 impl MemTable {
-    pub fn new (step: usize, buckets: usize, log_mod: u32, sip0: u64, sip1: u64) -> MemTable {
-        MemTable {log_mod, step, sip0, sip1, buckets: vec!(Bucket::default(); buckets), dirty: Dirty::new(buckets)}
+    pub fn new () -> MemTable {
+        let mut rng = thread_rng();
+
+        MemTable {log_mod: INIT_LOGMOD as u32, step: 0,
+            sip0: rng.next_u64(),
+            sip1: rng.next_u64(),
+            buckets: vec!(Bucket::default(); INIT_BUCKETS),
+            dirty: Dirty::new(INIT_BUCKETS)}
     }
 
-    pub fn load (&mut self, bcdb: &mut BCDB) -> Result<(), BCDBError>{
-        let mut offset_to_bucket = HashMap::with_capacity(self.buckets.len());
-        for (n, bucket) in bcdb.bucket_iterator().enumerate() {
-            if bucket.is_valid() {
-                offset_to_bucket.insert(bucket, n);
+    pub fn load (table_file: &TableFile, link_file: &LinkFile) -> Result<MemTable, BCDBError>{
+        if let Some(first) = table_file.read_page(Offset::from(0))? {
+            let n_buckets = first.read_offset(0)?.as_u64() as u32;
+            let step = first.read_offset(6)?.as_u64() as usize;
+            let log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
+            let sip0 = first.read_u64(12)?;
+            let sip1 = first.read_u64(20)?;
+
+            let mut bucket_to_link = HashMap::with_capacity(n_buckets as usize);
+            for (n, bucket) in table_file.iter().enumerate() {
+                if bucket.is_valid() {
+                    // TODO: follow link next
+                    bucket_to_link.insert(bucket, n);
+                }
             }
-        }
-        for (self_offset, links, _) in bcdb.link_iterator() {
-            if let Some(bucket_index) = offset_to_bucket.get(&self_offset) {
-                let mut bucket = self.buckets.get_mut(*bucket_index).unwrap();
-                bucket.link = self_offset;
-                // note that order is reverse of the link database
-                let mut hashes = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.0); a});
-                let mut offsets = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.1.as_u64()); a});
-                bucket.hashes.extend(hashes.iter().rev());
-                bucket.offsets.extend(offsets.iter().rev());
+            let mut buckets = vec!(Bucket::default(); n_buckets as usize);
+            for (self_offset, links, _) in link_file.iter() {
+                if let Some(bucket_index) = bucket_to_link.get(&self_offset) {
+                    let bucket = &mut buckets[*bucket_index];
+                    bucket.link = self_offset;
+                    // note that order is reverse of the link database
+                    let mut hashes = links.iter().fold(Vec::new(), |mut a, e| {
+                        a.push(e.0);
+                        a
+                    });
+                    let mut offsets = links.iter().fold(Vec::new(), |mut a, e| {
+                        a.push(e.1.as_u64());
+                        a
+                    });
+                    bucket.hashes.extend(hashes.iter().rev());
+                    bucket.offsets.extend(offsets.iter().rev());
+                }
             }
+            Ok(MemTable {log_mod, step, sip0, sip1, buckets, dirty: Dirty::new(n_buckets as usize) })
         }
-        Ok(())
+        else {
+            Ok(MemTable::new())
+        }
     }
 
     pub fn flush (&mut self, table_file: &mut TableFile, link_file: &mut LinkFile) -> Result<(), BCDBError> {
@@ -447,9 +472,7 @@ mod test {
         }
         db.batch().unwrap();
 
-        let (step, buckets, log_mod, sip0, sip1) = db.get_parameters();
-        let mut memtable = MemTable::new(step as usize, buckets as usize, log_mod, sip0, sip1);
-        memtable.load(&mut db).unwrap();
+        let mut memtable = MemTable::load(&db.table, &db.link).unwrap();
 
         for (k, (o, data)) in &check {
             assert_eq!(memtable.get(&k[..], &db.data).next().unwrap().unwrap(), (*o, vec!(k.to_vec()), data.clone()));

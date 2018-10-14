@@ -34,9 +34,8 @@ pub trait BCDBFactory {
 
 /// The blockchain db
 pub struct BCDB {
-    table: TableFile,
-    link: LinkFile,
-    // TODO: pub temporary
+    pub(crate) table: TableFile,
+    pub(crate) link: LinkFile,
     pub(crate) data: DataFile,
     log: Arc<Mutex<LogFile>>
 }

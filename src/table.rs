@@ -357,7 +357,7 @@ impl TableFile {
         self.async_file.sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
+    pub fn read_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
         if let Some(page) = self.async_file.read_page(offset)? {
             let key_page = TablePage::from(page);
             if key_page.offset.as_u64() != offset.as_u64() {
