@@ -23,6 +23,8 @@ use bcdb::BCDB;
 use offset::Offset;
 use datafile::{DataFile, Content};
 use table::TableFile;
+use linkfile::LinkFile;
+use page::{PAGE_SIZE, TablePage};
 
 use siphasher::sip::SipHasher;
 use rand::{thread_rng, RngCore};
@@ -33,18 +35,25 @@ use std::fmt;
 
 const BUCKET_FILL_TARGET: u32 = 128;
 
+const FIRST_PAGE_HEAD:usize = 28;
+const INIT_BUCKETS: usize = 512;
+const INIT_LOGMOD :usize = 8;
+const BUCKETS_FIRST_PAGE:usize = 677;
+const BUCKETS_PER_PAGE:usize = 681;
+const BUCKET_SIZE: usize = 6;
+
 pub struct MemTable {
     step: usize,
     log_mod: u32,
     sip0: u64,
     sip1: u64,
-    buckets: Vec<Option<Bucket>>,
+    buckets: Vec<Bucket>,
     dirty: Dirty
 }
 
 impl MemTable {
     pub fn new (step: usize, buckets: usize, log_mod: u32, sip0: u64, sip1: u64) -> MemTable {
-        MemTable {log_mod, step, sip0, sip1, buckets: vec!(None; buckets), dirty: Dirty::new(buckets)}
+        MemTable {log_mod, step, sip0, sip1, buckets: vec!(Bucket::default(); buckets), dirty: Dirty::new(buckets)}
     }
 
     pub fn load (&mut self, bcdb: &mut BCDB) -> Result<(), BCDBError>{
@@ -56,20 +65,62 @@ impl MemTable {
         }
         for (self_offset, links, _) in bcdb.link_iterator() {
             if let Some(bucket_index) = offset_to_bucket.get(&self_offset) {
-                let bucket = self.buckets.get_mut(*bucket_index).unwrap();
-                if bucket.is_none() {
-                    *bucket = Some(Bucket::default());
-                }
-                if let Some(ref mut b) = bucket {
-                    // note that order is reverse of the link database
-                    let mut hashes = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.0); a});
-                    let mut offsets = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.1.as_u64()); a});
-                    b.hashes.extend(hashes.iter().rev());
-                    b.offsets.extend(offsets.iter().rev());
-                }
+                let mut bucket = self.buckets.get_mut(*bucket_index).unwrap();
+                bucket.link = self_offset;
+                // note that order is reverse of the link database
+                let mut hashes = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.0); a});
+                let mut offsets = links.iter().fold(Vec::new(), |mut a, e| { a.push (e.1.as_u64()); a});
+                bucket.hashes.extend(hashes.iter().rev());
+                bucket.offsets.extend(offsets.iter().rev());
             }
         }
         Ok(())
+    }
+
+    pub fn flush (&mut self, table_file: &mut TableFile, link_file: &mut LinkFile) -> Result<(), BCDBError> {
+        if self.dirty.is_dirty() {
+            // first page
+            let mut page = TablePage::new(Offset::from(0));
+            page.write_offset(0, Offset::from(self.buckets.len() as u64))?;
+            page.write_offset(6, Offset::from(self.step as u64))?;
+            page.write_u64(12, self.sip0)?;
+            page.write_u64(20, self.sip1)?;
+            for b in 0 .. BUCKETS_FIRST_PAGE {
+                Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b)?;
+            }
+            table_file.write_page(page)?;
+
+            // other pages
+            for (pn_1 /* page number - 1 */, dirty) in self.dirty.page_flags().skip(1).enumerate() {
+                if dirty {
+                    page = TablePage::new(Offset::from((pn_1+1) as u64 * PAGE_SIZE as u64));
+                    for (n, b) in (BUCKETS_PER_PAGE*pn_1 + BUCKETS_FIRST_PAGE .. (pn_1+1)*BUCKETS_PER_PAGE + BUCKETS_FIRST_PAGE).enumerate() {
+                        Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n)?;
+                    }
+                    table_file.write_page(page)?;
+                }
+            }
+
+            link_file.flush()?;
+            table_file.flush()?;
+        }
+        Ok(())
+    }
+
+    fn write_offset_to_page(bucket: &mut Bucket, link_file: &mut LinkFile, page: &mut TablePage, i: usize) -> Result<(), BCDBError> {
+        let mut link = Offset::invalid();
+        let links = bucket.hashes.iter().zip(bucket.offsets.iter())
+            .fold(Vec::new(), |mut a, e|
+                {
+                    a.push((*e.0, Offset::from(*e.1)));
+                    a
+                });
+        for chunk in links.chunks(255) {
+            let mut links = chunk.to_vec();
+            links.reverse();
+            link = link_file.append_link(links, link)?;
+        }
+        page.write_offset(i * BUCKET_SIZE + FIRST_PAGE_HEAD, link)
     }
 
     pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset) -> Result<(), BCDBError>{
@@ -90,7 +141,7 @@ impl MemTable {
                     self.step = 0;
                 }
 
-                self.buckets.push(None);
+                self.buckets.push(Bucket::default());
                 self.dirty.append();
             }
         }
@@ -98,13 +149,9 @@ impl MemTable {
     }
 
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, offset: Offset) -> Result<(), BCDBError> {
-        if let Some(some) = self.buckets.get_mut(bucket as usize) {
-            if let Some(bucket) = some {
-                bucket.hashes.push(hash);
-                bucket.offsets.push(offset.as_u64());
-            } else {
-                *some = Some(Bucket{hashes: vec!(hash), offsets: vec!(offset.as_u64())});
-            }
+        if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
+            bucket.hashes.push(hash);
+            bucket.offsets.push(offset.as_u64());
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
@@ -116,7 +163,7 @@ impl MemTable {
         let mut rewrite = false;
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
-        if let Some(Some(b)) = self.buckets.get(bucket as usize) {
+        if let Some(b) = self.buckets.get(bucket as usize) {
             for (hash, offset) in b.hashes.iter().zip(b.offsets.iter()) {
                 let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
@@ -134,15 +181,12 @@ impl MemTable {
                     self.store_to_bucket(bucket, hash, offset)?;
                 }
             }
-            self.buckets[bucket] = Some(new_bucket_store);
+            self.buckets[bucket] = new_bucket_store;
             self.dirty.set(bucket);
         }
         Ok(())
     }
 
-    pub fn flush (table_file: &mut TableFile) {
-        unimplemented!()
-    }
 
     /// retrieve data offsets by key
     pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> impl MayFailIterator<(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
@@ -150,7 +194,7 @@ impl MemTable {
         let bucket_number = self.bucket_for_hash(hash);
         let mut offsets = Vec::new();
 
-        if let Some(Some(bucket)) = self.buckets.get(bucket_number) {
+        if let Some(bucket) = self.buckets.get(bucket_number) {
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
                     offsets.push(Offset::from(*bucket.offsets.get(n).unwrap()));
@@ -164,7 +208,7 @@ impl MemTable {
     pub fn get_unique(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
-        if let Some(Some(bucket)) = self.buckets.get(bucket_number) {
+        if let Some(bucket) = self.buckets.get(bucket_number) {
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
                     let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
@@ -227,6 +271,14 @@ impl Dirty {
         }
     }
 
+    pub fn is_dirty (&self) -> bool {
+        self.bits.iter().any(|n| *n != 0)
+    }
+
+    pub fn page_flags<'m>(&'m self) -> impl Iterator<Item=bool> + 'm {
+        PageIterator::new(&self)
+    }
+
     pub fn append(&mut self) {
         self.used += 1;
         if self.used >= (self.bits.len() << 6) {
@@ -236,6 +288,44 @@ impl Dirty {
             let next = self.used;
             self.set(next);
         }
+    }
+}
+
+struct PageIterator<'b> {
+    bits: &'b Dirty,
+    page: usize
+}
+
+impl<'b> PageIterator<'b> {
+    pub fn new(bits: &'b Dirty) -> PageIterator<'b> {
+        PageIterator {bits, page: 0}
+    }
+}
+
+impl<'b> Iterator for PageIterator<'b> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if self.page == 0 {
+            for i in 0 .. BUCKETS_FIRST_PAGE {
+                if self.bits.get(i) {
+                    return Some(true);
+                }
+            }
+            return Some(false);
+        }
+        else {
+            let start = BUCKETS_FIRST_PAGE + (self.page - 1) * BUCKETS_PER_PAGE;
+            if start < self.bits.used {
+                for i in start .. start + BUCKETS_PER_PAGE {
+                    if self.bits.get(i) {
+                        return Some(true);
+                    }
+                }
+                return Some(false);
+            }
+        }
+        return None;
     }
 }
 
@@ -303,6 +393,7 @@ impl<'data> Iterator for GetIteratorInner<'data> {
 
 #[derive(Clone, Default)]
 pub struct Bucket {
+    link: Offset,
     hashes: Vec<u32>,
     offsets: Vec<u64>
 }

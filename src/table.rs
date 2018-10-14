@@ -438,7 +438,7 @@ impl TableFile {
         Ok(None)
     }
 
-    fn write_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
+    pub fn write_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
         self.async_file.write_page(page.offset, page.page)
     }
 }
