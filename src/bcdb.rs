@@ -22,10 +22,8 @@ use table::TableFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
 use memtable::{MemTable, GetIterator};
-use page::{Page, TablePage, PageFile};
+use page::{TablePage, PageFile};
 use error::{BCDBError};
-
-use std::sync::{Mutex,Arc};
 
 /// a trait to create a new db
 pub trait BCDBFactory {
@@ -39,7 +37,7 @@ pub struct BCDB {
     pub(crate) table: TableFile,
     pub(crate) link: LinkFile,
     pub(crate) data: DataFile,
-    log: Arc<Mutex<LogFile>>
+    log: LogFile
 }
 
 /// public API to the blockchain db
@@ -72,8 +70,7 @@ pub trait BCDBAPI {
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
-        let log = table.log_file();
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
         let mut db = BCDB { mem: MemTable::load(&table, &link)?, table, link, data, log };
         db.recover()?;
         db.batch()?;
@@ -81,10 +78,9 @@ impl BCDB {
     }
 
     fn recover(&mut self) -> Result<(), BCDBError> {
-        let log = self.log.lock().unwrap();
         let mut first = true;
         debug!("recover");
-        for page in log.page_iter() {
+        for page in self.log.page_iter() {
             if !first {
                 let table_page = TablePage::from(page);
                 self.table.patch_page(table_page)?;
@@ -137,7 +133,7 @@ impl BCDBAPI for BCDB {
     fn init (&mut self) -> Result<(), BCDBError> {
         self.data.init()?;
         self.link.init()?;
-        self.log.lock().unwrap().init()?;
+        self.log.init(0, 0, 0)?;
         Ok(())
     }
 
@@ -150,7 +146,7 @@ impl BCDBAPI for BCDB {
         let data_len = self.data.len()?;
         self.data.clear_cache(data_len);
         debug!("data length {}", data_len);
-        self.mem.flush(&mut self.table, &mut self.link)?;
+        self.mem.flush(&mut self.log, &mut self.table, &mut self.link)?;
         self.link.sync()?;
         let link_len = self.link.len()?;
         self.link.clear_cache(link_len);
@@ -158,20 +154,8 @@ impl BCDBAPI for BCDB {
         self.table.sync()?;
         let table_len = self.table.len()?;
         debug!("table length {}", table_len);
-
-        let mut log = self.log.lock().unwrap();
-        log.truncate(0)?;
-
-        let mut first = Page::new();
-        first.write(0, &[0xBC, 0x00]).unwrap();
-        first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
-        first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
-        first.write(14, Offset::from(link_len).to_vec().as_slice()).unwrap();
-
-        log.tbl_len = table_len;
-        log.append_page(first)?;
-        log.flush()?;
-        log.sync()?;
+        self.log.init(data_len, table_len, link_len)?;
+        self.log.sync()?;
         debug!("batch start");
 
         Ok(())
@@ -239,7 +223,7 @@ mod test {
     use bcdb::test::rand::RngCore;
 
     #[test]
-    fn test () {
+    fn test_two_batches () {
         let mut db = InMemory::new_db("first").unwrap();
         db.init().unwrap();
 
@@ -248,6 +232,20 @@ mod test {
         let mut check = HashMap::new();
         let mut key = [0x0u8;32];
         let mut data = [0x0u8;40];
+
+        for _ in 0 .. 10000 {
+            rng.fill_bytes(&mut key);
+            rng.fill_bytes(&mut data);
+            let mut k = Vec::new();
+            k.push(key.to_vec());
+            let offset = db.put(k.clone(), &data).unwrap();
+            check.insert(key, (offset, data));
+        }
+        db.batch().unwrap();
+
+        for (k, (o, v)) in check.iter() {
+            assert_eq!(db.get_unique(k).unwrap(), Some((*o, vec!(k.to_vec()), v.to_vec())));
+        }
 
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);

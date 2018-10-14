@@ -23,6 +23,7 @@ use offset::Offset;
 use datafile::{DataFile, Content};
 use table::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
+use logfile::LogFile;
 use page::{PAGE_SIZE, TablePage, PageFile};
 
 use siphasher::sip::SipHasher;
@@ -58,7 +59,7 @@ impl MemTable {
     }
 
     pub fn load (table_file: &TableFile, link_file: &LinkFile) -> Result<MemTable, BCDBError>{
-        if let Some(first) = table_file.read_key_page(Offset::from(0))? {
+        if let Some(first) = table_file.read_table_page(Offset::from(0))? {
             let n_buckets = first.read_offset(0)?.as_u64() as u32;
             let step = first.read_offset(6)?.as_u64() as usize;
             let log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
@@ -110,9 +111,22 @@ impl MemTable {
         }
     }
 
-    pub fn flush (&mut self, table_file: &mut TableFile, link_file: &mut LinkFile) -> Result<(), BCDBError> {
+    pub fn flush (&mut self, log_file: &mut LogFile, table_file: &mut TableFile, link_file: &mut LinkFile) -> Result<(), BCDBError> {
         if self.dirty.is_dirty() {
-            let mut pages = Vec::new();
+            if table_file.last_len > 0 {
+                let mut to_log = Vec::new();
+                to_log.push(Offset::from(0));
+                for (page_number, dirty) in self.dirty.page_flags().skip(1).enumerate() {
+                    let offset = Offset::from((page_number + 1) as u64 * PAGE_SIZE as u64);
+                    if offset.as_u64() >= table_file.last_len {
+                        break;
+                    }
+                    if dirty {
+                        to_log.push(offset);
+                    }
+                }
+                log_file.log_pages(to_log, &table_file)?;
+            }
             // first page
             let mut page = TablePage::new(Offset::from(0));
             page.write_offset(0, Offset::from(self.buckets.len() as u64))?;
@@ -122,7 +136,7 @@ impl MemTable {
             for b in 0 .. min(self.buckets.len(), BUCKETS_FIRST_PAGE) {
                 Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b, FIRST_PAGE_HEAD)?;
             }
-            pages.push(page);
+            table_file.write_table_page(page)?;
 
             // other pages
             for (pn_1 /* page number - 1 */, dirty) in self.dirty.page_flags().skip(1).enumerate() {
@@ -133,14 +147,14 @@ impl MemTable {
                     for (n, b) in (start .. end).enumerate() {
                         Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n, 0)?;
                     }
-                    pages.push(page);
+                    table_file.write_table_page(page)?;
                 }
             }
+            self.dirty.clear();
 
             link_file.flush()?;
-            table_file.write_key_pages(pages)?;
             table_file.flush()?;
-            self.dirty.clear();
+            table_file.last_len = table_file.len()?;
         }
         Ok(())
     }

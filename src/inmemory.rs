@@ -33,7 +33,7 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io;
 use std::cmp::min;
-use std::sync::{Mutex,Arc};
+use std::sync::Mutex;
 
 /// in memory representation of a file
 pub struct InMemory {
@@ -55,12 +55,12 @@ impl InMemory {
 
 impl BCDBFactory for InMemory {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
-        let log = Arc::new(Mutex::new(LogFile::new(Box::new(InMemory::new(true)))));
-        let table = TableFile::new(Box::new(InMemory::new(false)), log)?;
+        let log = LogFile::new(Box::new(InMemory::new(true)));
+        let table = TableFile::new(Box::new(InMemory::new(false)))?;
         let data = DataFile::new(Box::new(InMemory::new(true)))?;
         let link = LinkFile::new(Box::new(InMemory::new(true)))?;
 
-        BCDB::new(table, data, link)
+        BCDB::new(log, table, data, link)
     }
 }
 

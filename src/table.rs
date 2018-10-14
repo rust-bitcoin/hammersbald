@@ -18,13 +18,9 @@
 //! Specific implementation details to hash table file
 //!
 
-use logfile::LogFile;
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use offset::Offset;
-
-use std::sync::{Mutex, Arc};
-use std::cmp::max;
 
 pub const FIRST_PAGE_HEAD:usize = 28;
 pub const BUCKETS_FIRST_PAGE:usize = 677;
@@ -34,12 +30,13 @@ pub const BUCKET_SIZE: usize = 6;
 /// The key file
 pub struct TableFile {
     file: Box<PageFile>,
-    log: Arc<Mutex<LogFile>>
+    pub last_len: u64
 }
 
 impl TableFile {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TableFile, BCDBError> {
-        Ok(TableFile {file, log})
+    pub fn new (file: Box<PageFile>) -> Result<TableFile, BCDBError> {
+        let last_len = file.len()?;
+        Ok(TableFile {file, last_len})
     }
 
     fn table_offset (bucket: u32) -> Offset {
@@ -61,11 +58,7 @@ impl TableFile {
         self.file.write_page(page.offset, page.page)
     }
 
-    pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
-        self.log.clone()
-    }
-
-    pub fn read_key_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
+    pub fn read_table_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
         if let Some(page) = self.read_page(offset)? {
             let key_page = TablePage::from(page);
             if key_page.offset.as_u64() != offset.as_u64() {
@@ -76,27 +69,8 @@ impl TableFile {
         Ok(None)
     }
 
-    pub fn write_key_pages(&mut self, pages: Vec<TablePage>) -> Result<u64, BCDBError> {
-        {
-            let mut log = self.log.lock()?;
-            for page in &pages {
-                let offset = page.offset;
-                if offset.as_u64() < log.tbl_len {
-                    if let Some(page) = self.read_page(offset)? {
-                        log.append_page(page)?;
-                    } else {
-                        return Err(BCDBError::Corrupted(format!("can not find pre-image to log {}", offset)));
-                    }
-                }
-            }
-            log.flush()?;
-            log.sync()?;
-        }
-        let mut len = self.len()?;
-        for page in pages {
-            len = max(len, self.write_page(page.offset, page.page)?);
-        }
-        Ok(len)
+    pub fn write_table_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
+        self.write_page(page.offset, page.page)
     }
 }
 

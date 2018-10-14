@@ -21,21 +21,30 @@
 //!
 
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
+use table::TableFile;
 use error::BCDBError;
 use offset::Offset;
 
 /// The buffer pool
 pub struct LogFile {
-    rw: Box<PageFile>,
-    pub tbl_len: u64
+    rw: Box<PageFile>
 }
 
 impl LogFile {
     pub fn new(rw: Box<PageFile>) -> LogFile {
-        LogFile { rw, tbl_len: 0 }
+        LogFile { rw }
     }
 
-    pub fn init (&mut self) -> Result<(), BCDBError> {
+    pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), BCDBError> {
+        self.truncate(0)?;
+        let mut first = Page::new();
+        first.write(0, &[0xBC, 0x00]).unwrap();
+        first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
+        first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
+        first.write(14, Offset::from(link_len).to_vec().as_slice()).unwrap();
+
+        self.append_page(first)?;
+        self.flush()?;
         Ok(())
     }
 
@@ -43,8 +52,20 @@ impl LogFile {
         LogPageIterator::new(self, 0)
     }
 
-    pub fn append_key_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
+    pub fn append_table_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
         self.append_page(page.page)
+    }
+
+    pub fn log_pages (&mut self, offsets: Vec<Offset>, table_file: &TableFile) -> Result<(), BCDBError> {
+        for offset in offsets {
+            if let Some(page) = table_file.read_page(offset)? {
+                self.append_page(page)?;
+            } else {
+                return Err(BCDBError::Corrupted(format!("can not find pre-image to log {}", offset)));
+            }
+        }
+        self.flush()?;
+        self.sync()
     }
 }
 
