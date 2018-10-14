@@ -55,9 +55,6 @@ pub trait BCDBAPI {
     /// storing with the same key makes previous data unaccessible
     fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError>;
 
-    /// leave only most recent data association with the key
-    fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError>;
-
     /// retrieve data offsets by key
     fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError>;
 
@@ -211,10 +208,6 @@ impl BCDBAPI for BCDB {
         Ok(data_offset)
     }
 
-    fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
-        self.table.dedup(key, &mut self.link, &self.data)
-    }
-
     /// retrieve data by key
     fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
         self.table.get(key, &self.data, &self.link)
@@ -335,13 +328,6 @@ mod test {
             assert_eq!(os[0].2.as_slice(), &d[..])
         }
 
-        // check dedup leaves most recent in place
-        for (k, v) in &check {
-            db.dedup(k).unwrap();
-            let mut os = db.get(k).unwrap();
-            assert_eq!(os.len(), 1);
-            assert_eq!(os[0].2.as_slice(), &v[..]);
-        }
         db.shutdown();
     }
 }

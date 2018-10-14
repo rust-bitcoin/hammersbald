@@ -141,10 +141,6 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.put(key, data)
     }
 
-    fn dedup(&mut self, key: &[u8]) -> Result<(), BCDBError> {
-        self.bcdb.dedup(key)
-    }
-
     fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
         self.bcdb.get(key)
     }
