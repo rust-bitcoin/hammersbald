@@ -508,7 +508,7 @@ impl DataEntry {
             result.extend(first.to_vec());
             let mut prev = first;
             for offset in offsets.iter().skip(1) {
-                let diff = prev.as_u64() - offset.as_u64 ();
+                let diff = offset.as_u64 () - prev.as_u64();
                 Self::write_diff(diff, &mut result);
                 prev = offset;
             }
@@ -578,7 +578,7 @@ impl<'file> DataIterator<'file> {
         let mut prev = init_offset;
         for _ in 0 .. n-1 {
             let d = Self::read_diff(cursor);
-            let next = Offset::from(prev.as_u64() - d);
+            let next = Offset::from(prev.as_u64() + d);
             result.push (next);
             prev = next;
         }

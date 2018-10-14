@@ -19,7 +19,6 @@
 //!
 //!
 use error::{BCDBError, MayFailIterator};
-use bcdb::BCDB;
 use offset::Offset;
 use datafile::{DataFile, Content};
 use table::TableFile;
@@ -32,6 +31,7 @@ use rand::{thread_rng, RngCore};
 use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
+use std::cmp::min;
 
 const BUCKET_FILL_TARGET: u32 = 128;
 
@@ -123,7 +123,7 @@ impl MemTable {
             page.write_offset(6, Offset::from(self.step as u64))?;
             page.write_u64(12, self.sip0)?;
             page.write_u64(20, self.sip1)?;
-            for b in 0 .. BUCKETS_FIRST_PAGE {
+            for b in 0 .. min(self.buckets.len(), BUCKETS_FIRST_PAGE) {
                 Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b)?;
             }
             table_file.write_page(page)?;
@@ -132,7 +132,9 @@ impl MemTable {
             for (pn_1 /* page number - 1 */, dirty) in self.dirty.page_flags().skip(1).enumerate() {
                 if dirty {
                     page = TablePage::new(Offset::from((pn_1+1) as u64 * PAGE_SIZE as u64));
-                    for (n, b) in (BUCKETS_PER_PAGE*pn_1 + BUCKETS_FIRST_PAGE .. (pn_1+1)*BUCKETS_PER_PAGE + BUCKETS_FIRST_PAGE).enumerate() {
+                    let start = BUCKETS_PER_PAGE*pn_1 + BUCKETS_FIRST_PAGE;
+                    let end = min(self.buckets.len(), (pn_1+1)*BUCKETS_PER_PAGE + BUCKETS_FIRST_PAGE);
+                    for (n, b) in (start .. end).enumerate() {
                         Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n)?;
                     }
                     table_file.write_page(page)?;
@@ -141,6 +143,7 @@ impl MemTable {
 
             link_file.flush()?;
             table_file.flush()?;
+            self.dirty.clear();
         }
         Ok(())
     }
@@ -225,7 +228,7 @@ impl MemTable {
 
 
     /// retrieve data offsets by key
-    pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> impl MayFailIterator<(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
+    pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> GetIterator<'a> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         let mut offsets = Vec::new();
@@ -343,6 +346,7 @@ impl<'b> Iterator for PageIterator<'b> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if self.page == 0 {
+            self.page += 1;
             for i in 0 .. BUCKETS_FIRST_PAGE {
                 if self.bits.get(i) {
                     return Some(true);
@@ -352,6 +356,7 @@ impl<'b> Iterator for PageIterator<'b> {
         }
         else {
             let start = BUCKETS_FIRST_PAGE + (self.page - 1) * BUCKETS_PER_PAGE;
+            self.page += 1;
             if start < self.bits.used {
                 for i in start .. start + BUCKETS_PER_PAGE {
                     if self.bits.get(i) {
@@ -365,11 +370,13 @@ impl<'b> Iterator for PageIterator<'b> {
     }
 }
 
-struct GetIterator<'data> {
+/// An iterator for non-unique result, that may also fail
+pub struct GetIterator<'data> {
     inner: GetIteratorInner<'data>
 }
 
-struct GetIteratorInner<'data> {
+/// An iterator for non-unique result that on fail stores error and returns None
+pub struct GetIteratorInner<'data> {
     key: Vec<u8>,
     pos: usize,
     offsets: Vec<Offset>,
@@ -378,6 +385,7 @@ struct GetIteratorInner<'data> {
 }
 
 impl<'data> GetIterator<'data> {
+    /// create a new iterator
     pub fn new (key: Vec<u8>, offsets: Vec<Offset>, data_file: &'data DataFile) -> GetIterator<'data> {
         GetIterator{inner: GetIteratorInner{key, offsets, data_file, pos: 0, error: None}}
     }
@@ -473,7 +481,7 @@ mod test {
         let mut data = [0x0u8;40];
         let mut check = HashMap::new();
 
-        for _ in 0 .. 100000{
+        for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
             let mut k = Vec::new();
@@ -483,24 +491,8 @@ mod test {
         }
         db.batch().unwrap();
 
-        let mut memtable = MemTable::load(&db.table, &db.link).unwrap();
-
-        for (k, (o, data)) in &check {
-            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap().unwrap(), (*o, vec!(k.to_vec()), data.clone()));
-        }
-
-        check.clear();
-        for _ in 0 .. 100000 {
-            rng.fill_bytes(&mut key);
-            rng.fill_bytes(&mut data);
-            let mut k = Vec::new();
-            k.push(key.to_vec());
-            let o = db.data.append_data(k.clone(), &data).unwrap();
-            memtable.put(k.clone(), o).unwrap();
-            check.insert(key, (o, data.to_vec()));
-        }
         for (k, (o, data)) in check {
-            assert_eq!(memtable.get_unique(&k[..], &db.data).unwrap().unwrap(), (o, vec!(k.to_vec()), data));
+            assert_eq!(db.get_unique(&k[..]).unwrap().unwrap(), (o, vec!(k.to_vec()), data));
         }
     }
 }

@@ -21,8 +21,9 @@ use logfile::LogFile;
 use table::TableFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
+use memtable::{MemTable, GetIterator};
 use page::{Page, TablePage, PageFile};
-use error::BCDBError;
+use error::{BCDBError};
 
 use std::sync::{Mutex,Arc};
 
@@ -34,6 +35,7 @@ pub trait BCDBFactory {
 
 /// The blockchain db
 pub struct BCDB {
+    mem: MemTable,
     pub(crate) table: TableFile,
     pub(crate) link: LinkFile,
     pub(crate) data: DataFile,
@@ -55,7 +57,7 @@ pub trait BCDBAPI {
     fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError>;
 
     /// retrieve data offsets by key
-    fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError>;
+    fn get<'a>(&'a self, key: &[u8]) -> GetIterator<'a>;
 
     /// retrieve single data by key
     fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError>;
@@ -72,7 +74,7 @@ impl BCDB {
     /// create a new db with key and data file
     pub fn new(table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
         let log = table.log_file();
-        let mut db = BCDB { table, link: link, data, log };
+        let mut db = BCDB { mem: MemTable::load(&table, &link)?, table, link, data, log };
         db.recover()?;
         db.batch()?;
         Ok(db)
@@ -154,12 +156,11 @@ impl BCDBAPI for BCDB {
         let data_len = self.data.len()?;
         self.data.clear_cache(data_len);
         debug!("data length {}", data_len);
-        self.link.flush()?;
+        self.mem.flush(&mut self.table, &mut self.link)?;
         self.link.sync()?;
         let link_len = self.link.len()?;
         self.link.clear_cache(link_len);
         debug!("link length {}", link_len);
-        self.table.flush()?;
         self.table.sync()?;
         let table_len = self.table.len()?;
         self.table.clear_cache(table_len);
@@ -203,18 +204,18 @@ impl BCDBAPI for BCDB {
         }
 
         let data_offset = self.data.append_data(keys.clone(), data)?;
-        self.table.put(keys, data_offset, &mut self.link)?;
+        self.mem.put(keys, data_offset)?;
         Ok(data_offset)
     }
 
     /// retrieve data by key
-    fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
-        self.table.get(key, &self.data, &self.link)
+    fn get<'a>(&'a self, key: &[u8]) -> GetIterator<'a> {
+        self.mem.get(key, &self.data)
     }
 
     /// retrieve the single data associated with this key
     fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
-        self.table.get_unique(key,  &self.link, &self.data)
+        self.mem.get_unique(key,  &self.data)
     }
 
     /// append some content without key
@@ -239,6 +240,7 @@ mod test {
     extern crate hex;
 
     use inmemory::InMemory;
+    use error::MayFailIterator;
 
     use super::*;
     use self::rand::thread_rng;
@@ -294,7 +296,7 @@ mod test {
         db.batch().unwrap();
 
         for v2 in check.keys() {
-            assert_eq!(db.get(&v2.0).unwrap(), db.get(&v2.1).unwrap());
+            assert_eq!(db.get(&v2.0).next().unwrap().unwrap(), db.get(&v2.1).next().unwrap().unwrap());
         }
         db.shutdown();
     }
@@ -322,9 +324,11 @@ mod test {
         db.batch().unwrap();
         // check logical overwrite
         for (k, d) in &check {
-            let mut os = db.get(k).unwrap();
-            assert!(os[0].0 > os[1].0);
-            assert_eq!(os[0].2.as_slice(), &d[..])
+            let mut result = db.get(k);
+            let os0 = result.next().unwrap().unwrap();
+            let os1 = result.next().unwrap().unwrap();
+            assert!(os0.0 > os1.0);
+            assert_eq!(os0.2.as_slice(), &d[..])
         }
 
         db.shutdown();

@@ -33,7 +33,6 @@ use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::hash::Hasher;
-use std::collections::HashMap;
 use std::time::Duration;
 
 const FIRST_PAGE_HEAD:u64 = 28;

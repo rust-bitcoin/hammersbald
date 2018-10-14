@@ -20,6 +20,7 @@
 use bcdb::{BCDB, BCDBAPI};
 use offset::{Offset, OffsetReader};
 use error::BCDBError;
+use memtable::GetIterator;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
 use bitcoin::blockdata::transaction::Transaction;
@@ -141,7 +142,7 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.put(key, data)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Vec<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+    fn get<'a>(&'a self, key: &[u8]) -> GetIterator<'a> {
         self.bcdb.get(key)
     }
 
