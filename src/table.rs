@@ -36,28 +36,38 @@ pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
-    async_file: TablePageFile,
+    inner: Arc<TableFileInner>,
+}
+
+
+struct TableFileInner {
+    file: Mutex<Box<PageFile>>,
+    log: Arc<Mutex<LogFile>>,
+    cache: Mutex<Cache>,
+    flushed: Condvar,
+    work: Condvar,
+    run: AtomicBool,
+    flushing: AtomicBool
+}
+
+impl TableFileInner {
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TableFileInner, BCDBError> {
+        let len = file.len()?;
+        Ok(TableFileInner { file: Mutex::new(file), log,
+            cache: Mutex::new(Cache::new(len)), flushed: Condvar::new(),
+            work: Condvar::new(),
+            run: AtomicBool::new(true),
+            flushing: AtomicBool::new(false)
+        })
+    }
 }
 
 impl TableFile {
-    pub fn new(rw: Box<PageFile>, log_file: Arc<Mutex<LogFile>>) -> Result<TableFile, BCDBError> {
-        Ok(TableFile {async_file: TablePageFile::new(rw, log_file)?})
-    }
-
-    pub fn patch_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.async_file.patch_page(page)
-    }
-
-    pub fn clear_cache(&mut self, len: u64) {
-        self.async_file.clear_cache(len);
-    }
-
-    pub fn log_file (&self) -> Arc<Mutex<LogFile>> {
-        self.async_file.log_file()
-    }
-
-    pub fn shutdown (&mut self) {
-        self.async_file.shutdown()
+    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TableFile, BCDBError> {
+        let inner = Arc::new(TableFileInner::new(file, log)?);
+        let inner2 = inner.clone();
+        thread::spawn(move || { TableFile::background(inner2) });
+        Ok(TableFile { inner })
     }
 
     fn table_offset (bucket: u32) -> Offset {
@@ -74,94 +84,8 @@ impl TableFile {
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
         BucketIterator{file: self, n:0}
     }
-}
 
-impl TableFile {
-    pub fn flush(&mut self) -> Result<(), BCDBError> {
-        self.async_file.flush()
-    }
-
-    pub fn len(&self) -> Result<u64, BCDBError> {
-        self.async_file.len()
-    }
-
-    pub fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
-        self.async_file.truncate(len)
-    }
-
-    pub fn sync(&self) -> Result<(), BCDBError> {
-        self.async_file.sync()
-    }
-
-    pub fn read_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
-        if let Some(page) = self.async_file.read_page(offset)? {
-            let key_page = TablePage::from(page);
-            if key_page.offset.as_u64() != offset.as_u64() {
-                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset)));
-            }
-            return Ok(Some(key_page));
-        }
-        Ok(None)
-    }
-
-    pub fn write_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.async_file.write_page(page.offset, page.page)
-    }
-}
-
-struct BucketIterator<'a> {
-    file: &'a TableFile,
-    n: u32
-}
-
-impl<'a> Iterator for BucketIterator<'a> {
-    type Item = Offset;
-
-    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        let table_offset = TableFile::table_offset(self.n);
-        if let Ok(Some(page)) = self.file.read_page(table_offset.this_page()) {
-            self.n += 1;
-            return Some(page.read_offset(table_offset.in_page_pos()).unwrap())
-        }
-        None
-    }
-}
-
-struct TablePageFile {
-    inner: Arc<TablePageFileInner>
-}
-
-struct TablePageFileInner {
-    file: Mutex<Box<PageFile>>,
-    log: Arc<Mutex<LogFile>>,
-    cache: Mutex<Cache>,
-    flushed: Condvar,
-    work: Condvar,
-    run: AtomicBool,
-    flushing: AtomicBool
-}
-
-impl TablePageFileInner {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TablePageFileInner, BCDBError> {
-        let len = file.len()?;
-        Ok(TablePageFileInner { file: Mutex::new(file), log,
-            cache: Mutex::new(Cache::new(len)), flushed: Condvar::new(),
-            work: Condvar::new(),
-            run: AtomicBool::new(true),
-            flushing: AtomicBool::new(false)
-        })
-    }
-}
-
-impl TablePageFile {
-    pub fn new (file: Box<PageFile>, log: Arc<Mutex<LogFile>>) -> Result<TablePageFile, BCDBError> {
-        let inner = Arc::new(TablePageFileInner::new(file, log)?);
-        let inner2 = inner.clone();
-        thread::spawn(move || { TablePageFile::background(inner2) });
-        Ok(TablePageFile { inner })
-    }
-
-    fn background (inner: Arc<TablePageFileInner>) {
+    fn background (inner: Arc<TableFileInner>) {
         while inner.run.load(Ordering::Relaxed) {
             let mut writes = Vec::new();
             {
@@ -191,9 +115,9 @@ impl TablePageFile {
                             log.append_page(page).expect("can not write log file");
                             logged = true;
                         }
-                        else {
-                            panic!("can not find pre-image to log {}", offset);
-                        }
+                            else {
+                                panic!("can not find pre-image to log {}", offset);
+                            }
                     }
                 }
                 if logged {
@@ -230,9 +154,24 @@ impl TablePageFile {
     pub fn clear_cache(&mut self, len: u64) {
         self.inner.cache.lock().unwrap().clear(len);
     }
+
+    pub fn read_key_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
+        if let Some(page) = self.read_page(offset)? {
+            let key_page = TablePage::from(page);
+            if key_page.offset.as_u64() != offset.as_u64() {
+                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset)));
+            }
+            return Ok(Some(key_page));
+        }
+        Ok(None)
+    }
+
+    pub fn write_key_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
+        self.write_page(page.offset, page.page)
+    }
 }
 
-impl PageFile for TablePageFile {
+impl PageFile for TableFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
@@ -284,3 +223,23 @@ impl PageFile for TablePageFile {
 
     }
 }
+
+
+struct BucketIterator<'a> {
+    file: &'a TableFile,
+    n: u32
+}
+
+impl<'a> Iterator for BucketIterator<'a> {
+    type Item = Offset;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        let table_offset = TableFile::table_offset(self.n);
+        if let Ok(Some(page)) = self.file.read_page(table_offset.this_page()) {
+            self.n += 1;
+            return Some(page.read_offset(table_offset.in_page_pos()).unwrap())
+        }
+        None
+    }
+}
+
