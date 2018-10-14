@@ -18,7 +18,7 @@
 //! Specific implementation details to in-memory index of the db
 //!
 //!
-use error::BCDBError;
+use error::{BCDBError, MayFailIterator};
 use bcdb::BCDB;
 use offset::Offset;
 use datafile::{DataFile, Content};
@@ -138,7 +138,7 @@ impl MemTable {
     }
 
     /// retrieve data offsets by key
-    pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> impl Iterator<Item=(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
+    pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> impl MayFailIterator<(Offset, Vec<Vec<u8>>, Vec<u8>)> + 'a {
         let hash = self.hash(key);
         let mut bucket_number = (hash & (!0u32 >> (32 - self.log_mod))) as usize; // hash % 2^(log_mod)
         if bucket_number < self.step as usize {
@@ -164,32 +164,61 @@ impl MemTable {
 }
 
 struct GetIterator<'data> {
+    inner: GetIteratorInner<'data>
+}
+
+struct GetIteratorInner<'data> {
     key: Vec<u8>,
     pos: usize,
     offsets: Vec<Offset>,
-    data_file: &'data DataFile
+    data_file: &'data DataFile,
+    error: Option<String>
 }
 
 impl<'data> GetIterator<'data> {
     pub fn new (key: Vec<u8>, offsets: Vec<Offset>, data_file: &'data DataFile) -> GetIterator<'data> {
-        GetIterator{key, offsets, data_file, pos: 0}
+        GetIterator{inner: GetIteratorInner{key, offsets, data_file, pos: 0, error: None}}
     }
 }
 
-impl<'data> Iterator for GetIterator<'data> {
+impl<'data> MayFailIterator<(Offset, Vec<Vec<u8>>, Vec<u8>)> for GetIterator<'data> {
+    fn next(&mut self) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+        match self.inner.next() {
+            Some(n) => Ok(Some(n)),
+            None => if let Some(ref error) = self.inner.error {
+                Err(BCDBError::Corrupted(error.clone()))
+            }
+            else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+impl<'data> IntoIterator for GetIterator<'data> {
+    type Item = (Offset, Vec<Vec<u8>>, Vec<u8>);
+    type IntoIter = GetIteratorInner<'data>;
+
+    fn into_iter(self) -> <Self as IntoIterator>::IntoIter {
+        self.inner
+    }
+}
+
+impl<'data> Iterator for GetIteratorInner<'data> {
     type Item = (Offset, Vec<Vec<u8>>, Vec<u8>);
 
-    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+    fn next(&mut self) -> Option<(Offset, Vec<Vec<u8>>, Vec<u8>)> {
+        use std::error::Error;
+
         while self.pos < self.offsets.len() {
             let data_offset = self.offsets[self.pos];
             self.pos += 1;
-            if let Ok(Some(Content::Data(keys, data))) = self.data_file.get_content(data_offset) {
-                if keys.iter().any(|key| *key == self.key) {
+            match self.data_file.get_content(data_offset) {
+                Ok(Some(Content::Data(keys, data))) => if keys.iter().any(|key| *key == self.key) {
                     return Some((data_offset, keys, data));
                 }
-            }
-            else {
-                // TODO: deal with corruption
+                Ok(_) => { self.error = Some(format!("offset {} should point to data", data_offset)); return None }
+                Err(ref error) => { self.error = Some(error.description().to_string()); return None }
             }
         }
         None
@@ -240,7 +269,7 @@ mod test {
         memtable.load(&mut db).unwrap();
 
         for (k, (o, data)) in &check {
-            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap(), (*o, vec!(k.to_vec()), data.clone()));
+            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap().unwrap(), (*o, vec!(k.to_vec()), data.clone()));
         }
 
         check.clear();
@@ -254,7 +283,7 @@ mod test {
             check.insert(key, (o, data.to_vec()));
         }
         for (k, (o, data)) in check {
-            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap(), (o, vec!(k.to_vec()), data));
+            assert_eq!(memtable.get(&k[..], &db.data).next().unwrap().unwrap(), (o, vec!(k.to_vec()), data));
         }
     }
 }
