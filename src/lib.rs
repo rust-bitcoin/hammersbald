@@ -42,6 +42,7 @@ mod rolled;
 mod asyncfile;
 mod linkfile;
 mod memtable;
+pub mod content;
 pub mod bcdb;
 pub mod datafile;
 pub mod error;
