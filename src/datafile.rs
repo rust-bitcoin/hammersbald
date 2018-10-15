@@ -326,11 +326,11 @@ impl DataEntry {
         }));
 
         let offsets = links.iter().fold(Vec::new(), |mut buf, s| {
-            buf.push(s.1);
+            buf.write_u48::<BigEndian>(s.1.as_u64()).unwrap();
             buf
         });
 
-        sp.extend(Offset::compress_ascending(offsets));
+        sp.extend(offsets);
         sp.write_u48::<BigEndian>(next.as_u64()).unwrap();
         DataEntry{data_type: DataType::Link, data: sp.to_vec()}
     }
@@ -426,14 +426,13 @@ impl<'file> Iterator for DataIterator<'file> {
                     for _ in 0..m {
                         hashes.push(cursor.read_u32::<BigEndian>().unwrap());
                     }
-                    let mut offsets = Offset::decompress_ascending(&mut cursor);
-                    let next = cursor.read_offset();
-                    let mut oi = offsets.iter();
-                    let mut links = Vec::new();
-                    for h in hashes {
-                        let o = *oi.next().unwrap();
-                        links.push((h, o));
+                    let mut offsets = Vec::new();
+                    for _ in 0..m {
+                        offsets.push(cursor.read_offset());
                     }
+                    let next = cursor.read_offset();
+                    let links = hashes.iter().zip(offsets.iter())
+                        .map(|(h, o)| (*h, *o)).collect();
                     return Some((offset, Content::Link(links, next)));
                 }
             }
