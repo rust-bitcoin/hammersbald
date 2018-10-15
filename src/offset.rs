@@ -119,7 +119,7 @@ impl Offset {
     }
 
     /// compress a vector of offsets assuming that they are in ascending order
-    pub fn compress_ascending (offsets: Vec<Offset>) -> Vec<u8> {
+    pub(crate) fn compress_ascending (offsets: Vec<Offset>) -> Vec<u8> {
         let mut result = Vec::new();
         #[cfg(debug_assertions)]
             {
@@ -165,7 +165,7 @@ impl Offset {
     }
 
     /// decompress a sequence of differences into a vector of offsets in ascending order
-    pub fn decompress_ascending(cursor: &mut Cursor<Vec<u8>>) -> Vec<Offset> {
+    pub(crate) fn decompress_ascending(cursor: &mut Cursor<Vec<u8>>) -> Vec<Offset> {
         let mut offsets = Vec::new();
         let n = cursor.read_u8().unwrap() as usize;
         if n > 0 {
