@@ -276,7 +276,7 @@ impl DataPageFile {
             let mut next = file.len().unwrap();
             for (o, page) in &writes {
                 if o.as_u64() != next as u64 {
-                    panic!("non conscutive append {} {}", next, o);
+                    panic!("non consecutive append {} {}", next, o);
                 }
                 next = o.as_u64() + PAGE_SIZE as u64;
                 file.append_page(page.clone()).expect("can not extend data file");
