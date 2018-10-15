@@ -18,7 +18,7 @@
 //! Specific implementation details to in-memory index of the db
 //!
 //!
-use error::{BCDBError, MayFailIterator};
+use error::BCDBError;
 use offset::Offset;
 use datafile::{DataFile, Content};
 use table::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
@@ -177,27 +177,25 @@ impl MemTable {
         BucketIterator{file: self, n:0}
     }
 
-    pub fn put (&mut self,  keys: Vec<Vec<u8>>, data_offset: Offset) -> Result<(), BCDBError>{
-        for key in keys {
-            let hash = self.hash(key.as_slice());
-            let bucket = self.bucket_for_hash(hash);
-            self.store_to_bucket(bucket, hash, data_offset)?;
+    pub fn put (&mut self,  key: &[u8], data_offset: Offset) -> Result<(), BCDBError>{
+        let hash = self.hash(key);
+        let bucket = self.bucket_for_hash(hash);
+        self.store_to_bucket(bucket, hash, data_offset)?;
 
-            if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
-                if self.step < (1 << self.log_mod) {
-                    let step = self.step;
-                    self.rehash_bucket(step)?;
-                }
-
-                self.step += 1;
-                if self.step > (1 << (self.log_mod + 1)) {
-                    self.log_mod += 1;
-                    self.step = 0;
-                }
-
-                self.buckets.push(Bucket::default());
-                self.dirty.append();
+        if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
+            if self.step < (1 << self.log_mod) {
+                let step = self.step;
+                self.rehash_bucket(step)?;
             }
+
+            self.step += 1;
+            if self.step > (1 << (self.log_mod + 1)) {
+                self.log_mod += 1;
+                self.step = 0;
+            }
+
+            self.buckets.push(Bucket::default());
+            self.dirty.append();
         }
         Ok(())
     }
@@ -241,34 +239,17 @@ impl MemTable {
         Ok(())
     }
 
-
-    /// retrieve data offsets by key
-    pub fn get<'a>(&'a self, key: &[u8], data_file: &'a DataFile) -> GetIterator<'a> {
-        let hash = self.hash(key);
-        let bucket_number = self.bucket_for_hash(hash);
-        let mut offsets = Vec::new();
-
-        if let Some(bucket) = self.buckets.get(bucket_number) {
-            for (n, h) in bucket.hashes.iter().enumerate().rev() {
-                if *h == hash {
-                    offsets.push(Offset::from(*bucket.offsets.get(n).unwrap()));
-                }
-            }
-        }
-        GetIterator::new(key.to_vec(), offsets, data_file)
-    }
-
     // get the data last associated with the key
-    pub fn get_unique(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+    pub fn get_unique(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
                     let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
-                    if let Some(Content::Data(keys, data)) = data_file.get_content(data_offset)? {
-                        if keys.iter().any(|k| *k == key) {
-                            return Ok(Some((data_offset, keys, data)));
+                    if let Some(Content::Data(data_key, data)) = data_file.get_content(data_offset)? {
+                        if data_key.as_slice() == key {
+                            return Ok(Some((data_offset, data_key, data)));
                         }
                     }
                 }
@@ -401,71 +382,6 @@ impl<'b> Iterator for PageIterator<'b> {
     }
 }
 
-/// An iterator for non-unique result, that may also fail
-pub struct GetIterator<'data> {
-    inner: GetIteratorInner<'data>
-}
-
-/// An iterator for non-unique result that on fail stores error and returns None
-pub struct GetIteratorInner<'data> {
-    key: Vec<u8>,
-    pos: usize,
-    offsets: Vec<Offset>,
-    data_file: &'data DataFile,
-    error: Option<String>
-}
-
-impl<'data> GetIterator<'data> {
-    /// create a new iterator
-    pub fn new (key: Vec<u8>, offsets: Vec<Offset>, data_file: &'data DataFile) -> GetIterator<'data> {
-        GetIterator{inner: GetIteratorInner{key, offsets, data_file, pos: 0, error: None}}
-    }
-}
-
-impl<'data> MayFailIterator<(Offset, Vec<Vec<u8>>, Vec<u8>)> for GetIterator<'data> {
-    fn next(&mut self) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
-        match self.inner.next() {
-            Some(n) => Ok(Some(n)),
-            None => if let Some(ref error) = self.inner.error {
-                Err(BCDBError::Corrupted(error.clone()))
-            }
-            else {
-                Ok(None)
-            }
-        }
-    }
-}
-
-impl<'data> IntoIterator for GetIterator<'data> {
-    type Item = (Offset, Vec<Vec<u8>>, Vec<u8>);
-    type IntoIter = GetIteratorInner<'data>;
-
-    fn into_iter(self) -> <Self as IntoIterator>::IntoIter {
-        self.inner
-    }
-}
-
-impl<'data> Iterator for GetIteratorInner<'data> {
-    type Item = (Offset, Vec<Vec<u8>>, Vec<u8>);
-
-    fn next(&mut self) -> Option<(Offset, Vec<Vec<u8>>, Vec<u8>)> {
-        use std::error::Error;
-
-        while self.pos < self.offsets.len() {
-            let data_offset = self.offsets[self.pos];
-            self.pos += 1;
-            match self.data_file.get_content(data_offset) {
-                Ok(Some(Content::Data(keys, data))) => if keys.iter().any(|key| *key == self.key) {
-                    return Some((data_offset, keys, data));
-                }
-                Ok(_) => { self.error = Some(format!("offset {} should point to data", data_offset)); return None }
-                Err(ref error) => { self.error = Some(error.description().to_string()); return None }
-            }
-        }
-        None
-    }
-}
-
 #[derive(Clone, Default)]
 pub struct Bucket {
     link: Offset,
@@ -515,15 +431,13 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let mut k = Vec::new();
-            k.push(key.to_vec());
-            let o = db.put(k.clone(), &data).unwrap();
+            let o = db.put(&key, &data).unwrap();
             check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, (o, data)) in check {
-            assert_eq!(db.get_unique(&k[..]).unwrap().unwrap(), (o, vec!(k.to_vec()), data));
+            assert_eq!(db.get_unique(&k[..]).unwrap().unwrap(), (o, k.to_vec(), data));
         }
     }
 }

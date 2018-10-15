@@ -20,7 +20,6 @@
 use bcdb::{BCDB, BCDBAPI};
 use offset::{Offset, OffsetReader};
 use error::BCDBError;
-use memtable::GetIterator;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
 use bitcoin::blockdata::transaction::Transaction;
@@ -53,7 +52,7 @@ impl BitcoinAdapter {
             let offset = self.bcdb.put_content(d.as_slice())?;
             serialized_header.extend(offset.to_vec());
         }
-        self.bcdb.put(vec!(key.to_vec()), serialized_header.as_slice())
+        self.bcdb.put(&key[..], serialized_header.as_slice())
     }
 
     /// Fetch a header by its id
@@ -91,7 +90,7 @@ impl BitcoinAdapter {
             let offset = self.bcdb.put_content(d.as_slice())?;
             serialized_block.extend(offset.to_vec());
         }
-        self.bcdb.put(vec!(key.to_vec()), serialized_block.as_slice())
+        self.bcdb.put(&key[..], serialized_block.as_slice())
     }
 
     /// Fetch a block by its id
@@ -138,15 +137,11 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.shutdown()
     }
 
-    fn put(&mut self, key: Vec<Vec<u8>>, data: &[u8]) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
         self.bcdb.put(key, data)
     }
 
-    fn get<'a>(&'a self, key: &[u8]) -> GetIterator<'a> {
-        self.bcdb.get(key)
-    }
-
-    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<Vec<u8>>, Vec<u8>)>, BCDBError> {
+    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
         self.bcdb.get_unique(key)
     }
 
@@ -154,7 +149,7 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.put_content(data)
     }
 
-    fn get_content(&self, offset: Offset) -> Result<(Vec<Vec<u8>>, Vec<u8>), BCDBError> {
+    fn get_content(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>), BCDBError> {
         self.bcdb.get_content(offset)
     }
 }
@@ -188,8 +183,8 @@ mod test {
         db.init().unwrap();
         let data = encode(&Sha256dHash::default()).unwrap();
         let key = encode(&Sha256dHash::default()).unwrap();
-        let offset = db.put(vec!(key.clone()), data.as_slice()).unwrap();
-        assert_eq!(db.get_unique(key.as_slice()).unwrap(), Some((offset, vec!(key), data)));
+        let offset = db.put(&key[..], data.as_slice()).unwrap();
+        assert_eq!(db.get_unique(&key[..]).unwrap(), Some((offset, key, data)));
         db.shutdown();
     }
 
