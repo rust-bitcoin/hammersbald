@@ -27,6 +27,7 @@ use bcdb::{BCDBFactory, BCDB};
 use offset::Offset;
 use page::{PageFile,Page};
 use rolled::RolledFile;
+use asyncfile::AsyncFile;
 
 const TABLE_CHUNK_SIZE: u64 = 1024*1024*1024;
 const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
@@ -52,7 +53,10 @@ impl BCDBFactory for InFile {
             RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?
         )))?;
         let link = LinkFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
-        let data = DataFile::new(Box::new(RolledFile::new(name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?;
+        let data = DataFile::new(
+            Box::new(AsyncFile::new(
+            Box::new(RolledFile::new(
+                name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?))?;
 
         BCDB::new(log, table, data, link)
     }
@@ -85,5 +89,8 @@ impl PageFile for InFile {
 
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         self.file.write_page(offset, page)
+    }
+
+    fn shutdown (&mut self) {
     }
 }

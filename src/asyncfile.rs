@@ -36,21 +36,19 @@ struct AsyncFileInner {
     cache: Mutex<Cache>,
     work: Condvar,
     run: AtomicBool,
-    #[allow(dead_code)]
-    role: String,
 }
 
 impl AsyncFileInner {
-    pub fn new (file: Box<PageFile>, role: String) -> Result<AsyncFileInner, BCDBError> {
+    pub fn new (file: Box<PageFile>) -> Result<AsyncFileInner, BCDBError> {
         let len = file.len()?;
         Ok(AsyncFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
-            work: Condvar::new(), run: AtomicBool::new(true), role })
+            work: Condvar::new(), run: AtomicBool::new(true)})
     }
 }
 
 impl AsyncFile {
-    pub fn new (file: Box<PageFile>, role: String) -> Result<AsyncFile, BCDBError> {
-        let inner = Arc::new(AsyncFileInner::new(file, role)?);
+    pub fn new (file: Box<PageFile>) -> Result<AsyncFile, BCDBError> {
+        let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
         Ok(AsyncFile { inner })
@@ -86,12 +84,6 @@ impl AsyncFile {
             return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset)))
         }
         self.inner.file.lock().unwrap().read_page(offset)
-    }
-
-    pub fn shutdown (&mut self) {
-        let _cache = self.inner.cache.lock().unwrap();
-        self.inner.run.store(false, Ordering::Release);
-        self.inner.work.notify_all();
     }
 }
 
@@ -141,5 +133,11 @@ impl PageFile for AsyncFile {
 
     fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
         unimplemented!()
+    }
+
+    fn shutdown (&mut self) {
+        let _cache = self.inner.cache.lock().unwrap();
+        self.inner.run.store(false, Ordering::Release);
+        self.inner.work.notify_all();
     }
 }

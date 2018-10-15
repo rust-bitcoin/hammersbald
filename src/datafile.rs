@@ -21,7 +21,6 @@
 use page::{Page, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use offset::{Offset, OffsetReader};
-use asyncfile::AsyncFile;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
@@ -36,7 +35,7 @@ pub struct DataFile {
 impl DataFile {
     /// create new file
     pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCDBError> {
-        Ok(DataFile{im: DataFileImpl::new(rw, "data")?})
+        Ok(DataFile{im: DataFileImpl::new(rw)?})
     }
 
     /// initialize
@@ -116,22 +115,19 @@ impl<'a> Iterator for DataFileIterator<'a> {
 
 /// the data file
 pub(crate) struct DataFileImpl {
-    file: AsyncFile,
+    file: Box<PageFile>,
     append_pos: Offset,
     page: Page,
-    #[allow(dead_code)]
-    role: String,
 }
 
 impl DataFileImpl {
     /// create a new data file
-    pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFileImpl, BCDBError> {
-        let file = AsyncFile::new(rw, role.to_string())?;
+    pub fn new(file: Box<PageFile>) -> Result<DataFileImpl, BCDBError> {
         let append_pos = Offset::from(file.len()?);
         Ok(DataFileImpl {
-            file: file,
+            file,
             append_pos,
-            page: Page::new(), role: role.to_string()})
+            page: Page::new()})
     }
 
     /// initialize
@@ -220,6 +216,9 @@ impl PageFile for DataFileImpl {
 
     fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
         unimplemented!()
+    }
+
+    fn shutdown (&mut self) {
     }
 }
 

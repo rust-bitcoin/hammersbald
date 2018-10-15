@@ -26,6 +26,7 @@ use datafile::DataFile;
 use linkfile::LinkFile;
 use offset::Offset;
 use page::{PageFile,Page,PAGE_SIZE};
+use asyncfile::AsyncFile;
 
 use std::io::Read;
 use std::io::Write;
@@ -57,7 +58,7 @@ impl BCDBFactory for InMemory {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
         let log = LogFile::new(Box::new(InMemory::new(true)));
         let table = TableFile::new(Box::new(InMemory::new(false)))?;
-        let data = DataFile::new(Box::new(InMemory::new(true)))?;
+        let data = DataFile::new(Box::new(AsyncFile::new(Box::new(InMemory::new(true)))?))?;
         let link = LinkFile::new(Box::new(InMemory::new(true)))?;
 
         BCDB::new(log, table, data, link)
@@ -106,6 +107,9 @@ impl PageFile for InMemory {
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.write(&page.finish()[..])?;
         Ok(inner.data.len() as u64)
+    }
+
+    fn shutdown (&mut self) {
     }
 }
 

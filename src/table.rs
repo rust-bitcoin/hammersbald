@@ -102,6 +102,8 @@ impl PageFile for TableFile {
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         self.file.write_page(offset, page)
     }
+
+    fn shutdown (&mut self) {}
 }
 
 

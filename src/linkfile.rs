@@ -31,7 +31,7 @@ pub struct LinkFile {
 impl LinkFile {
     /// create new file
     pub fn new(rw: Box<PageFile>) -> Result<LinkFile, BCDBError> {
-        Ok(LinkFile{im: DataFileImpl::new(rw, "link")?})
+        Ok(LinkFile{im: DataFileImpl::new(rw)?})
     }
 
     /// initialize

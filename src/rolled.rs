@@ -181,6 +181,8 @@ impl PageFile for RolledFile {
             return Err(BCDBError::Corrupted(format!("missing chunk in write {}", chunk)));
         }
     }
+
+    fn shutdown (&mut self) {}
 }
 
 struct SingleFile {
@@ -252,4 +254,6 @@ impl PageFile for SingleFile {
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(self.len)
     }
+
+    fn shutdown (&mut self) {}
 }
