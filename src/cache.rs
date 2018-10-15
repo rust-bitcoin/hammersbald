@@ -82,7 +82,7 @@ impl Cache {
         None
     }
 
-    pub fn move_writes_to_wrote(&mut self) -> Vec<(Offset, Page)> {
+    pub fn new_writes(&mut self) -> Vec<(Offset, Page)> {
         use std::ops::Deref;
 
         let writes = self.writes.iter().map(|(o, p)| (*o, p.deref().clone())).collect::<Vec<_>>();

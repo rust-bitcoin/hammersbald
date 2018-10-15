@@ -30,7 +30,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::io::{Write, Read, Cursor};
-use std::time::Duration;
 
 /// file storing data and data extensions
 pub struct DataFile {
@@ -245,16 +244,14 @@ struct DataPageFileInner {
     cache: Mutex<Cache>,
     flushed: Condvar,
     work: Condvar,
-    run: AtomicBool,
-    flushing: AtomicBool
+    run: AtomicBool
 }
 
 impl DataPageFileInner {
     pub fn new (file: Box<PageFile>) -> Result<DataPageFileInner, BCDBError> {
         let len = file.len()?;
         Ok(DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
-            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true),
-            flushing: AtomicBool::new(false) })
+            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true) })
     }
 }
 
@@ -268,29 +265,21 @@ impl DataPageFile {
 
     fn background (inner: Arc<DataPageFileInner>) {
         while inner.run.load(Ordering::Relaxed) {
-            let mut writes = Vec::new();
-            {
-                let cache = inner.cache.lock().expect("cache lock poisoned");
-                if cache.is_empty() {
-                    inner.flushed.notify_all();
-                }
-                if inner.flushing.swap(false, Ordering::AcqRel) == false {
-                    // TODO: timeout is just a workaround here
-                    let (mut cache, _) = inner.work.wait_timeout(cache, Duration::from_millis(100)).expect("cache lock poisoned while waiting for work");
-                    writes = cache.move_writes_to_wrote();
-                }
+            let mut cache = inner.cache.lock().expect("cache lock poisoned");
+            if cache.is_empty() {
+                inner.flushed.notify_all();
             }
-            if !writes.is_empty() {
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
-                let mut file = inner.file.lock().expect("file lock poisoned");
-                let mut next = file.len().unwrap();
-                for (o, page) in &writes {
-                    if o.as_u64() != next as u64 {
-                        panic!("non conscutive append {} {}", next, o);
-                    }
-                    next = o.as_u64() + PAGE_SIZE as u64;
-                    file.append_page(page.clone()).expect("can not extend data file");
+            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
+            let mut writes = cache.new_writes();
+            writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
+            let mut file = inner.file.lock().expect("file lock poisoned");
+            let mut next = file.len().unwrap();
+            for (o, page) in &writes {
+                if o.as_u64() != next as u64 {
+                    panic!("non conscutive append {} {}", next, o);
                 }
+                next = o.as_u64() + PAGE_SIZE as u64;
+                file.append_page(page.clone()).expect("can not extend data file");
             }
         }
     }
@@ -318,7 +307,6 @@ impl PageFile for DataPageFile {
         let mut cache = self.inner.cache.lock().unwrap();
         if !cache.is_empty() {
             self.inner.work.notify_one();
-            self.inner.flushing.store(true, Ordering::Release);
             cache = self.inner.flushed.wait(cache)?;
         }
         self.inner.file.lock().unwrap().flush()
@@ -337,16 +325,11 @@ impl PageFile for DataPageFile {
     }
 
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        {
-            let cache = self.inner.cache.lock().unwrap();
-            if let Some(page) = cache.get(offset) {
-                return Ok(Some(page));
-            }
+        let mut cache = self.inner.cache.lock().unwrap();
+        if let Some(page) = cache.get(offset) {
+            return Ok(Some(page));
         }
         if let Some(page) = self.read_page_from_store(offset)? {
-            // write cache takes precedence therefore no problem if there was
-            // a write between above read and this lock
-            let mut cache = self.inner.cache.lock().unwrap();
             cache.cache(offset, page.clone());
             return Ok(Some(page));
         }
