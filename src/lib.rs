@@ -39,6 +39,7 @@ mod logfile;
 mod table;
 mod cache;
 mod rolled;
+mod asyncfile;
 mod linkfile;
 mod memtable;
 pub mod bcdb;

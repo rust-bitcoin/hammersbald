@@ -21,14 +21,11 @@
 use page::{Page, PageFile, PAGE_SIZE};
 use error::BCDBError;
 use offset::{Offset, OffsetReader};
-use cache::Cache;
+use asyncfile::AsyncFile;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::cmp::min;
-use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::io::{Write, Read, Cursor};
 
 /// file storing data and data extensions
@@ -119,7 +116,7 @@ impl<'a> Iterator for DataFileIterator<'a> {
 
 /// the data file
 pub(crate) struct DataFileImpl {
-    async_file: DataPageFile,
+    file: AsyncFile,
     append_pos: Offset,
     page: Page,
     #[allow(dead_code)]
@@ -129,9 +126,10 @@ pub(crate) struct DataFileImpl {
 impl DataFileImpl {
     /// create a new data file
     pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFileImpl, BCDBError> {
-        let file = DataPageFile::new(rw, role.to_string())?;
+        let file = AsyncFile::new(rw, role.to_string())?;
         let append_pos = Offset::from(file.len()?);
-        Ok(DataFileImpl {async_file: file,
+        Ok(DataFileImpl {
+            file: file,
             append_pos,
             page: Page::new(), role: role.to_string()})
     }
@@ -144,7 +142,7 @@ impl DataFileImpl {
 
     /// shutdown
     pub fn shutdown (&mut self) {
-        self.async_file.shutdown()
+        self.file.shutdown()
     }
 
     /// get a stored content at offset
@@ -192,150 +190,32 @@ impl PageFile for DataFileImpl {
             self.append_pos = Offset::from(self.append_page(page)?);
             self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
         }
-        self.async_file.flush()
+        self.file.flush()
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
-        self.async_file.len()
+        self.file.len()
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
         self.append_pos = Offset::from(len);
         self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
-        self.async_file.truncate(len)
+        self.file.truncate(len)
     }
 
     fn sync(&self) -> Result<(), BCDBError> {
-        self.async_file.sync()
+        self.file.sync()
     }
 
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         if offset == self.append_pos.this_page() {
             return Ok(Some(self.page.clone()))
         }
-        self.async_file.read_page(offset)
+        self.file.read_page(offset)
     }
 
     fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
-        self.async_file.append_page(page)
-    }
-
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
-        unimplemented!()
-    }
-}
-
-
-struct DataPageFile {
-    inner: Arc<DataPageFileInner>
-}
-
-struct DataPageFileInner {
-    file: Mutex<Box<PageFile>>,
-    cache: Mutex<Cache>,
-    work: Condvar,
-    run: AtomicBool,
-    #[allow(dead_code)]
-    role: String,
-}
-
-impl DataPageFileInner {
-    pub fn new (file: Box<PageFile>, role: String) -> Result<DataPageFileInner, BCDBError> {
-        let len = file.len()?;
-        Ok(DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
-            work: Condvar::new(), run: AtomicBool::new(true), role })
-    }
-}
-
-impl DataPageFile {
-    pub fn new (file: Box<PageFile>, role: String) -> Result<DataPageFile, BCDBError> {
-        let inner = Arc::new(DataPageFileInner::new(file, role)?);
-        let inner2 = inner.clone();
-        thread::spawn(move || { DataPageFile::background(inner2) });
-        Ok(DataPageFile { inner })
-    }
-
-    fn background (inner: Arc<DataPageFileInner>) {
-        let mut cache = inner.cache.lock().expect("cache lock poisoned");
-        loop {
-            while cache.has_writes() && inner.run.load(Ordering::Acquire) {
-                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-            }
-            if inner.run.load(Ordering::Acquire) == false {
-                break;
-            }
-            let mut file = inner.file.lock().expect("file lock poisoned");
-            let mut next = file.len().unwrap();
-            for (o, page) in cache.new_writes() {
-                use std::ops::Deref;
-
-                if o.as_u64() != next as u64 {
-                    panic!("non consecutive append {} {}", next, o);
-                }
-                next = o.as_u64() + PAGE_SIZE as u64;
-                file.append_page(page.deref().clone()).expect("can not extend data file");
-            }
-            cache.clear_writes();
-            inner.work.notify_one();
-        }
-    }
-
-    fn read_page_from_store (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        if offset != offset.this_page () {
-            return Err(BCDBError::Corrupted(format!("data or link read is not page aligned {}", offset)))
-        }
-        self.inner.file.lock().unwrap().read_page(offset)
-    }
-
-    pub fn shutdown (&mut self) {
-        let _cache = self.inner.cache.lock().unwrap();
-        self.inner.run.store(false, Ordering::Release);
-        self.inner.work.notify_all();
-    }
-}
-
-impl PageFile for DataPageFile {
-    #[allow(unused_assignments)]
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        while !cache.has_writes() {
-            cache = self.inner.work.wait(cache).expect("cache lock poisoned while waiting for flush");
-        }
-        self.inner.file.lock().unwrap().flush()
-    }
-
-    fn len(&self) -> Result<u64, BCDBError> {
-        self.inner.file.lock().unwrap().len()
-    }
-
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        cache.clear_writes();
-        cache.reset_len(new_len);
-        self.inner.file.lock().unwrap().truncate(new_len)
-    }
-
-    fn sync(&self) -> Result<(), BCDBError> {
-        self.inner.file.lock().unwrap().sync()
-    }
-
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        if let Some(page) = cache.get(offset) {
-            return Ok(Some(page));
-        }
-        if let Some(page) = self.read_page_from_store(offset)? {
-            cache.cache(offset, Arc::new(page.clone()));
-            return Ok(Some(page));
-        }
-        Ok(None)
-    }
-
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        let len = cache.append(page);
-        self.inner.work.notify_all();
-        Ok(len)
+        self.file.append_page(page)
     }
 
     fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
