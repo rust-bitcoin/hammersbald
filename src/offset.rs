@@ -117,4 +117,97 @@ impl Offset {
     pub fn in_page_pos(&self) -> usize {
         (self.0 % PAGE_SIZE as u64) as usize
     }
+
+    /// compress a vector of offsets assuming that they are in ascending order
+    pub fn compress_ascending (offsets: Vec<Offset>) -> Vec<u8> {
+        let mut result = Vec::new();
+        #[cfg(debug_assertions)]
+            {
+                if offsets.len() > 255 {
+                    panic!("can not compress offset array with length > 255");
+                }
+            }
+        result.write_u8(offsets.len() as u8).unwrap();
+        if let Some(first) = offsets.first() {
+            let mut prev = first.as_u64();
+            result.write_u48::<BigEndian>(prev).unwrap();
+            for next in offsets.iter().skip(1) {
+                let next = next.as_u64();
+                write_diff(next - prev, &mut result);
+                prev = next;
+            }
+        }
+
+        fn write_diff (d: u64, result: &mut Vec<u8>) {
+            let s = (d & 0x0f) as u8;
+            if d <= 0xf {
+                result.push(s);
+            } else if d <= 0xfff {
+                result.push(s | 0x10);
+                result.push((d >> 4) as u8);
+            } else if d <= 0xfffff {
+                result.push(s | 0x20);
+                result.write_u16::<BigEndian>((d >> 4) as u16).unwrap();
+            } else if d <= 0xfffffff {
+                result.push(s | 0x30);
+                result.write_u24::<BigEndian>((d >> 4) as u32).unwrap();
+            } else if d <= 0xfffffffff {
+                result.push(s | 0x40);
+                result.write_u32::<BigEndian>((d >> 4) as u32).unwrap();
+            } else if d <= 0xfffffffffff {
+                result.push(s | 0x50);
+                result.write_u32::<BigEndian>((d >> 4) as u32).unwrap();
+                result.write_u8((d >> 36) as u8).unwrap();
+            }
+        }
+
+        result
+    }
+
+    /// decompress a sequence of differences into a vector of offsets in ascending order
+    pub fn decompress_ascending(cursor: &mut Cursor<Vec<u8>>) -> Vec<Offset> {
+        let mut offsets = Vec::new();
+        let n = cursor.read_u8().unwrap() as usize;
+        if n > 0 {
+            let mut prev  = cursor.read_u48::<BigEndian>().unwrap();
+            offsets.push(Offset::from(prev));
+            for _ in 0 .. n-1 {
+                let next = prev + read_diff(cursor);
+                offsets.push(Offset::from(next));
+                prev = next;
+            }
+        }
+
+        fn read_diff(cursor: &mut Cursor<Vec<u8>>) -> u64 {
+            let fb = cursor.read_u8().unwrap();
+            let s = (fb & 0xf) as u64;
+            match fb & 0xf0 {
+                0x00 => return s,
+                0x10 => {
+                    let b = cursor.read_u8().unwrap() as u64;
+                    return s + (b << 4);
+                },
+                0x20 => {
+                    let b = cursor.read_u16::<BigEndian>().unwrap() as u64;
+                    return s + (b << 4);
+                },
+                0x30 => {
+                    let b = cursor.read_u24::<BigEndian>().unwrap() as u64;
+                    return s + (b << 4);
+                },
+                0x40 => {
+                    let b = cursor.read_u32::<BigEndian>().unwrap() as u64;
+                    return s + (b << 4);
+                },
+                0x50 => {
+                    let b = cursor.read_u32::<BigEndian>().unwrap() as u64;
+                    let c = cursor.read_u8().unwrap() as u64;
+                    return s + (b << 4) + (c << 36);
+                },
+                _ => return 0
+            };
+        }
+
+        offsets
+    }
 }

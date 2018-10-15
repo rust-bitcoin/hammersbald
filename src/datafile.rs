@@ -330,48 +330,9 @@ impl DataEntry {
             buf
         });
 
-        sp.extend(Self::write_compressed_distance(offsets));
+        sp.extend(Offset::compress_ascending(offsets));
         sp.write_u48::<BigEndian>(next.as_u64()).unwrap();
         DataEntry{data_type: DataType::Link, data: sp.to_vec()}
-    }
-
-    fn write_diff (d: u64, result: &mut Vec<u8>) {
-        let s = (d & 0x0f) as u8;
-        if d <= 0xf {
-            result.push(s);
-        } else if d <= 0xfff {
-            result.push(s | 0x10);
-            result.push((d >> 4) as u8);
-        } else if d <= 0xfffff {
-            result.push(s | 0x20);
-            result.write_u16::<BigEndian>((d >> 4) as u16).unwrap();
-        } else if d <= 0xfffffff {
-            result.push(s | 0x30);
-            result.write_u24::<BigEndian>((d >> 4) as u32).unwrap();
-        } else if d <= 0xfffffffff {
-            result.push(s | 0x40);
-            result.write_u32::<BigEndian>((d >> 4) as u32).unwrap();
-        } else if d <= 0xfffffffffff {
-            result.push(s | 0x50);
-            result.write_u32::<BigEndian>((d >> 4) as u32).unwrap();
-            result.write_u8((d >> 36) as u8).unwrap();
-        }
-    }
-
-    fn write_compressed_distance (offsets: Vec<Offset>) -> Vec<u8> {
-        let mut result = Vec::new();
-        if !offsets.is_empty() {
-            result.push(offsets.len() as u8);
-            let first = offsets.first().unwrap();
-            result.extend(first.to_vec());
-            let mut prev = first;
-            for offset in offsets.iter().skip(1) {
-                let diff = offset.as_u64 () - prev.as_u64();
-                Self::write_diff(diff, &mut result);
-                prev = offset;
-            }
-        }
-        result
     }
 }
 
@@ -395,52 +356,6 @@ impl<'file> DataIterator<'file> {
             }
         }
         None
-    }
-
-    fn read_diff(cursor: &mut Cursor<Vec<u8>>) -> u64 {
-        let fb = cursor.read_u8().unwrap();
-        let s = (fb & 0xf) as u64;
-        match fb & 0xf0 {
-            0x00 => return s,
-            0x10 => {
-                let b = cursor.read_u8().unwrap() as u64;
-                return s + (b << 4);
-            },
-            0x20 => {
-                let b = cursor.read_u16::<BigEndian>().unwrap() as u64;
-                return s + (b << 4);
-            },
-            0x30 => {
-                let b = cursor.read_u24::<BigEndian>().unwrap() as u64;
-                return s + (b << 4);
-            },
-            0x40 => {
-                let b = cursor.read_u32::<BigEndian>().unwrap() as u64;
-                return s + (b << 4);
-            },
-            0x50 => {
-                let b = cursor.read_u32::<BigEndian>().unwrap() as u64;
-                let c = cursor.read_u8().unwrap() as u64;
-                return s + (b << 4) + (c << 36);
-            },
-            _ => return 0
-        };
-    }
-
-    // uses the assumption that offsets are descending ordered
-    pub fn read_compressed_offset_vector (cursor: &mut Cursor<Vec<u8>>) -> Option<Vec<Offset>> {
-        let mut result = Vec::new();
-        let n = cursor.read_u8().unwrap();
-        let init_offset = cursor.read_offset();
-        result.push(init_offset);
-        let mut prev = init_offset;
-        for _ in 0 .. n-1 {
-            let d = Self::read_diff(cursor);
-            let next = Offset::from(prev.as_u64() + d);
-            result.push (next);
-            prev = next;
-        }
-        return Some(result);
     }
 
     fn read(&mut self, n: usize) -> Option<Vec<u8>> {
@@ -511,7 +426,7 @@ impl<'file> Iterator for DataIterator<'file> {
                     for _ in 0..m {
                         hashes.push(cursor.read_u32::<BigEndian>().unwrap());
                     }
-                    let mut offsets = Self::read_compressed_offset_vector(&mut cursor).unwrap();
+                    let mut offsets = Offset::decompress_ascending(&mut cursor);
                     let next = cursor.read_offset();
                     let mut oi = offsets.iter();
                     let mut links = Vec::new();
