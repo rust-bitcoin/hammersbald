@@ -144,12 +144,10 @@ impl BCDBAPI for BCDB {
         self.data.flush()?;
         self.data.sync()?;
         let data_len = self.data.len()?;
-        self.data.clear_cache(data_len);
         debug!("data length {}", data_len);
         self.mem.flush(&mut self.log, &mut self.table, &mut self.link)?;
         self.link.sync()?;
         let link_len = self.link.len()?;
-        self.link.clear_cache(link_len);
         debug!("link length {}", link_len);
         self.table.sync()?;
         let table_len = self.table.len()?;

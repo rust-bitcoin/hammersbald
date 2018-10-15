@@ -30,7 +30,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::io::{Write, Read, Cursor};
-use std::time::Duration;
 
 /// file storing data and data extensions
 pub struct DataFile {
@@ -72,11 +71,6 @@ impl DataFile {
     /// append extension
     pub fn append_data_extension (&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
         self.im.append(DataEntry::new_data_extension(data))
-    }
-
-    /// clear cache
-    pub fn clear_cache(&mut self, len: u64) {
-        self.im.clear_cache(len);
     }
 
     /// truncate file
@@ -135,7 +129,7 @@ pub(crate) struct DataFileImpl {
 impl DataFileImpl {
     /// create a new data file
     pub fn new(rw: Box<PageFile>, role: &str) -> Result<DataFileImpl, BCDBError> {
-        let file = DataPageFile::new(rw)?;
+        let file = DataPageFile::new(rw, role.to_string())?;
         let append_pos = Offset::from(file.len()?);
         Ok(DataFileImpl {async_file: file,
             append_pos,
@@ -189,10 +183,6 @@ impl DataFileImpl {
         }
         Ok(())
     }
-
-    pub(crate) fn clear_cache(&mut self, len: u64) {
-        self.async_file.clear_cache(len);
-    }
 }
 
 impl PageFile for DataFileImpl {
@@ -243,22 +233,23 @@ struct DataPageFile {
 struct DataPageFileInner {
     file: Mutex<Box<PageFile>>,
     cache: Mutex<Cache>,
-    flushed: Condvar,
     work: Condvar,
-    run: AtomicBool
+    run: AtomicBool,
+    #[allow(dead_code)]
+    role: String,
 }
 
 impl DataPageFileInner {
-    pub fn new (file: Box<PageFile>) -> Result<DataPageFileInner, BCDBError> {
+    pub fn new (file: Box<PageFile>, role: String) -> Result<DataPageFileInner, BCDBError> {
         let len = file.len()?;
         Ok(DataPageFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
-            flushed: Condvar::new(), work: Condvar::new(), run: AtomicBool::new(true) })
+            work: Condvar::new(), run: AtomicBool::new(true), role })
     }
 }
 
 impl DataPageFile {
-    pub fn new (file: Box<PageFile>) -> Result<DataPageFile, BCDBError> {
-        let inner = Arc::new(DataPageFileInner::new(file)?);
+    pub fn new (file: Box<PageFile>, role: String) -> Result<DataPageFile, BCDBError> {
+        let inner = Arc::new(DataPageFileInner::new(file, role)?);
         let inner2 = inner.clone();
         thread::spawn(move || { DataPageFile::background(inner2) });
         Ok(DataPageFile { inner })
@@ -266,24 +257,25 @@ impl DataPageFile {
 
     fn background (inner: Arc<DataPageFileInner>) {
         let mut cache = inner.cache.lock().expect("cache lock poisoned");
-        while inner.run.load(Ordering::Relaxed) {
-            // TODO: timeout is a workaround here. It should not be needed, but there is something fishy with the notification mechanism.
-            let (c, timeout) = inner.work.wait_timeout(cache, Duration::from_millis(10)).expect("cache lock poisoned while waiting for work");
-            cache = c;
-            if !timeout.timed_out() {
-                let mut writes = cache.new_writes();
-                writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
-                let mut file = inner.file.lock().expect("file lock poisoned");
-                let mut next = file.len().unwrap();
-                for (o, page) in &writes {
-                    if o.as_u64() != next as u64 {
-                        panic!("non consecutive append {} {}", next, o);
-                    }
-                    next = o.as_u64() + PAGE_SIZE as u64;
-                    file.append_page(page.clone()).expect("can not extend data file");
-                }
+        loop {
+            while cache.is_empty() && inner.run.load(Ordering::Acquire) {
+                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
             }
-            inner.flushed.notify_all();
+            if inner.run.load(Ordering::Acquire) == false {
+                break;
+            }
+            let mut writes = cache.new_writes();
+            writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
+            let mut file = inner.file.lock().expect("file lock poisoned");
+            let mut next = file.len().unwrap();
+            for (o, page) in &writes {
+                if o.as_u64() != next as u64 {
+                    panic!("non consecutive append {} {}", next, o);
+                }
+                next = o.as_u64() + PAGE_SIZE as u64;
+                file.append_page(page.clone()).expect("can not extend data file");
+            }
+            inner.work.notify_one();
         }
     }
 
@@ -296,12 +288,8 @@ impl DataPageFile {
 
     pub fn shutdown (&mut self) {
         let _cache = self.inner.cache.lock().unwrap();
-        self.inner.run.store(false, Ordering::Relaxed);
-        self.inner.work.notify_one();
-    }
-
-    pub fn clear_cache(&mut self, len: u64) {
-        self.inner.cache.lock().unwrap().clear(len);
+        self.inner.run.store(false, Ordering::Release);
+        self.inner.work.notify_all();
     }
 }
 
@@ -309,8 +297,9 @@ impl PageFile for DataPageFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
-        self.inner.work.notify_one();
-        cache = self.inner.flushed.wait(cache)?;
+        while !cache.is_empty() {
+            cache = self.inner.work.wait(cache).expect("cache lock poisoned while waiting for flush");
+        }
         self.inner.file.lock().unwrap().flush()
     }
 
@@ -319,6 +308,8 @@ impl PageFile for DataPageFile {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        let mut cache = self.inner.cache.lock().unwrap();
+        cache.reset_len(new_len);
         self.inner.file.lock().unwrap().truncate(new_len)
     }
 
@@ -341,7 +332,7 @@ impl PageFile for DataPageFile {
     fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
         let len = cache.append(page);
-        self.inner.work.notify_one();
+        self.inner.work.notify_all();
         Ok(len)
     }
 

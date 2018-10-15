@@ -69,11 +69,6 @@ impl LinkFile {
         }
     }
 
-    /// clear cache
-    pub fn clear_cache(&mut self, len: u64) {
-        self.im.clear_cache(len);
-    }
-
     /// truncate file
     pub fn truncate(&mut self, offset: u64) -> Result<(), BCDBError> {
         self.im.truncate (offset)

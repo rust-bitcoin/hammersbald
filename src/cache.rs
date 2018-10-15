@@ -82,6 +82,10 @@ impl Cache {
         None
     }
 
+    pub fn is_empty (&self) -> bool {
+        return self.writes.is_empty()
+    }
+
     pub fn new_writes(&mut self) -> Vec<(Offset, Page)> {
         use std::ops::Deref;
 
@@ -90,10 +94,7 @@ impl Cache {
         writes
     }
 
-    pub fn clear (&mut self, len: u64) {
+    pub fn reset_len(&mut self, len: u64) {
         self.len = len;
-        self.writes.clear();
-        self.reads.clear();
-        self.age_desc.clear();
     }
 }
