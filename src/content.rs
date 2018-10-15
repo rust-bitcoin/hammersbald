@@ -21,7 +21,7 @@ use offset::Offset;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
-use std::io::{Write, Read, Cursor};
+use std::io::{Write, Read};
 
 /// Content envelope wrapping payload in data and link files
 pub struct Envelope {
@@ -35,21 +35,20 @@ pub struct Envelope {
 
 impl Envelope {
     /// serialize for storage
-    pub fn serialize (&self) -> Vec<u8> {
-        let payload = self.payload.serialize();
+    pub fn serialize (&self, result: &mut Write) {
+        let mut payload = Vec::new();
+        self.payload.serialize(&mut payload);
         let length = (payload.len() + 9) as u32;
-        let mut result = Vec::new();
         result.write_u24::<BigEndian>(length).unwrap();
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-        result.extend(payload);
-        result
+        result.write(payload.as_slice()).unwrap();
     }
 
     /// deserialize from storage
-    pub fn deserialize(cursor: &mut Cursor<&[u8]>) -> Result<Envelope, BCDBError> {
-        let length = cursor.read_u24::<BigEndian>()?;
-        let previous = Offset::from(cursor.read_u48::<BigEndian>()?);
-        Ok(Envelope{length, previous, payload: Payload::deserialize(cursor)?})
+    pub fn deserialize(reader: &mut Read) -> Result<Envelope, BCDBError> {
+        let length = reader.read_u24::<BigEndian>()?;
+        let previous = Offset::from(reader.read_u48::<BigEndian>()?);
+        Ok(Envelope{length, previous, payload: Payload::deserialize(reader)?})
     }
 }
 
@@ -65,31 +64,29 @@ pub enum Payload {
 
 impl Payload {
     /// serialize for storage
-    pub fn serialize (&self) -> Vec<u8> {
-        let mut result = Vec::new();
+    pub fn serialize (&self, result: &mut Write) {
         match self {
             Payload::Indexed(indexed) => {
                 result.write_u8(0).unwrap();
-                result.extend(indexed.serialize())
+                indexed.serialize(result);
             },
             Payload::Owned(owned) => {
                 result.write_u8(1).unwrap();
-                result.extend(owned.serialize())
+                owned.serialize(result);
             },
             Payload::Chain(chain) => {
                 result.write_u8(2).unwrap();
-                result.extend(chain.serialize())
+                chain.serialize(result);
             }
         }
-        result
     }
 
     /// deserialize from storage
-    pub fn deserialize(cursor: &mut Cursor<&[u8]>) -> Result<Payload, BCDBError> {
-        match cursor.read_u8()? {
-            0 => Ok(Payload::Indexed(IndexedData::deserialize(cursor)?)),
-            1 => Ok(Payload::Owned(OwnedData::deserialize(cursor)?)),
-            2 => Ok(Payload::Chain(LinkChain::deserialize(cursor)?)),
+    pub fn deserialize(reader: &mut Read) -> Result<Payload, BCDBError> {
+        match reader.read_u8()? {
+            0 => Ok(Payload::Indexed(IndexedData::deserialize(reader)?)),
+            1 => Ok(Payload::Owned(OwnedData::deserialize(reader)?)),
+            2 => Ok(Payload::Chain(LinkChain::deserialize(reader)?)),
             _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
         }
     }
@@ -107,8 +104,7 @@ pub struct IndexedData {
 
 impl IndexedData {
     /// serialize for storage
-    pub fn serialize (&self) -> Vec<u8> {
-        let mut result = Vec::new();
+    pub fn serialize (&self, result: &mut Write) {
         result.write_u8(self.key.len() as u8).unwrap();
         result.write(self.key.as_slice()).unwrap();
         result.write_u8(self.data.len() as u8).unwrap();
@@ -117,23 +113,22 @@ impl IndexedData {
         for offset in &self.owned {
             result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
         }
-        result
     }
 
     /// deserialize from storage
-    pub fn deserialize(cursor: &mut Cursor<&[u8]>) -> Result<IndexedData, BCDBError> {
-        let key_len = cursor.read_u8()? as usize;
+    pub fn deserialize(reader: &mut Read) -> Result<IndexedData, BCDBError> {
+        let key_len = reader.read_u8()? as usize;
         let mut key = vec!(0u8; key_len);
-        cursor.read(key.as_mut_slice())?;
+        reader.read(key.as_mut_slice())?;
 
-        let data_len = cursor.read_u8()? as usize;
+        let data_len = reader.read_u8()? as usize;
         let mut data = vec!(0u8; data_len);
-        cursor.read(data.as_mut_slice())?;
+        reader.read(data.as_mut_slice())?;
 
-        let owned_len = cursor.read_u16::<BigEndian>()? as usize;
+        let owned_len = reader.read_u16::<BigEndian>()? as usize;
         let mut owned = Vec::new();
         for _ in 0 .. owned_len {
-            owned.push(Offset::from(cursor.read_u48::<BigEndian>()?));
+            owned.push(Offset::from(reader.read_u48::<BigEndian>()?));
         }
         Ok(IndexedData{key, data, owned})
     }
@@ -149,27 +144,25 @@ pub struct OwnedData {
 
 impl OwnedData {
     /// serialize for storage
-    pub fn serialize (&self) -> Vec<u8> {
-        let mut result = Vec::new();
+    pub fn serialize (&self, result: &mut Write) {
         result.write_u8(self.data.len() as u8).unwrap();
         result.write(self.data.as_slice()).unwrap();
         result.write_u16::<BigEndian>(self.owned.len() as u16).unwrap();
         for offset in &self.owned {
             result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
         }
-        result
     }
 
     /// deserialize from storage
-    pub fn deserialize(cursor: &mut Cursor<&[u8]>) -> Result<OwnedData, BCDBError> {
-        let data_len = cursor.read_u8()? as usize;
+    pub fn deserialize(reader: &mut Read) -> Result<OwnedData, BCDBError> {
+        let data_len = reader.read_u8()? as usize;
         let mut data = vec!(0u8; data_len);
-        cursor.read(data.as_mut_slice())?;
+        reader.read(data.as_mut_slice())?;
 
-        let owned_len = cursor.read_u16::<BigEndian>()? as usize;
+        let owned_len = reader.read_u16::<BigEndian>()? as usize;
         let mut owned = Vec::new();
         for _ in 0 .. owned_len {
-            owned.push(Offset::from(cursor.read_u48::<BigEndian>()?));
+            owned.push(Offset::from(reader.read_u48::<BigEndian>()?));
         }
         Ok(OwnedData{data, owned})
     }
@@ -185,17 +178,15 @@ pub struct Link {
 
 impl Link {
     /// serialize for storage
-    pub fn serialize (&self) -> Vec<u8> {
-        let mut result = Vec::new();
+    pub fn serialize (&self, result: &mut Write) {
         result.write_u32::<BigEndian>(self.hash).unwrap();
         result.write_u48::<BigEndian>(self.envelope.as_u64()).unwrap();
-        result
     }
 
     /// deserialize from storage
-    pub fn deserialize(cursor: &mut Cursor<&[u8]>) -> Result<Link, BCDBError> {
-        let hash = cursor.read_u32::<BigEndian>()?;
-        let envelope = Offset::from(cursor.read_u48::<BigEndian>()?);
+    pub fn deserialize(reader: &mut Read) -> Result<Link, BCDBError> {
+        let hash = reader.read_u32::<BigEndian>()?;
+        let envelope = Offset::from(reader.read_u48::<BigEndian>()?);
         Ok(Link{hash, envelope})
     }
 }
@@ -210,17 +201,15 @@ pub struct LinkChain {
 
 impl LinkChain {
     /// serialize for storage
-    pub fn serialize (&self) -> Vec<u8> {
-        let mut result = Vec::new();
-        result.extend(self.link.serialize());
+    pub fn serialize (&self, result: &mut Write) {
+        self.link.serialize(result);
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-        result
     }
 
     /// deserialize from storage
-    pub fn deserialize(cursor: &mut Cursor<&[u8]>) -> Result<LinkChain, BCDBError> {
-        let link = Link::deserialize(cursor)?;
-        let previous = Offset::from(cursor.read_u48::<BigEndian>()?);
+    pub fn deserialize(reader: &mut Read) -> Result<LinkChain, BCDBError> {
+        let link = Link::deserialize(reader)?;
+        let previous = Offset::from(reader.read_u48::<BigEndian>()?);
         Ok(LinkChain{link, previous})
     }
 }
