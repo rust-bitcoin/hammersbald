@@ -42,13 +42,11 @@ impl Cache {
     }
 
     pub fn cache (&mut self, offset: Offset, page: Page) {
-        if !self.writes.contains_key(&offset) {
-            if self.reads.insert(offset, Arc::new(page)).is_none() {
-                self.fifo.push_back(offset);
-                if self.reads.len() >= READ_CACHE_PAGES {
-                    if let Some(old) = self.fifo.pop_front() {
-                        self.reads.remove(&old);
-                    }
+        if self.reads.insert(offset, Arc::new(page)).is_none() {
+            self.fifo.push_back(offset);
+            if self.reads.len() >= READ_CACHE_PAGES {
+                if let Some(old) = self.fifo.pop_front() {
+                    self.reads.remove(&old);
                 }
             }
         }
