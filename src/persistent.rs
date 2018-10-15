@@ -14,13 +14,13 @@
 // limitations under the License.
 //
 //!
-//! # in file store
+//! # persistent store
 //!
 //! Implements persistent store
 
 use error::BCDBError;
 use logfile::LogFile;
-use table::TableFile;
+use tablefile::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
 use bcdb::{BCDBFactory, BCDB};
@@ -34,22 +34,22 @@ const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
 const LOG_CHUNK_SIZE: u64 = 1024*1024*1024;
 
 /// Implements persistent storage
-pub struct InFile {
+pub struct Persistent {
     file: RolledFile
 }
 
-impl InFile {
+impl Persistent {
     /// create a new persistent DB
-    pub fn new (file: RolledFile) -> InFile {
-        InFile {file: file}
+    pub fn new (file: RolledFile) -> Persistent {
+        Persistent {file: file}
     }
 }
 
-impl BCDBFactory for InFile {
+impl BCDBFactory for Persistent {
     fn new_db (name: &str) -> Result<BCDB, BCDBError> {
         let log = LogFile::new(Box::new(
             RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?));
-        let table = TableFile::new(Box::new(InFile::new(
+        let table = TableFile::new(Box::new(Persistent::new(
             RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?
         )))?;
         let link = LinkFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
@@ -62,7 +62,7 @@ impl BCDBFactory for InFile {
     }
 }
 
-impl PageFile for InFile {
+impl PageFile for Persistent {
     fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }

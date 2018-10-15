@@ -14,14 +14,14 @@
 // limitations under the License.
 //
 //!
-//! # in memory store for tests
+//! # transient store for tests
 //!
 //! Implements in-memory Read and Write for tests
 
 use error::BCDBError;
 use logfile::LogFile;
 use bcdb::{BCDBFactory, BCDB};
-use table::TableFile;
+use tablefile::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
 use offset::Offset;
@@ -37,7 +37,7 @@ use std::cmp::min;
 use std::sync::Mutex;
 
 /// in memory representation of a file
-pub struct InMemory {
+pub struct Transient {
     inner: Mutex<Inner>
 }
 
@@ -47,25 +47,25 @@ struct Inner {
     append: bool
 }
 
-impl InMemory {
+impl Transient {
     /// create a new file
-    pub fn new (append: bool) -> InMemory {
-        InMemory{inner: Mutex::new(Inner{data: Vec::new(), pos: 0, append})}
+    pub fn new (append: bool) -> Transient {
+        Transient {inner: Mutex::new(Inner{data: Vec::new(), pos: 0, append})}
     }
 }
 
-impl BCDBFactory for InMemory {
+impl BCDBFactory for Transient {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
-        let log = LogFile::new(Box::new(InMemory::new(true)));
-        let table = TableFile::new(Box::new(InMemory::new(false)))?;
-        let data = DataFile::new(Box::new(AsyncFile::new(Box::new(InMemory::new(true)))?))?;
-        let link = LinkFile::new(Box::new(InMemory::new(true)))?;
+        let log = LogFile::new(Box::new(Transient::new(true)));
+        let table = TableFile::new(Box::new(Transient::new(false)))?;
+        let data = DataFile::new(Box::new(AsyncFile::new(Box::new(Transient::new(true)))?))?;
+        let link = LinkFile::new(Box::new(Transient::new(true)))?;
 
         BCDB::new(log, table, data, link)
     }
 }
 
-impl PageFile for InMemory {
+impl PageFile for Transient {
     fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
 
     fn len(&self) -> Result<u64, BCDBError> {

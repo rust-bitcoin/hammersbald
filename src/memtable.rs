@@ -21,7 +21,7 @@
 use error::BCDBError;
 use offset::Offset;
 use datafile::{DataFile, Content};
-use table::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
+use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
 use logfile::LogFile;
 use page::{PAGE_SIZE, TablePage, PageFile};
@@ -393,7 +393,7 @@ pub struct Bucket {
 mod test {
     extern crate rand;
 
-    use inmemory::InMemory;
+    use transient::Transient;
     use bcdb::BCDBFactory;
     use bcdb::BCDBAPI;
 
@@ -420,7 +420,7 @@ mod test {
 
         #[test]
     fn test() {
-        let mut db = InMemory::new_db("first").unwrap();
+        let mut db = Transient::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

@@ -3,7 +3,7 @@ extern crate rand;
 extern crate simple_logger;
 extern crate log;
 
-use blockchain_store::infile::InFile;
+use blockchain_store::persistent::Persistent;
 use blockchain_store::bcdb::BCDBFactory;
 use blockchain_store::bcdb::BCDBAPI;
 
@@ -13,7 +13,7 @@ use std::time::{Instant};
 
 pub fn main () {
     simple_logger::init_with_level(log::Level::Info).unwrap();
-    let mut db = InFile::new_db("testdb").unwrap();
+    let mut db = Persistent::new_db("testdb").unwrap();
     db.init().unwrap();
 
     // transaction size assumed 500 bytes

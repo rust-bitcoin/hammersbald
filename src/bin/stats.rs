@@ -3,7 +3,7 @@ extern crate rand;
 extern crate simple_logger;
 extern crate log;
 
-use blockchain_store::infile::InFile;
+use blockchain_store::persistent::Persistent;
 use blockchain_store::bcdb::BCDBFactory;
 use blockchain_store::bcdb::BCDBAPI;
 
@@ -45,9 +45,9 @@ pub fn main () {
 
     let mut db;
     if let Some(path) = find_arg("db") {
-        db = InFile::new_db(path.as_str()).unwrap();
+        db = Persistent::new_db(path.as_str()).unwrap();
     } else {
-        db = InFile::new_db("testdb").unwrap();
+        db = Persistent::new_db("testdb").unwrap();
     }
 
     db.init().unwrap();

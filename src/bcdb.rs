@@ -18,7 +18,7 @@
 //!
 use offset::Offset;
 use logfile::LogFile;
-use table::TableFile;
+use tablefile::TableFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
 use memtable::MemTable;
@@ -203,7 +203,7 @@ mod test {
     extern crate rand;
     extern crate hex;
 
-    use inmemory::InMemory;
+    use transient::Transient;
 
     use super::*;
     use self::rand::thread_rng;
@@ -212,7 +212,7 @@ mod test {
 
     #[test]
     fn test_two_batches () {
-        let mut db = InMemory::new_db("first").unwrap();
+        let mut db = Transient::new_db("first").unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

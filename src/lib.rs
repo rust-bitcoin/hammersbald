@@ -36,7 +36,7 @@ extern crate byteorder;
 
 mod page;
 mod logfile;
-mod table;
+mod tablefile;
 mod cache;
 mod rolled;
 mod asyncfile;
@@ -46,7 +46,7 @@ pub mod bcdb;
 pub mod datafile;
 pub mod error;
 pub mod offset;
-pub mod inmemory;
-pub mod infile;
+pub mod transient;
+pub mod persistent;
 #[cfg(feature="bitcoin_support")]
 pub mod bitcoin_adapter;

@@ -19,7 +19,7 @@
 //!
 
 use page::{Page, TablePage, PageFile, PAGE_SIZE};
-use table::TableFile;
+use tablefile::TableFile;
 use error::BCDBError;
 use offset::Offset;
 
