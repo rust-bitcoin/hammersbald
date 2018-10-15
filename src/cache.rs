@@ -30,7 +30,7 @@ use std::cmp::max;
 pub const READ_CACHE_PAGES: usize = 1000;
 
 pub struct Cache {
-    writes: HashMap<Offset, Arc<Page>>,
+    writes: Vec<(Offset, Arc<Page>)>,
     reads: HashMap<Offset, Arc<Page>>,
     age_desc: VecDeque<Offset>,
     len: u64
@@ -38,15 +38,17 @@ pub struct Cache {
 
 impl Cache {
     pub fn new (len: u64) -> Cache {
-        Cache { writes: HashMap::new(), reads: HashMap::new(), age_desc: VecDeque::new(), len }
+        Cache { writes: Vec::new(), reads: HashMap::new(), age_desc: VecDeque::new(), len }
     }
 
-    pub fn cache (&mut self, offset: Offset, page: Page) {
-        if self.reads.insert(offset, Arc::new(page)).is_none() {
+    pub fn cache (&mut self, offset: Offset, page: Arc<Page>) {
+        if self.reads.insert(offset, page).is_none() {
             self.age_desc.push_back(offset);
-            if self.reads.len() >= READ_CACHE_PAGES {
-                if let Some(old) = self.age_desc.pop_front() {
-                    self.reads.remove(&old);
+            if self.reads.len() > READ_CACHE_PAGES {
+                while let Some(old) = self.age_desc.pop_front() {
+                    if self.reads.remove(&old).is_some() {
+                        break;
+                    }
                 }
             }
         }
@@ -58,43 +60,49 @@ impl Cache {
         }
     }
 
-    pub fn write (&mut self, offset: Offset, page: Page) -> u64 {
+    pub fn append (&mut self, page: Page) ->u64 {
+        let offset = Offset::from(self.len);
         let page = Arc::new(page);
-        self.writes.insert(offset, page);
+        self.writes.push((offset, page.clone()));
+        self.cache(offset, page);
         self.len = max(self.len, offset.as_u64() + PAGE_SIZE as u64);
         self.len
     }
 
-    pub fn append (&mut self, page: Page) ->u64 {
-        let len = self.len;
-        self.write(Offset::from(len), page)
-    }
-
     pub fn get(&self, offset: Offset) -> Option<Page> {
         use std::ops::Deref;
-
-        if let Some(content) = self.writes.get(&offset) {
-            return Some(content.deref().clone())
-        }
         if let Some(content) = self.reads.get(&offset) {
             return Some(content.deref().clone())
         }
         None
     }
 
-    pub fn is_empty (&self) -> bool {
+    pub fn has_writes(&self) -> bool {
         return self.writes.is_empty()
     }
 
-    pub fn new_writes(&mut self) -> Vec<(Offset, Page)> {
-        use std::ops::Deref;
+    pub fn new_writes(&mut self) -> impl Iterator<Item=&(Offset, Arc<Page>)> {
+        self.writes.iter()
+    }
 
-        let writes = self.writes.iter().map(|(o, p)| (*o, p.deref().clone())).collect::<Vec<_>>();
-        self.writes.clear();
-        writes
+    pub fn clear_writes(&mut self) {
+        self.writes.clear()
     }
 
     pub fn reset_len(&mut self, len: u64) {
         self.len = len;
+        let to_delete: Vec<_> = self.reads.keys().filter_map(
+            |o| {
+                let l = o.as_u64();
+                if l >= len {
+                    Some(l)
+                }
+                else {
+                    None
+                }
+            }).collect();
+        for o in to_delete {
+            self.reads.remove(&Offset::from(o));
+        }
     }
 }

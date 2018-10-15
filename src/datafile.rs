@@ -258,23 +258,24 @@ impl DataPageFile {
     fn background (inner: Arc<DataPageFileInner>) {
         let mut cache = inner.cache.lock().expect("cache lock poisoned");
         loop {
-            while cache.is_empty() && inner.run.load(Ordering::Acquire) {
+            while cache.has_writes() && inner.run.load(Ordering::Acquire) {
                 cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
             }
             if inner.run.load(Ordering::Acquire) == false {
                 break;
             }
-            let mut writes = cache.new_writes();
-            writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
             let mut file = inner.file.lock().expect("file lock poisoned");
             let mut next = file.len().unwrap();
-            for (o, page) in &writes {
+            for (o, page) in cache.new_writes() {
+                use std::ops::Deref;
+
                 if o.as_u64() != next as u64 {
                     panic!("non consecutive append {} {}", next, o);
                 }
                 next = o.as_u64() + PAGE_SIZE as u64;
-                file.append_page(page.clone()).expect("can not extend data file");
+                file.append_page(page.deref().clone()).expect("can not extend data file");
             }
+            cache.clear_writes();
             inner.work.notify_one();
         }
     }
@@ -297,7 +298,7 @@ impl PageFile for DataPageFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
-        while !cache.is_empty() {
+        while !cache.has_writes() {
             cache = self.inner.work.wait(cache).expect("cache lock poisoned while waiting for flush");
         }
         self.inner.file.lock().unwrap().flush()
@@ -309,6 +310,7 @@ impl PageFile for DataPageFile {
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
+        cache.clear_writes();
         cache.reset_len(new_len);
         self.inner.file.lock().unwrap().truncate(new_len)
     }
@@ -323,7 +325,7 @@ impl PageFile for DataPageFile {
             return Ok(Some(page));
         }
         if let Some(page) = self.read_page_from_store(offset)? {
-            cache.cache(offset, page.clone());
+            cache.cache(offset, Arc::new(page.clone()));
             return Ok(Some(page));
         }
         Ok(None)
