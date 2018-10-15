@@ -15,9 +15,7 @@
 //
 //!
 //! # The log file
-//! A synchronous append writer of a log file. It maintains its own set of page offsets
-//! loged, so only the first pre-image will be stored within a batch. The batch should reset
-//! this set.
+//! A synchronous append writer of a log file.
 //!
 
 use page::{Page, TablePage, PageFile, PAGE_SIZE};

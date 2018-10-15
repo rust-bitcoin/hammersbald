@@ -39,7 +39,7 @@ pub struct InFile {
 }
 
 impl InFile {
-    /// create a new DB in memory for tests
+    /// create a new persistent DB
     pub fn new (file: RolledFile) -> InFile {
         InFile {file: file}
     }

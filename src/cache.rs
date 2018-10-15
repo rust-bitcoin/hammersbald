@@ -16,8 +16,6 @@
 //!
 //! # a disk page cache
 //!
-//! A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
-//!
 
 use page::{Page, PAGE_SIZE};
 use offset::Offset;
