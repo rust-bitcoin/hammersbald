@@ -39,9 +39,9 @@ impl LogFile {
         self.truncate(0)?;
         let mut first = Page::new();
         first.write(0, &[0xBC, 0x00]).unwrap();
-        first.write(2, Offset::from(data_len).to_vec().as_slice()).unwrap();
-        first.write(8, Offset::from(table_len).to_vec().as_slice()).unwrap();
-        first.write(14, Offset::from(link_len).to_vec().as_slice()).unwrap();
+        first.write_offset(2, Offset::from(data_len)).unwrap();
+        first.write_offset(8, Offset::from(table_len)).unwrap();
+        first.write_offset(14, Offset::from(link_len)).unwrap();
 
         self.append_page(first)?;
         self.flush()?;
