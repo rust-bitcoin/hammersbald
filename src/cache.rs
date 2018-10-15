@@ -32,22 +32,28 @@ pub const READ_CACHE_PAGES: usize = 1000;
 pub struct Cache {
     writes: HashMap<Offset, Arc<Page>>,
     reads: HashMap<Offset, Arc<Page>>,
-    fifo: VecDeque<Offset>,
+    age_desc: VecDeque<Offset>,
     len: u64
 }
 
 impl Cache {
     pub fn new (len: u64) -> Cache {
-        Cache { writes: HashMap::new(), reads: HashMap::new(), fifo: VecDeque::new(), len }
+        Cache { writes: HashMap::new(), reads: HashMap::new(), age_desc: VecDeque::new(), len }
     }
 
     pub fn cache (&mut self, offset: Offset, page: Page) {
         if self.reads.insert(offset, Arc::new(page)).is_none() {
-            self.fifo.push_back(offset);
+            self.age_desc.push_back(offset);
             if self.reads.len() >= READ_CACHE_PAGES {
-                if let Some(old) = self.fifo.pop_front() {
+                if let Some(old) = self.age_desc.pop_front() {
                     self.reads.remove(&old);
                 }
+            }
+        }
+        else {
+            if let Some(pos) = self.age_desc.iter().rposition(|o| *o == offset) {
+                let last = self.age_desc.len() - 1;
+                self.age_desc.swap(pos, last);
             }
         }
     }
@@ -92,6 +98,6 @@ impl Cache {
         self.len = len;
         self.writes.clear();
         self.reads.clear();
-        self.fifo.clear();
+        self.age_desc.clear();
     }
 }
