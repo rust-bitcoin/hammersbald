@@ -70,10 +70,6 @@ impl Cache {
         self.write(Offset::from(len), page)
     }
 
-    pub fn is_empty (&self) -> bool {
-        self.writes.is_empty()
-    }
-
     pub fn get(&self, offset: Offset) -> Option<Page> {
         use std::ops::Deref;
 

@@ -30,6 +30,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::io::{Write, Read, Cursor};
+use std::time::Duration;
 
 /// file storing data and data extensions
 pub struct DataFile {
@@ -264,23 +265,25 @@ impl DataPageFile {
     }
 
     fn background (inner: Arc<DataPageFileInner>) {
+        let mut cache = inner.cache.lock().expect("cache lock poisoned");
         while inner.run.load(Ordering::Relaxed) {
-            let mut cache = inner.cache.lock().expect("cache lock poisoned");
-            if cache.is_empty() {
-                inner.flushed.notify_all();
-            }
-            cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-            let mut writes = cache.new_writes();
-            writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
-            let mut file = inner.file.lock().expect("file lock poisoned");
-            let mut next = file.len().unwrap();
-            for (o, page) in &writes {
-                if o.as_u64() != next as u64 {
-                    panic!("non consecutive append {} {}", next, o);
+            // TODO: timeout is a workaround here. It should not be needed, but there is something fishy with the notification mechanism.
+            let (c, timeout) = inner.work.wait_timeout(cache, Duration::from_millis(10)).expect("cache lock poisoned while waiting for work");
+            cache = c;
+            if !timeout.timed_out() {
+                let mut writes = cache.new_writes();
+                writes.sort_unstable_by(|a, b| u64::cmp(&a.0.as_u64(), &b.0.as_u64()));
+                let mut file = inner.file.lock().expect("file lock poisoned");
+                let mut next = file.len().unwrap();
+                for (o, page) in &writes {
+                    if o.as_u64() != next as u64 {
+                        panic!("non consecutive append {} {}", next, o);
+                    }
+                    next = o.as_u64() + PAGE_SIZE as u64;
+                    file.append_page(page.clone()).expect("can not extend data file");
                 }
-                next = o.as_u64() + PAGE_SIZE as u64;
-                file.append_page(page.clone()).expect("can not extend data file");
             }
+            inner.flushed.notify_all();
         }
     }
 
@@ -292,6 +295,7 @@ impl DataPageFile {
     }
 
     pub fn shutdown (&mut self) {
+        let _cache = self.inner.cache.lock().unwrap();
         self.inner.run.store(false, Ordering::Relaxed);
         self.inner.work.notify_one();
     }
@@ -305,10 +309,8 @@ impl PageFile for DataPageFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
-        if !cache.is_empty() {
-            self.inner.work.notify_one();
-            cache = self.inner.flushed.wait(cache)?;
-        }
+        self.inner.work.notify_one();
+        cache = self.inner.flushed.wait(cache)?;
         self.inner.file.lock().unwrap().flush()
     }
 
@@ -337,7 +339,8 @@ impl PageFile for DataPageFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
-        let len = self.inner.cache.lock().unwrap().append(page);
+        let mut cache = self.inner.cache.lock().unwrap();
+        let len = cache.append(page);
         self.inner.work.notify_one();
         Ok(len)
     }
