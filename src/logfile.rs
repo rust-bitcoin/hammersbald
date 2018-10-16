@@ -18,8 +18,8 @@
 //! A synchronous append writer of a log file.
 //!
 
-use page::{Page, PAGE_SIZE};
-use pagedfile::PagedFile;
+use page::Page;
+use pagedfile::{PagedFile, PagedFileIterator};
 use tablefile::{TableFile, TablePage};
 use error::BCDBError;
 use offset::Offset;
@@ -47,8 +47,8 @@ impl LogFile {
         Ok(())
     }
 
-    pub fn page_iter (&self) -> LogPageIterator {
-        LogPageIterator::new(self, 0)
+    pub fn page_iter (&self) -> PagedFileIterator {
+        PagedFileIterator::new(self, Offset::from(0))
     }
 
     pub fn append_table_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
@@ -98,34 +98,4 @@ impl PagedFile for LogFile {
     }
 
     fn shutdown (&mut self) {}
-}
-
-/// iterate through pages of a paged file
-pub struct LogPageIterator<'file> {
-    /// the current page of the iterator
-    pub pagenumber: u64,
-    file: &'file LogFile
-}
-
-/// page iterator
-impl<'file> LogPageIterator<'file> {
-    /// create a new iterator starting at given page
-    pub fn new (file: &'file LogFile, pagenumber: u64) -> LogPageIterator {
-        LogPageIterator{pagenumber, file}
-    }
-}
-
-impl<'file> Iterator for LogPageIterator<'file> {
-    type Item = Page;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pagenumber < (1 << 47) / PAGE_SIZE as u64 {
-            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
-            if let Ok(Some(page)) = self.file.read_page(offset) {
-                self.pagenumber += 1;
-                return Some(page);
-            }
-        }
-        None
-    }
 }
