@@ -18,11 +18,13 @@
 //!
 use error::BCDBError;
 use offset::Offset;
+use page::{Page, PAGE_SIZE};
 use pagedfile::{PagedFileIterator, PagedFile};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::{Write, Read, Cursor};
+use std::cmp::min;
 
 /// Content envelope wrapping payload in data and link files
 pub struct Envelope {
@@ -212,6 +214,62 @@ impl LinkChain {
         let link = Link::deserialize(reader)?;
         let previous = Offset::from(reader.read_u48::<BigEndian>()?);
         Ok(LinkChain{link, previous})
+    }
+}
+
+/// An Envelope writer for PagedFile
+pub struct EnvelopeAppender<'file> {
+    file: &'file mut PagedFile,
+    page: Option<Page>,
+    pos: usize,
+    page_offset: Offset,
+    previous: Offset,
+    next: Offset,
+}
+
+impl<'file> EnvelopeAppender<'file> {
+    /// create a new envelope appender for a file
+    /// envelope will be appended at next
+    /// assumes that previous is the offset of the last appended envelope
+    pub fn new (file: &'file mut PagedFile, next: Offset, previous: Offset) -> EnvelopeAppender<'file> {
+        EnvelopeAppender {file, page: None, pos: next.in_page_pos(), page_offset: next.this_page(), previous, next}
+    }
+
+    fn append_slice(&mut self, data: &[u8]) -> Result<(), BCDBError> {
+        let mut wrote = 0;
+        while wrote < data.len() {
+            if self.page.is_none() {
+                self.page = Some(self.file.read_page(self.page_offset)?.unwrap_or(Page::new()));
+                self.pos = 0;
+            }
+            if let Some(ref mut page) = self.page {
+                let space = min(PAGE_SIZE - self.pos, data.len() - wrote);
+                page.payload[self.pos .. self.pos + space].copy_from_slice(&data[wrote .. wrote + space]);
+                wrote += space;
+                self.pos += space;
+                if self.pos == PAGE_SIZE {
+                    self.file.write_page(self.page_offset, page.clone())?;
+                }
+            }
+            if self.pos == PAGE_SIZE {
+                self.page_offset = Offset::from(self.page_offset.as_u64() + PAGE_SIZE as u64);
+                self.page = None;
+                self.pos = 0;
+            }
+        }
+        self.next += data.len() as u64;
+        Ok(())
+    }
+
+    /// wrap some data into an envelope and append to the file
+    /// returns the offset for next append
+    pub fn append(&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
+        let mut header = Vec::with_capacity(9);
+        header.write_u24::<BigEndian>(data.len() as u32 + 9)?;
+        header.write_u48::<BigEndian>(self.previous.as_u64())?;
+        self.append_slice(header.as_slice())?;
+        self.append_slice(data)?;
+        Ok(self.next)
     }
 }
 

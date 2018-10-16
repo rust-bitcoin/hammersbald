@@ -25,6 +25,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use std::io::Cursor;
 use std::cmp::Ordering;
 use std::fmt;
+use std::ops;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 /// Pointer to persistent data. Limited to 2^48
@@ -76,6 +77,46 @@ pub trait OffsetReader {
 impl OffsetReader for Cursor<Vec<u8>> {
     fn read_offset(&mut self) -> Offset {
         Offset(self.read_u48::<BigEndian>().unwrap())
+    }
+}
+
+impl ops::Add<u64> for Offset {
+    type Output = Offset;
+
+    fn add(self, rhs: u64) -> <Self as ops::Add<u64>>::Output {
+        Offset::from(self.as_u64() + rhs)
+    }
+}
+
+impl ops::AddAssign<u64> for Offset {
+    fn add_assign(&mut self, rhs: u64) {
+        #[cfg(debug_assertions)]
+        {
+            if self.0 + rhs > 0xffffffffffffu64 {
+                panic!("offset would become greater than 2^48-1");
+            }
+        }
+        self.0 += rhs;
+    }
+}
+
+impl ops::Sub<u64> for Offset {
+    type Output = Offset;
+
+    fn sub(self, rhs: u64) -> <Self as ops::Sub<u64>>::Output {
+        Offset::from(self.as_u64() - rhs)
+    }
+}
+
+impl ops::SubAssign<u64> for Offset {
+    fn sub_assign(&mut self, rhs: u64) {
+        #[cfg(debug_assertions)]
+        {
+            if rhs >= self.0 {
+                panic!("offset would become invalid through subtraction");
+            }
+        }
+        self.0 -= rhs;
     }
 }
 
