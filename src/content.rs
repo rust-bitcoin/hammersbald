@@ -62,7 +62,7 @@ pub enum Payload {
     /// payload that carries OwnedData
     Owned(OwnedData),
     /// payload that carries a LinkChain
-    Chain(LinkChain)
+    Link(Link)
 }
 
 impl Payload {
@@ -77,9 +77,9 @@ impl Payload {
                 result.write_u8(1).unwrap();
                 owned.serialize(result);
             },
-            Payload::Chain(chain) => {
+            Payload::Link(link) => {
                 result.write_u8(2).unwrap();
-                chain.serialize(result);
+                link.serialize(result);
             }
         }
     }
@@ -89,7 +89,7 @@ impl Payload {
         match reader.read_u8()? {
             0 => Ok(Payload::Indexed(IndexedData::deserialize(reader)?)),
             1 => Ok(Payload::Owned(OwnedData::deserialize(reader)?)),
-            2 => Ok(Payload::Chain(LinkChain::deserialize(reader)?)),
+            2 => Ok(Payload::Link(Link::deserialize(reader)?)),
             _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
         }
     }
@@ -175,45 +175,30 @@ impl OwnedData {
 pub struct Link {
     /// hash of the key
     pub hash: u32,
+    /// data category
+    pub cat: u16,
     /// pointer to the Envelope of an IndexedData
-    pub envelope: Offset
+    pub envelope: Offset,
+    /// pointer to previous link
+    pub previous: Offset
 }
 
 impl Link {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         result.write_u32::<BigEndian>(self.hash).unwrap();
+        result.write_u16::<BigEndian>(self.cat).unwrap();
         result.write_u48::<BigEndian>(self.envelope.as_u64()).unwrap();
+        result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
     }
 
     /// deserialize from storage
     pub fn deserialize(reader: &mut Read) -> Result<Link, BCDBError> {
         let hash = reader.read_u32::<BigEndian>()?;
+        let cat = reader.read_u16::<BigEndian>()?;
         let envelope = Offset::from(reader.read_u48::<BigEndian>()?);
-        Ok(Link{hash, envelope})
-    }
-}
-
-/// A chain of links
-pub struct LinkChain {
-    /// link
-    pub link: Link,
-    /// previous link
-    pub previous: Offset
-}
-
-impl LinkChain {
-    /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
-        self.link.serialize(result);
-        result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-    }
-
-    /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<LinkChain, BCDBError> {
-        let link = Link::deserialize(reader)?;
         let previous = Offset::from(reader.read_u48::<BigEndian>()?);
-        Ok(LinkChain{link, previous})
+        Ok(Link{hash, cat, envelope, previous})
     }
 }
 
