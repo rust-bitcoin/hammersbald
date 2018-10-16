@@ -25,7 +25,9 @@ use offset::Offset;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
-use std::io::Cursor;
+use std::io::{Read, Cursor};
+use std::io;
+use std::cmp::min;
 
 pub const PAGE_SIZE: usize = 4096;
 
@@ -122,3 +124,65 @@ pub trait PageFile : Send + Sync {
     fn shutdown (&mut self);
 }
 
+/// iterate through pages of a paged file
+pub struct PageIterator<'file> {
+    // the current page of the iterator
+    pagenumber: u64,
+    // the current page
+    page: Option<Page>,
+    // position on current page
+    pos: usize,
+    // the iterated file
+    file: &'file PageFile
+}
+
+/// page iterator
+impl<'file> PageIterator<'file> {
+    /// create a new iterator starting at given page
+    pub fn new (file: &'file PageFile, offset: Offset) -> PageIterator {
+        PageIterator{pagenumber: offset.page_number(), page: None, pos: offset.in_page_pos(), file}
+    }
+}
+
+impl<'file> Iterator for PageIterator<'file> {
+    type Item = Page;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pagenumber <= (1 << 35) / PAGE_SIZE as u64 {
+            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
+            if let Ok(Some(page)) = self.file.read_page(offset) {
+                self.pagenumber += 1;
+                return Some(page);
+            }
+        }
+        None
+    }
+}
+
+impl<'file> Read for PageIterator<'file> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
+        let mut read = 0;
+        loop {
+            if self.page.is_none() {
+                self.page = self.file.read_page(Offset::from(self.pagenumber))?;
+            }
+            if let Some(ref page) = self.page {
+                let have = min(PAGE_SIZE - self.pos, buf.len() - read);
+                buf[read..read + have].copy_from_slice(&page.payload[self.pos..self.pos + have]);
+                self.pos += have;
+                read += have;
+            }
+            else {
+                return Ok(read)
+            }
+            if read == buf.len() {
+                break;
+            } else {
+                self.page = None;
+                self.pagenumber += 1;
+                self.pos = 0;
+            }
+        }
+        Ok(buf.len())
+    }
+}

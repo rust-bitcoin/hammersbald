@@ -18,10 +18,11 @@
 //!
 use error::BCDBError;
 use offset::Offset;
+use page::{PageIterator, PageFile};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
-use std::io::{Write, Read};
+use std::io::{Write, Read, Cursor};
 
 /// Content envelope wrapping payload in data and link files
 pub struct Envelope {
@@ -211,5 +212,54 @@ impl LinkChain {
         let link = Link::deserialize(reader)?;
         let previous = Offset::from(reader.read_u48::<BigEndian>()?);
         Ok(LinkChain{link, previous})
+    }
+}
+
+/// An iterator returning envelopes in offset ascending order
+pub struct ForwardEnvelopeIterator<'file> {
+    reader: PageIterator<'file>
+}
+
+impl<'file> ForwardEnvelopeIterator<'file> {
+    /// create a new iterator returning envelopes in offset ascending order
+    pub fn new (file: &'file PageFile, start: Offset) -> ForwardEnvelopeIterator<'file> {
+        ForwardEnvelopeIterator{reader: PageIterator::new(file, start)}
+    }
+}
+
+impl<'file> Iterator for ForwardEnvelopeIterator<'file> {
+    type Item = Envelope;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        let length = self.reader.read_u24::<BigEndian>().unwrap() as usize;
+        let mut buf = vec!(0u8; length - 3);
+        self.reader.read(&mut buf).unwrap();
+        Some(Envelope::deserialize(&mut Cursor::new(&buf[6..])).unwrap())
+    }
+}
+
+/// An iterator returning envelopes in offset descending order
+pub struct BackwardEnvelopeIterator<'file> {
+    file: &'file PageFile,
+    reader: PageIterator<'file>
+}
+
+impl<'file> BackwardEnvelopeIterator<'file> {
+    /// create a new iterator returning envelopes in offset ascending order
+    pub fn new (file: &'file PageFile, start: Offset) -> BackwardEnvelopeIterator<'file> {
+        BackwardEnvelopeIterator{file, reader: PageIterator::new(file, start)}
+    }
+}
+
+impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
+    type Item = Envelope;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        let length = self.reader.read_u24::<BigEndian>().unwrap() as usize;
+        let previous = Offset::from(self.reader.read_u48::<BigEndian>().unwrap());
+        let mut buf = vec!(0u8; length - 9);
+        self.reader.read(&mut buf).unwrap();
+        self.reader = PageIterator::new(self.file, previous);
+        Some(Envelope::deserialize(&mut Cursor::new(&buf)).unwrap())
     }
 }

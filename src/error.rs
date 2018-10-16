@@ -87,6 +87,12 @@ impl convert::From<io::Error> for BCDBError {
     }
 }
 
+impl convert::From<BCDBError> for io::Error {
+    fn from(_: BCDBError) -> io::Error {
+        io::Error::from(io::ErrorKind::UnexpectedEof)
+    }
+}
+
 impl<T> convert::From<sync::PoisonError<T>> for BCDBError {
     fn from(err: sync::PoisonError<T>) -> BCDBError {
         BCDBError::Poisoned(err.to_string())
