@@ -33,25 +33,25 @@ pub struct Envelope {
     /// pointer to previous entry. Useful for backward iteration
     pub previous: Offset,
     /// payload
-    pub payload: Payload
+    pub payload: Vec<u8>
 }
 
 impl Envelope {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
-        let mut payload = Vec::new();
-        self.payload.serialize(&mut payload);
-        let length = (payload.len() + 9) as u32;
+        let length = (self.payload.len() + 9) as u32;
         result.write_u24::<BigEndian>(length).unwrap();
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-        result.write(payload.as_slice()).unwrap();
+        result.write(self.payload.as_slice()).unwrap();
     }
 
     /// deserialize from storage
     pub fn deserialize(reader: &mut Read) -> Result<Envelope, BCDBError> {
         let length = reader.read_u24::<BigEndian>()?;
         let previous = Offset::from(reader.read_u48::<BigEndian>()?);
-        Ok(Envelope{length, previous, payload: Payload::deserialize(reader)?})
+        let mut payload = vec!(0u8; length as usize - 9);
+        reader.read(&mut payload)?;
+        Ok(Envelope{length, previous, payload})
     }
 }
 
@@ -235,16 +235,16 @@ impl<'file> EnvelopeAppender<'file> {
         EnvelopeAppender {file, page: None, pos: next.in_page_pos(), page_offset: next.this_page(), previous, next}
     }
 
-    fn append_slice(&mut self, data: &[u8]) -> Result<(), BCDBError> {
+    fn append_slice(&mut self, payload: &[u8]) -> Result<(), BCDBError> {
         let mut wrote = 0;
-        while wrote < data.len() {
+        while wrote < payload.len() {
             if self.page.is_none() {
                 self.page = Some(self.file.read_page(self.page_offset)?.unwrap_or(Page::new()));
                 self.pos = 0;
             }
             if let Some(ref mut page) = self.page {
-                let space = min(PAGE_SIZE - self.pos, data.len() - wrote);
-                page.payload[self.pos .. self.pos + space].copy_from_slice(&data[wrote .. wrote + space]);
+                let space = min(PAGE_SIZE - self.pos, payload.len() - wrote);
+                page.payload[self.pos .. self.pos + space].copy_from_slice(&payload[wrote .. wrote + space]);
                 wrote += space;
                 self.pos += space;
                 if self.pos == PAGE_SIZE {
@@ -257,18 +257,18 @@ impl<'file> EnvelopeAppender<'file> {
                 self.pos = 0;
             }
         }
-        self.next += data.len() as u64;
+        self.next += payload.len() as u64;
         Ok(())
     }
 
     /// wrap some data into an envelope and append to the file
     /// returns the offset for next append
-    pub fn append(&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
+    pub fn append(&mut self, payload: &[u8]) -> Result<Offset, BCDBError> {
         let mut header = Vec::with_capacity(9);
-        header.write_u24::<BigEndian>(data.len() as u32 + 9)?;
+        header.write_u24::<BigEndian>(payload.len() as u32 + 9)?;
         header.write_u48::<BigEndian>(self.previous.as_u64())?;
         self.append_slice(header.as_slice())?;
-        self.append_slice(data)?;
+        self.append_slice(payload)?;
         Ok(self.next)
     }
 }
