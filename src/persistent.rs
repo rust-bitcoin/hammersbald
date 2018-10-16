@@ -23,7 +23,7 @@ use logfile::LogFile;
 use tablefile::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
-use bcdb::{BCDBFactory, BCDB};
+use api::{BCDBFactory, BCDB};
 use offset::Offset;
 use page::Page;
 use pagedfile::PagedFile;

@@ -17,7 +17,7 @@
 //! # Bitcoin specific use of this blockchain db
 //!
 
-use bcdb::{BCDB, BCDBAPI};
+use api::{BCDB, BCDBAPI};
 use offset::{Offset, OffsetReader};
 use error::BCDBError;
 
@@ -173,7 +173,7 @@ mod test {
 
     use transient::Transient;
 
-    use bcdb::BCDBFactory;
+    use api::BCDBFactory;
 
     use super::*;
 

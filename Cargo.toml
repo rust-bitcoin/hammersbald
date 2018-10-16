@@ -1,5 +1,5 @@
 [package]
-name = "blockchain-store"
+name = "bcdb"
 version = "0.1.0"
 authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
 license = "Apache-2.0"
@@ -7,11 +7,11 @@ homepage = "https://github.com/rust-bitcoin/rust-blockchain-store/"
 repository = "https://github.com/rust-bitcoin/rust-blockchain-store/"
 documentation = "https://github.com/rust-bitcoin/rust-blockchain-store/"
 description = "Persistent blockchain store and a convenience library for a blockchain"
-keywords = [ "crypto", "bitcoin" ]
+keywords = [ "blockchain", "bitcoin" ]
 readme = "README.md"
 
 [lib]
-name = "blockchain_store"
+name = "bcdb"
 path = "src/lib.rs"
 
 [features]

@@ -208,7 +208,7 @@ mod test {
     use super::*;
     use self::rand::thread_rng;
     use std::collections::HashMap;
-    use bcdb::test::rand::RngCore;
+    use api::test::rand::RngCore;
 
     #[test]
     fn test_two_batches () {

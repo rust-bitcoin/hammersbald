@@ -396,8 +396,8 @@ mod test {
     extern crate rand;
 
     use transient::Transient;
-    use bcdb::BCDBFactory;
-    use bcdb::BCDBAPI;
+    use api::BCDBFactory;
+    use api::BCDBAPI;
 
     use super::*;
     use self::rand::thread_rng;

@@ -44,11 +44,11 @@ mod asyncfile;
 mod linkfile;
 mod memtable;
 pub mod content;
-pub mod bcdb;
+pub mod api;
 pub mod datafile;
 pub mod error;
 pub mod offset;
 pub mod transient;
 pub mod persistent;
 #[cfg(feature="bitcoin_support")]
-pub mod bitcoin_adapter;
+pub mod bitcoin_support;

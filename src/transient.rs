@@ -20,7 +20,7 @@
 
 use error::BCDBError;
 use logfile::LogFile;
-use bcdb::{BCDBFactory, BCDB};
+use api::{BCDBFactory, BCDB};
 use tablefile::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;

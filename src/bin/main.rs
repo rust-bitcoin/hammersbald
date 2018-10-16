@@ -1,11 +1,11 @@
-extern crate blockchain_store;
+extern crate bcdb;
 extern crate rand;
 extern crate simple_logger;
 extern crate log;
 
-use blockchain_store::persistent::Persistent;
-use blockchain_store::bcdb::BCDBFactory;
-use blockchain_store::bcdb::BCDBAPI;
+use bcdb::persistent::Persistent;
+use bcdb::api::BCDBFactory;
+use bcdb::api::BCDBAPI;
 
 use rand::{thread_rng, Rng};
 
