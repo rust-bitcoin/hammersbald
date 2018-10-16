@@ -64,6 +64,11 @@ impl<'file> PagedFileIterator<'file> {
     pub fn new (file: &'file PagedFile, offset: Offset) -> PagedFileIterator {
         PagedFileIterator {pagenumber: offset.page_number(), page: None, pos: offset.in_page_pos(), file}
     }
+
+    /// return position next read would be reading from
+    pub fn position (&self) -> Offset {
+        Offset::from(self.pagenumber * PAGE_SIZE as u64 + self.pos as u64)
+    }
 }
 
 impl<'file> Iterator for PagedFileIterator<'file> {

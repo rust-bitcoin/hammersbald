@@ -260,13 +260,15 @@ impl<'file> EnvelopeAppender<'file> {
 
 /// An iterator returning envelopes in offset ascending order
 pub struct ForwardEnvelopeIterator<'file> {
-    reader: PagedFileIterator<'file>
+    reader: PagedFileIterator<'file>,
+    fence: Offset
 }
 
 impl<'file> ForwardEnvelopeIterator<'file> {
     /// create a new iterator returning envelopes in offset ascending order
-    pub fn new (file: &'file PagedFile, start: Offset) -> ForwardEnvelopeIterator<'file> {
-        ForwardEnvelopeIterator{reader: PagedFileIterator::new(file, start)}
+    /// iteration is limited to [start .. fence]
+    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset) -> ForwardEnvelopeIterator<'file> {
+        ForwardEnvelopeIterator{reader: PagedFileIterator::new(file, start), fence}
     }
 }
 
@@ -274,6 +276,9 @@ impl<'file> Iterator for ForwardEnvelopeIterator<'file> {
     type Item = Envelope;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if self.reader.position() >= self.fence {
+            return None;
+        }
         let length = self.reader.read_u24::<BigEndian>().unwrap() as usize;
         let mut buf = vec!(0u8; length - 3);
         self.reader.read(&mut buf).unwrap();
@@ -284,13 +289,15 @@ impl<'file> Iterator for ForwardEnvelopeIterator<'file> {
 /// An iterator returning envelopes in offset descending order
 pub struct BackwardEnvelopeIterator<'file> {
     file: &'file PagedFile,
-    reader: PagedFileIterator<'file>
+    reader: PagedFileIterator<'file>,
+    fence: Offset
 }
 
 impl<'file> BackwardEnvelopeIterator<'file> {
     /// create a new iterator returning envelopes in offset ascending order
-    pub fn new (file: &'file PagedFile, start: Offset) -> BackwardEnvelopeIterator<'file> {
-        BackwardEnvelopeIterator{file, reader: PagedFileIterator::new(file, start)}
+    /// iteration is limited to [fence .. start]
+    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset) -> BackwardEnvelopeIterator<'file> {
+        BackwardEnvelopeIterator{file, reader: PagedFileIterator::new(file, start), fence}
     }
 }
 
@@ -298,6 +305,9 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
     type Item = Envelope;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if self.reader.position() < self.fence {
+            return None;
+        }
         let length = self.reader.read_u24::<BigEndian>().unwrap() as usize;
         let previous = Offset::from(self.reader.read_u48::<BigEndian>().unwrap());
         let mut buf = vec!(0u8; length - 9);
@@ -306,3 +316,63 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
         Some(Envelope::deserialize(&mut Cursor::new(&buf)).unwrap())
     }
 }
+
+/// An iterator returning uniform length slices of data in offset ascending order
+pub struct ForwardSliceIterator<'file> {
+    length: u64,
+    reader: PagedFileIterator<'file>,
+    fence: Offset
+}
+
+impl<'file> ForwardSliceIterator<'file> {
+    /// create a new iterator returning uniform length slices of data in offset ascending order
+    /// iteration is limited to [start .. fence]
+    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset, length: u64) -> ForwardSliceIterator<'file> {
+        ForwardSliceIterator {reader: PagedFileIterator::new(file, start), fence, length}
+    }
+}
+
+impl<'file> Iterator for ForwardSliceIterator<'file> {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if self.reader.position() >= self.fence {
+            return None;
+        }
+        let mut buf = vec!(0u8; self.length as usize);
+        self.reader.read(&mut buf).unwrap();
+        Some(buf)
+    }
+}
+
+
+/// An iterator returning envelopes in offset descending order
+pub struct BackwardSliceIterator<'file> {
+    length: u64,
+    file: &'file PagedFile,
+    reader: PagedFileIterator<'file>,
+    fence: Offset
+}
+
+impl<'file> BackwardSliceIterator<'file> {
+    /// create a new iterator returning envelopes in offset ascending order
+    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset, length: u64) -> BackwardSliceIterator<'file> {
+        BackwardSliceIterator{file, reader: PagedFileIterator::new(file, start), fence, length}
+    }
+}
+
+impl<'file> Iterator for BackwardSliceIterator<'file> {
+    type Item = Envelope;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if self.reader.position () < self.fence {
+            return None;
+        }
+        let mut buf = vec!(0u8; self.length as usize);
+        self.reader.read(&mut buf).unwrap();
+        self.reader = PagedFileIterator::new(self.file, self.reader.position() - self.length);
+        Some(Envelope::deserialize(&mut Cursor::new(&buf)).unwrap())
+    }
+}
+
+
