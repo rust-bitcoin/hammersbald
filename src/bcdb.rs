@@ -18,11 +18,11 @@
 //!
 use offset::Offset;
 use logfile::LogFile;
-use tablefile::TableFile;
+use tablefile::{TableFile, TablePage};
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
 use memtable::MemTable;
-use page::{TablePage, PageFile};
+use page::PageFile;
 use error::{BCDBError};
 
 /// a trait to create a new db

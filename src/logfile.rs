@@ -18,8 +18,8 @@
 //! A synchronous append writer of a log file.
 //!
 
-use page::{Page, TablePage, PageFile, PAGE_SIZE};
-use tablefile::TableFile;
+use page::{Page, PageFile, PAGE_SIZE};
+use tablefile::{TableFile, TablePage};
 use error::BCDBError;
 use offset::Offset;
 
