@@ -25,7 +25,8 @@ use datafile::DataFile;
 use linkfile::LinkFile;
 use bcdb::{BCDBFactory, BCDB};
 use offset::Offset;
-use page::{PageFile,Page};
+use page::Page;
+use pagedfile::PagedFile;
 use rolled::RolledFile;
 use asyncfile::AsyncFile;
 
@@ -62,7 +63,7 @@ impl BCDBFactory for Persistent {
     }
 }
 
-impl PageFile for Persistent {
+impl PagedFile for Persistent {
     fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }

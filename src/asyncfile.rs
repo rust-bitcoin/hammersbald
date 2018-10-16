@@ -18,7 +18,9 @@
 //! an append only file written in background
 //!
 
-use page::{Page, PAGE_SIZE, PageFile};
+use page::{Page, PAGE_SIZE};
+use pagedfile::PagedFile;
+
 use cache::Cache;
 use error::BCDBError;
 use offset::Offset;
@@ -32,14 +34,14 @@ pub struct AsyncFile {
 }
 
 struct AsyncFileInner {
-    file: Mutex<Box<PageFile>>,
+    file: Mutex<Box<PagedFile>>,
     cache: Mutex<Cache>,
     work: Condvar,
     run: AtomicBool,
 }
 
 impl AsyncFileInner {
-    pub fn new (file: Box<PageFile>) -> Result<AsyncFileInner, BCDBError> {
+    pub fn new (file: Box<PagedFile>) -> Result<AsyncFileInner, BCDBError> {
         let len = file.len()?;
         Ok(AsyncFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
             work: Condvar::new(), run: AtomicBool::new(true)})
@@ -47,7 +49,7 @@ impl AsyncFileInner {
 }
 
 impl AsyncFile {
-    pub fn new (file: Box<PageFile>) -> Result<AsyncFile, BCDBError> {
+    pub fn new (file: Box<PagedFile>) -> Result<AsyncFile, BCDBError> {
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
@@ -87,7 +89,7 @@ impl AsyncFile {
     }
 }
 
-impl PageFile for AsyncFile {
+impl PagedFile for AsyncFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();

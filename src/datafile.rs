@@ -18,7 +18,9 @@
 //! Specific implementation details to data file
 //!
 
-use page::{Page, PageFile, PAGE_SIZE};
+use page::{Page, PAGE_SIZE};
+use pagedfile::PagedFile;
+
 use error::BCDBError;
 use offset::{Offset, OffsetReader};
 
@@ -34,7 +36,7 @@ pub struct DataFile {
 
 impl DataFile {
     /// create new file
-    pub fn new(rw: Box<PageFile>) -> Result<DataFile, BCDBError> {
+    pub fn new(rw: Box<PagedFile>) -> Result<DataFile, BCDBError> {
         Ok(DataFile{im: DataFileImpl::new(rw)?})
     }
 
@@ -115,14 +117,14 @@ impl<'a> Iterator for DataFileIterator<'a> {
 
 /// the data file
 pub(crate) struct DataFileImpl {
-    file: Box<PageFile>,
+    file: Box<PagedFile>,
     append_pos: Offset,
     page: Page,
 }
 
 impl DataFileImpl {
     /// create a new data file
-    pub fn new(file: Box<PageFile>) -> Result<DataFileImpl, BCDBError> {
+    pub fn new(file: Box<PagedFile>) -> Result<DataFileImpl, BCDBError> {
         let append_pos = Offset::from(file.len()?);
         Ok(DataFileImpl {
             file,
@@ -179,7 +181,7 @@ impl DataFileImpl {
     }
 }
 
-impl PageFile for DataFileImpl {
+impl PagedFile for DataFileImpl {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             let page = self.page.clone();

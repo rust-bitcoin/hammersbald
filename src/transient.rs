@@ -25,7 +25,8 @@ use tablefile::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
 use offset::Offset;
-use page::{PageFile,Page,PAGE_SIZE};
+use page::{Page,PAGE_SIZE};
+use pagedfile::PagedFile;
 use asyncfile::AsyncFile;
 
 use std::io::Read;
@@ -65,7 +66,7 @@ impl BCDBFactory for Transient {
     }
 }
 
-impl PageFile for Transient {
+impl PagedFile for Transient {
     fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
 
     fn len(&self) -> Result<u64, BCDBError> {

@@ -18,7 +18,8 @@
 //! Specific implementation details to hash table file
 //!
 
-use page::{Page, PageFile, PAGE_SIZE};
+use page::{Page, PAGE_SIZE};
+use pagedfile::PagedFile;
 use error::BCDBError;
 use offset::Offset;
 
@@ -29,12 +30,12 @@ pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
-    file: Box<PageFile>,
+    file: Box<PagedFile>,
     pub last_len: u64
 }
 
 impl TableFile {
-    pub fn new (file: Box<PageFile>) -> Result<TableFile, BCDBError> {
+    pub fn new (file: Box<PagedFile>) -> Result<TableFile, BCDBError> {
         let last_len = file.len()?;
         Ok(TableFile {file, last_len})
     }
@@ -74,7 +75,7 @@ impl TableFile {
     }
 }
 
-impl PageFile for TableFile {
+impl PagedFile for TableFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }

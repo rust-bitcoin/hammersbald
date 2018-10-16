@@ -24,7 +24,8 @@ use datafile::{DataFile, Content};
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
 use logfile::LogFile;
-use page::{PAGE_SIZE, PageFile};
+use page::{PAGE_SIZE};
+use pagedfile::PagedFile;
 use tablefile::TablePage;
 
 use siphasher::sip::SipHasher;

@@ -22,7 +22,7 @@ use tablefile::{TableFile, TablePage};
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
 use memtable::MemTable;
-use page::PageFile;
+use pagedfile::PagedFile;
 use error::{BCDBError};
 
 /// a trait to create a new db

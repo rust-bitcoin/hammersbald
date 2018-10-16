@@ -20,7 +20,9 @@
 //!
 use error::BCDBError;
 use offset::Offset;
-use page::{PageFile, Page, PAGE_SIZE};
+use page::{Page, PAGE_SIZE};
+use pagedfile::PagedFile;
+
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -102,7 +104,7 @@ impl RolledFile {
     }
 }
 
-impl PageFile for RolledFile {
+impl PagedFile for RolledFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         for file in &mut self.files.values_mut() {
             file.flush()?;
@@ -199,7 +201,7 @@ impl SingleFile {
     }
 }
 
-impl PageFile for SingleFile {
+impl PagedFile for SingleFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         Ok(self.file.lock().unwrap().flush()?)
     }

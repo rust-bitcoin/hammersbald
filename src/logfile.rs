@@ -18,18 +18,19 @@
 //! A synchronous append writer of a log file.
 //!
 
-use page::{Page, PageFile, PAGE_SIZE};
+use page::{Page, PAGE_SIZE};
+use pagedfile::PagedFile;
 use tablefile::{TableFile, TablePage};
 use error::BCDBError;
 use offset::Offset;
 
 /// The buffer pool
 pub struct LogFile {
-    rw: Box<PageFile>
+    rw: Box<PagedFile>
 }
 
 impl LogFile {
-    pub fn new(rw: Box<PageFile>) -> LogFile {
+    pub fn new(rw: Box<PagedFile>) -> LogFile {
         LogFile { rw }
     }
 
@@ -67,7 +68,7 @@ impl LogFile {
     }
 }
 
-impl PageFile for LogFile {
+impl PagedFile for LogFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         Ok(self.rw.flush()?)
     }

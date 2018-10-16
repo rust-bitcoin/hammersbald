@@ -18,7 +18,7 @@
 //! Specific implementation details to link file
 //!
 
-use page::PageFile;
+use pagedfile::PagedFile;
 use error::BCDBError;
 use offset::Offset;
 use datafile::{DataFileImpl, DataIterator, DataPageIterator, DataEntry, Content};
@@ -30,7 +30,7 @@ pub struct LinkFile {
 
 impl LinkFile {
     /// create new file
-    pub fn new(rw: Box<PageFile>) -> Result<LinkFile, BCDBError> {
+    pub fn new(rw: Box<PagedFile>) -> Result<LinkFile, BCDBError> {
         Ok(LinkFile{im: DataFileImpl::new(rw)?})
     }
 

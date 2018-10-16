@@ -35,6 +35,7 @@ extern crate rand;
 extern crate byteorder;
 
 mod page;
+mod pagedfile;
 mod logfile;
 mod tablefile;
 mod cache;

@@ -18,7 +18,7 @@
 //!
 use error::BCDBError;
 use offset::Offset;
-use page::{PageIterator, PageFile};
+use pagedfile::{PagedFileIterator, PagedFile};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
@@ -217,13 +217,13 @@ impl LinkChain {
 
 /// An iterator returning envelopes in offset ascending order
 pub struct ForwardEnvelopeIterator<'file> {
-    reader: PageIterator<'file>
+    reader: PagedFileIterator<'file>
 }
 
 impl<'file> ForwardEnvelopeIterator<'file> {
     /// create a new iterator returning envelopes in offset ascending order
-    pub fn new (file: &'file PageFile, start: Offset) -> ForwardEnvelopeIterator<'file> {
-        ForwardEnvelopeIterator{reader: PageIterator::new(file, start)}
+    pub fn new (file: &'file PagedFile, start: Offset) -> ForwardEnvelopeIterator<'file> {
+        ForwardEnvelopeIterator{reader: PagedFileIterator::new(file, start)}
     }
 }
 
@@ -240,14 +240,14 @@ impl<'file> Iterator for ForwardEnvelopeIterator<'file> {
 
 /// An iterator returning envelopes in offset descending order
 pub struct BackwardEnvelopeIterator<'file> {
-    file: &'file PageFile,
-    reader: PageIterator<'file>
+    file: &'file PagedFile,
+    reader: PagedFileIterator<'file>
 }
 
 impl<'file> BackwardEnvelopeIterator<'file> {
     /// create a new iterator returning envelopes in offset ascending order
-    pub fn new (file: &'file PageFile, start: Offset) -> BackwardEnvelopeIterator<'file> {
-        BackwardEnvelopeIterator{file, reader: PageIterator::new(file, start)}
+    pub fn new (file: &'file PagedFile, start: Offset) -> BackwardEnvelopeIterator<'file> {
+        BackwardEnvelopeIterator{file, reader: PagedFileIterator::new(file, start)}
     }
 }
 
@@ -259,7 +259,7 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
         let previous = Offset::from(self.reader.read_u48::<BigEndian>().unwrap());
         let mut buf = vec!(0u8; length - 9);
         self.reader.read(&mut buf).unwrap();
-        self.reader = PageIterator::new(self.file, previous);
+        self.reader = PagedFileIterator::new(self.file, previous);
         Some(Envelope::deserialize(&mut Cursor::new(&buf)).unwrap())
     }
 }
