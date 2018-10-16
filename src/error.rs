@@ -98,10 +98,3 @@ impl<T> convert::From<sync::PoisonError<T>> for BCDBError {
         BCDBError::Poisoned(err.to_string())
     }
 }
-
-/// an iterator that may fail on next() with a BCDBError
-pub trait MayFailIterator<I> : IntoIterator<Item=I> {
-    /// get next item.
-    /// Error is returned only on data corruption.
-    fn next(&mut self) -> Result<Option<I>, BCDBError>;
-}
