@@ -60,9 +60,11 @@ pub enum Payload {
     /// payload that carries IndexedData
     Indexed(IndexedData),
     /// payload that carries OwnedData
-    Owned(OwnedData),
-    /// payload that carries a LinkChain
-    Link(Link)
+    Referred(ReferredData),
+    /// payload that carries a Link
+    Link(Link),
+    /// payload thay carries a Table entry
+    Table(Offset)
 }
 
 impl Payload {
@@ -73,14 +75,12 @@ impl Payload {
                 result.write_u8(0).unwrap();
                 indexed.serialize(result);
             },
-            Payload::Owned(owned) => {
+            Payload::Referred(owned) => {
                 result.write_u8(1).unwrap();
                 owned.serialize(result);
             },
-            Payload::Link(link) => {
-                result.write_u8(2).unwrap();
-                link.serialize(result);
-            }
+            // Link and Table are not serialized with a type
+            _ => {}
         }
     }
 
@@ -88,8 +88,8 @@ impl Payload {
     pub fn deserialize(reader: &mut Read) -> Result<Payload, BCDBError> {
         match reader.read_u8()? {
             0 => Ok(Payload::Indexed(IndexedData::deserialize(reader)?)),
-            1 => Ok(Payload::Owned(OwnedData::deserialize(reader)?)),
-            2 => Ok(Payload::Link(Link::deserialize(reader)?)),
+            1 => Ok(Payload::Referred(ReferredData::deserialize(reader)?)),
+            // Link and Table are not serialized with a type
             _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
         }
     }
@@ -138,14 +138,14 @@ impl IndexedData {
 }
 
 /// data that is indirectly accessible through keyed data
-pub struct OwnedData {
+pub struct ReferredData {
     /// data
     pub data: Vec<u8>,
     /// further accessible data (OwnedData)
     pub owned: Vec<Offset>
 }
 
-impl OwnedData {
+impl ReferredData {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         result.write_u8(self.data.len() as u8).unwrap();
@@ -157,7 +157,7 @@ impl OwnedData {
     }
 
     /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<OwnedData, BCDBError> {
+    pub fn deserialize(reader: &mut Read) -> Result<ReferredData, BCDBError> {
         let data_len = reader.read_u8()? as usize;
         let mut data = vec!(0u8; data_len);
         reader.read(data.as_mut_slice())?;
@@ -167,7 +167,7 @@ impl OwnedData {
         for _ in 0 .. owned_len {
             owned.push(Offset::from(reader.read_u48::<BigEndian>()?));
         }
-        Ok(OwnedData{data, owned})
+        Ok(ReferredData {data, owned})
     }
 }
 
