@@ -19,7 +19,7 @@
 //!
 
 use page::Page;
-use pagedfile::{PagedFile, PagedFileIterator};
+use pagedfile::{FileOps, PagedFile, PagedFileIterator};
 use error::BCDBError;
 use offset::Offset;
 
@@ -68,7 +68,7 @@ impl LogFile {
     }
 }
 
-impl PagedFile for LogFile {
+impl FileOps for LogFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         Ok(self.file.flush()?)
     }
@@ -85,6 +85,10 @@ impl PagedFile for LogFile {
         self.file.sync()
     }
 
+    fn shutdown (&mut self) {}
+}
+
+impl PagedFile for LogFile {
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         self.file.read_page(offset)
     }
@@ -92,6 +96,4 @@ impl PagedFile for LogFile {
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.append_page(page)
     }
-
-    fn shutdown (&mut self) {}
 }

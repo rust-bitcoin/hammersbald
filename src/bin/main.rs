@@ -41,7 +41,7 @@ pub fn main () {
         thread_rng().fill(&mut data[..]);
         thread_rng().fill(&mut key[..]);
 
-        let offset = db.put(&key, &data).unwrap();
+        let offset = db.put(&key, &data, vec!()).unwrap();
         if i % 1000 == 0 {
             check.push ((offset, key.to_vec(), data.to_vec()));
         }

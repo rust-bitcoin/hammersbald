@@ -25,8 +25,7 @@ use std::io;
 use std::io::Read;
 use std::cmp::min;
 
-/// a read-write-seek-able storage
-pub trait PagedFile: Send + Sync {
+pub trait FileOps {
     /// flush buffered writes
     fn flush(&mut self) -> Result<(), BCDBError>;
     /// length of the storage
@@ -35,12 +34,16 @@ pub trait PagedFile: Send + Sync {
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError>;
     /// tell OS to flush buffers to disk
     fn sync (&self) -> Result<(), BCDBError>;
+    /// shutdown async write
+    fn shutdown (&mut self);
+}
+
+/// by page accessed storage
+pub trait PagedFile: FileOps + Send + Sync {
     /// read a page at offset
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError>;
     /// append a page
     fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
-    /// shutdown async write
-    fn shutdown (&mut self);
 }
 
 pub trait RandomWritePagedFile : PagedFile {

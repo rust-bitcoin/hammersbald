@@ -18,7 +18,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use pagedfile::PagedFile;
+use pagedfile::{FileOps, PagedFile};
 use offset::Offset;
 use error::BCDBError;
 
@@ -44,7 +44,7 @@ impl CachedFile {
     }
 }
 
-impl PagedFile for CachedFile {
+impl FileOps for CachedFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }
@@ -62,6 +62,12 @@ impl PagedFile for CachedFile {
         self.file.sync()
     }
 
+    fn shutdown(&mut self) {
+        self.file.shutdown()
+    }
+}
+
+impl PagedFile for CachedFile {
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         {
             let cache = self.cache.read().unwrap();
@@ -82,10 +88,6 @@ impl PagedFile for CachedFile {
         cache.append(page.clone());
         self.file.append_page(page)
 
-    }
-
-    fn shutdown(&mut self) {
-        self.file.shutdown()
     }
 }
 

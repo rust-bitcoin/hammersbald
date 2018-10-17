@@ -19,7 +19,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use pagedfile::{PagedFile, RandomWritePagedFile};
+use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use error::BCDBError;
 use offset::Offset;
 
@@ -69,7 +69,7 @@ impl TableFile {
     }
 }
 
-impl PagedFile for TableFile {
+impl FileOps for TableFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }
@@ -86,6 +86,10 @@ impl PagedFile for TableFile {
         self.file.sync()
     }
 
+    fn shutdown (&mut self) {}
+}
+
+impl PagedFile for TableFile {
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         self.file.read_page(offset)
     }
@@ -93,8 +97,6 @@ impl PagedFile for TableFile {
     fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
-
-    fn shutdown (&mut self) {}
 }
 
 impl RandomWritePagedFile for TableFile {

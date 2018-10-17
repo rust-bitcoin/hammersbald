@@ -18,32 +18,26 @@
 //! Specific implementation details to link file
 //!
 
-use pagedfile::PagedFile;
+use pagedfile::{FileOps, PagedFile};
 use error::BCDBError;
 use offset::Offset;
-use content::Link;
-use appender::Appender;
+use format::{Formatter, Link};
 
 /// file storing data link chains from hash table to data
 pub struct LinkFile {
-    appender: Appender
+    appender: Formatter
 }
 
 impl LinkFile {
     /// create new file
     pub fn new(file: Box<PagedFile>) -> Result<LinkFile, BCDBError> {
         let start = Offset::from(file.len()?);
-        Ok(LinkFile{ appender: Appender::new(file, start)? })
+        Ok(LinkFile{ appender: Formatter::new(file, start)? })
     }
 
     /// initialize
     pub fn init(&mut self) -> Result<(), BCDBError> {
         self.appender.append_slice(&[0xBC, 0xDB])
-    }
-
-    /// shutdown
-    pub fn shutdown (&mut self) {
-        self.appender.shutdown()
     }
 
     /// append data
@@ -52,25 +46,26 @@ impl LinkFile {
         link.serialize(&mut ls);
         self.appender.append_slice(ls.as_slice())
     }
+}
 
-    /// truncate file
-    pub fn truncate(&mut self, offset: u64) -> Result<(), BCDBError> {
-        self.appender.truncate (offset)
-    }
-
-    /// flush buffers
-    pub fn flush (&mut self) -> Result<(), BCDBError> {
+impl FileOps for LinkFile {
+    fn flush(&mut self) -> Result<(), BCDBError> {
         self.appender.flush()
     }
 
-    /// sync file on file system
-    pub fn sync (&self) -> Result<(), BCDBError> {
+    fn len(&self) -> Result<u64, BCDBError> {
+        self.appender.len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        self.appender.truncate (new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
         self.appender.sync()
     }
 
-    /// get file length
-    pub fn len (&self) -> Result<u64, BCDBError> {
-        self.appender.len()
+    fn shutdown(&mut self) {
+        self.appender.shutdown()
     }
 }
-

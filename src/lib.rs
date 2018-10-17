@@ -36,7 +36,6 @@ extern crate byteorder;
 
 mod page;
 mod pagedfile;
-mod appender;
 mod logfile;
 mod tablefile;
 mod cachedfile;
@@ -45,7 +44,7 @@ mod rolledfile;
 mod asyncfile;
 mod linkfile;
 mod memtable;
-pub mod content;
+pub mod format;
 pub mod api;
 pub mod datafile;
 pub mod error;

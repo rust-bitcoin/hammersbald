@@ -26,7 +26,7 @@ use datafile::DataFile;
 use linkfile::LinkFile;
 use offset::Offset;
 use page::{Page,PAGE_SIZE};
-use pagedfile::{PagedFile, RandomWritePagedFile};
+use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use asyncfile::AsyncFile;
 use cachedfile::CachedFile;
 
@@ -65,14 +65,14 @@ impl BCDBFactory for Transient {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
-                cached_data_pages)?))?;
+                cached_data_pages)?), Offset::invalid())?;
         let link = LinkFile::new(Box::new(Transient::new(true)))?;
 
         BCDB::new(log, table, data, link)
     }
 }
 
-impl PagedFile for Transient {
+impl FileOps for Transient {
     fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
 
     fn len(&self) -> Result<u64, BCDBError> {
@@ -91,6 +91,11 @@ impl PagedFile for Transient {
 
     fn sync(&self) -> Result<(), BCDBError> { Ok(()) }
 
+    fn shutdown (&mut self) {
+    }
+}
+
+impl PagedFile for Transient {
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
@@ -107,9 +112,6 @@ impl PagedFile for Transient {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.finish()[..])?;
         Ok(())
-    }
-
-    fn shutdown (&mut self) {
     }
 }
 

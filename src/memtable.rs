@@ -20,13 +20,14 @@
 //!
 use error::BCDBError;
 use offset::Offset;
-use datafile::{DataFile, Content};
+use datafile::DataFile;
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
 use logfile::LogFile;
 use page::{PAGE_SIZE};
-use pagedfile::{PagedFile, RandomWritePagedFile};
+use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use tablefile::TablePage;
+use format::Payload;
 
 use siphasher::sip::SipHasher;
 use rand::{thread_rng, RngCore};
@@ -239,9 +240,9 @@ impl MemTable {
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
                     let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
-                    if let Some(Content::Data(data_key, data)) = data_file.get_content(data_offset)? {
-                        if data_key.as_slice() == key {
-                            return Ok(Some((data_offset, data_key, data)));
+                    if let Some(Payload::Indexed(indexed)) = data_file.get_payload(data_offset)? {
+                        if indexed.key.as_slice() == key {
+                            return Ok(Some((data_offset, indexed.key, indexed.data.data)));
                         }
                     }
                 }
@@ -419,7 +420,7 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let o = db.put(&key, &data).unwrap();
+            let o = db.put(&key, &data, vec!()).unwrap();
             check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();

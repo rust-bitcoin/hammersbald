@@ -19,7 +19,7 @@
 use offset::Offset;
 use logfile::LogFile;
 use tablefile::TableFile;
-use datafile::{DataFile, Content};
+use datafile::DataFile;
 use linkfile::LinkFile;
 use memtable::MemTable;
 use error::{BCDBError};
@@ -48,17 +48,10 @@ pub trait BCDBAPI {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError>;
+    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError>;
 
     /// retrieve single data by key
     fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError>;
-
-    /// append some content without key
-    /// only the returned offset can be used to retrieve
-    fn put_content(&mut self, content: &[u8]) -> Result<Offset, BCDBError>;
-
-    /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>), BCDBError>;
 }
 
 impl BCDB {
@@ -75,11 +68,6 @@ impl BCDB {
     fn recover(&mut self) -> Result<(), BCDBError> {
         let data_len = self.mem.recover()?;
         self.data.truncate(data_len)
-    }
-
-    /// get data iterator - this also includes no longer referenced data
-    pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<u8>, Vec<u8>)> + 'a {
-        self.data.iter()
     }
 
     /// get hash table bucket iterator
@@ -114,7 +102,7 @@ impl BCDBAPI for BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaddressable
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
@@ -122,7 +110,7 @@ impl BCDBAPI for BCDB {
             }
         }
 
-        let data_offset = self.data.append_data(key, data)?;
+        let data_offset = self.data.append_data(key, data, referred)?;
         self.mem.put(key, data_offset)?;
         Ok(data_offset)
     }
@@ -130,21 +118,6 @@ impl BCDBAPI for BCDB {
     /// retrieve the single data associated with this key
     fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
         self.mem.get_unique(key,  &self.data)
-    }
-
-    /// append some content without key
-    /// only the returned offset can be used to retrieve
-    fn put_content(&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
-        self.data.append_data_extension(data)
-    }
-
-    /// get some content at a known offset
-    fn get_content(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>), BCDBError> {
-        match self.data.get_content(offset)? {
-            Some(Content::Extension(data)) => return Ok((Vec::new(), data)),
-            Some(Content::Data(key, data)) => return Ok((key, data)),
-            _ => return Err(BCDBError::Corrupted(format!("wrong offset {}", offset)))
-        }
     }
 }
 
@@ -174,7 +147,7 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let offset = db.put(&key, &data).unwrap();
+            let offset = db.put(&key, &data, vec!()).unwrap();
             check.insert(key, (offset, data));
         }
         db.batch().unwrap();
@@ -186,7 +159,7 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let offset = db.put(&key, &data).unwrap();
+            let offset = db.put(&key, &data, vec!()).unwrap();
             check.insert(key, (offset, data));
         }
         db.batch().unwrap();

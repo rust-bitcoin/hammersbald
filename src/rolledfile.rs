@@ -21,7 +21,7 @@
 use error::BCDBError;
 use offset::Offset;
 use page::{Page, PAGE_SIZE};
-use pagedfile::{PagedFile, RandomWritePagedFile};
+use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use singlefile::SingleFile;
 
 use std::collections::HashMap;
@@ -101,7 +101,7 @@ impl RolledFile {
     }
 }
 
-impl PagedFile for RolledFile {
+impl FileOps for RolledFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         for file in &mut self.files.values_mut() {
             file.flush()?;
@@ -137,6 +137,10 @@ impl PagedFile for RolledFile {
         Ok(())
     }
 
+    fn shutdown (&mut self) {}
+}
+
+impl PagedFile for RolledFile {
     fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         let chunk = (offset.as_u64() / self.chunk_size) as u16;
         if let Some(file) = self.files.get(&chunk) {
@@ -163,9 +167,6 @@ impl PagedFile for RolledFile {
             return Err(BCDBError::Corrupted(format!("missing chunk in append {}", chunk)));
         }
     }
-
-
-    fn shutdown (&mut self) {}
 }
 
 impl RandomWritePagedFile for RolledFile {

@@ -19,7 +19,7 @@
 //!
 
 use page::Page;
-use pagedfile::PagedFile;
+use pagedfile::{FileOps, PagedFile};
 
 use error::BCDBError;
 use offset::Offset;
@@ -72,8 +72,7 @@ impl AsyncFile {
     }
 }
 
-impl PagedFile for AsyncFile {
-    #[allow(unused_assignments)]
+impl FileOps for AsyncFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         let mut queue = self.inner.queue.lock().unwrap();
         self.inner.work.notify_one();
@@ -96,17 +95,6 @@ impl PagedFile for AsyncFile {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        self.inner.file.lock().unwrap().read_page(offset)
-    }
-
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        let mut queue = self.inner.queue.lock().unwrap();
-        queue.push_back(page);
-        self.inner.work.notify_one();
-        Ok(())
-    }
-
     fn shutdown (&mut self) {
         let mut queue = self.inner.queue.lock().unwrap();
         self.inner.work.notify_one();
@@ -116,5 +104,18 @@ impl PagedFile for AsyncFile {
         let mut file = self.inner.file.lock().unwrap();
         file.flush().unwrap();
         self.inner.run.store(false, Ordering::Release)
+    }
+}
+
+impl PagedFile for AsyncFile {
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        self.inner.file.lock().unwrap().read_page(offset)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        let mut queue = self.inner.queue.lock().unwrap();
+        queue.push_back(page);
+        self.inner.work.notify_one();
+        Ok(())
     }
 }

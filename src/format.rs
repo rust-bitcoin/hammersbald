@@ -19,8 +19,7 @@
 use error::BCDBError;
 use offset::Offset;
 use page::{Page, PAGE_SIZE};
-use pagedfile::{PagedFileIterator, PagedFile};
-use appender::Appender;
+use pagedfile::{PagedFileIterator, PagedFile, FileOps};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
@@ -61,7 +60,7 @@ pub enum Payload {
     /// payload that carries IndexedData
     Indexed(IndexedData),
     /// payload that carries OwnedData
-    Referred(ReferredData),
+    Referred(Data),
     /// payload that carries a Link
     Link(Link),
     /// payload thay carries a Table entry
@@ -89,10 +88,45 @@ impl Payload {
     pub fn deserialize(reader: &mut Read) -> Result<Payload, BCDBError> {
         match reader.read_u8()? {
             0 => Ok(Payload::Indexed(IndexedData::deserialize(reader)?)),
-            1 => Ok(Payload::Referred(ReferredData::deserialize(reader)?)),
+            1 => Ok(Payload::Referred(Data::deserialize(reader)?)),
             // Link and Table are not serialized with a type
             _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
         }
+    }
+}
+
+
+/// data that is accessible only if its position is known
+pub struct Data {
+    /// data
+    pub data: Vec<u8>,
+    /// further accessible data (OwnedData)
+    pub referred: Vec<Offset>
+}
+
+impl Data {
+    /// serialize for storage
+    pub fn serialize (&self, result: &mut Write) {
+        result.write_u8(self.data.len() as u8).unwrap();
+        result.write(self.data.as_slice()).unwrap();
+        result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
+        for offset in &self.referred {
+            result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
+        }
+    }
+
+    /// deserialize from storage
+    pub fn deserialize(reader: &mut Read) -> Result<Data, BCDBError> {
+        let data_len = reader.read_u8()? as usize;
+        let mut data = vec!(0u8; data_len);
+        reader.read(data.as_mut_slice())?;
+
+        let owned_len = reader.read_u16::<BigEndian>()? as usize;
+        let mut referred = Vec::new();
+        for _ in 0 .. owned_len {
+            referred.push(Offset::from(reader.read_u48::<BigEndian>()?));
+        }
+        Ok(Data {data, referred })
     }
 }
 
@@ -101,9 +135,7 @@ pub struct IndexedData {
     /// key
     pub key: Vec<u8>,
     /// data
-    pub data: Vec<u8>,
-    /// further accessible data (OwnedData)
-    pub referred: Vec<Offset>
+    pub data: Data
 }
 
 impl IndexedData {
@@ -111,12 +143,7 @@ impl IndexedData {
     pub fn serialize (&self, result: &mut Write) {
         result.write_u8(self.key.len() as u8).unwrap();
         result.write(self.key.as_slice()).unwrap();
-        result.write_u8(self.data.len() as u8).unwrap();
-        result.write(self.data.as_slice()).unwrap();
-        result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
-        for offset in &self.referred {
-            result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
-        }
+        self.data.serialize(result);
     }
 
     /// deserialize from storage
@@ -125,50 +152,8 @@ impl IndexedData {
         let mut key = vec!(0u8; key_len);
         reader.read(key.as_mut_slice())?;
 
-        let data_len = reader.read_u8()? as usize;
-        let mut data = vec!(0u8; data_len);
-        reader.read(data.as_mut_slice())?;
-
-        let owned_len = reader.read_u16::<BigEndian>()? as usize;
-        let mut referred = Vec::new();
-        for _ in 0 .. owned_len {
-            referred.push(Offset::from(reader.read_u48::<BigEndian>()?));
-        }
-        Ok(IndexedData{key, data, referred })
-    }
-}
-
-/// data that is indirectly accessible through keyed data
-pub struct ReferredData {
-    /// data
-    pub data: Vec<u8>,
-    /// further accessible data (OwnedData)
-    pub referred: Vec<Offset>
-}
-
-impl ReferredData {
-    /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
-        result.write_u8(self.data.len() as u8).unwrap();
-        result.write(self.data.as_slice()).unwrap();
-        result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
-        for offset in &self.referred {
-            result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
-        }
-    }
-
-    /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<ReferredData, BCDBError> {
-        let data_len = reader.read_u8()? as usize;
-        let mut data = vec!(0u8; data_len);
-        reader.read(data.as_mut_slice())?;
-
-        let owned_len = reader.read_u16::<BigEndian>()? as usize;
-        let mut referred = Vec::new();
-        for _ in 0 .. owned_len {
-            referred.push(Offset::from(reader.read_u48::<BigEndian>()?));
-        }
-        Ok(ReferredData {data, referred })
+        let data = Data::deserialize(reader)?;
+        Ok(IndexedData{key, data })
     }
 }
 
@@ -203,53 +188,168 @@ impl Link {
     }
 }
 
-/// An Envelope writer for PagedFile
-pub struct EnvelopeAppender {
-    appender: Appender,
-    previous: Offset,
+/// Formatter for PagedFile
+pub struct Formatter {
+    file: Box<PagedFile>,
+    page: Option<Page>,
+    page_offset: Offset,
+    append_pos: Offset,
 }
 
-impl EnvelopeAppender {
-    /// create a new envelope appender for a file
-    /// envelope will be appended at next
-    /// assumes that previous is the offset of the last appended envelope
-    pub fn new (file: Box<PagedFile>, start: Offset, previous: Offset) -> Result<EnvelopeAppender, BCDBError> {
-        Ok(EnvelopeAppender {appender: Appender::new(file, start)?, previous})
+impl Formatter {
+    /// create a new formatter for a file
+    pub fn new (file: Box<PagedFile>, start: Offset) -> Result<Formatter, BCDBError> {
+        Ok(Formatter {file, page: None, page_offset: start.this_page(), append_pos: start })
     }
 
-    /// wrap some data into an envelope and append to the file
-    /// returns the offset for next append
-    pub fn append(&mut self, payload: &[u8]) -> Result<Offset, BCDBError> {
-        let mut header = Vec::with_capacity(9);
-        header.write_u24::<BigEndian>(payload.len() as u32 + 9)?;
-        header.write_u48::<BigEndian>(self.previous.as_u64())?;
-        self.appender.append_slice(header.as_slice())?;
-        self.appender.append_slice(payload)?;
-        Ok(self.appender.position())
+    /// append a slice at current position
+    pub fn append_slice(&mut self, payload: &[u8]) -> Result<(), BCDBError> {
+        let mut wrote = 0;
+        while wrote < payload.len() {
+            let pos = self.append_pos.in_page_pos();
+            if self.page.is_none() {
+                self.page = Some(self.file.read_page(self.page_offset)?.unwrap_or(Page::new()));
+            }
+            if let Some(ref mut page) = self.page {
+                let space = min(PAGE_SIZE - pos, payload.len() - wrote);
+                page.payload[pos .. pos + space].copy_from_slice(&payload[wrote .. wrote + space]);
+                wrote += space;
+                self.append_pos += space as u64;
+                if self.append_pos.in_page_pos() == 0 {
+                    self.file.append_page(page.clone())?;
+                    self.page_offset = self.append_pos;
+                }
+            }
+            if self.append_pos.in_page_pos() == 0 {
+                self.page = None;
+            }
+        }
+        self.append_pos += payload.len() as u64;
+        Ok(())
+    }
+
+    /// read a slice of data
+    pub fn get_slice (&self, offset: Offset, length: u64) -> Result<Option<Vec<u8>>, BCDBError> {
+        // TODO : error propagation
+        Ok(ForwardSliceIterator::new(self.file.as_ref(), offset, length).next())
+    }
+
+    /// return next append position
+    pub fn position (&self) -> Offset {
+        self.append_pos
     }
 
     /// extend with contents from an iterator
     pub fn extend(&mut self, mut from: impl Iterator<Item=Vec<u8>>) -> Result<Offset, BCDBError> {
         while let Some(payload) = from.next() {
-            let next = self.appender.position();
-            self.append(payload.as_slice())?;
-            self.previous = next;
+            self.append_slice(payload.as_slice())?;
         }
-        Ok(self.appender.position())
+        Ok(self.append_pos)
     }
 }
 
-/// An iterator returning envelopes in offset ascending order
+impl FileOps for Formatter {
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        if self.append_pos.in_page_pos() > 0 {
+            if let Some(page) = self.page.clone() {
+                self.file.append_page(page)?;
+                self.append_pos = self.append_pos.this_page() + PAGE_SIZE as u64;
+                self.page_offset = self.append_pos;
+            }
+            self.page = None;
+        }
+        self.file.flush()
+    }
+
+    fn len(&self) -> Result<u64, BCDBError> {
+        self.file.len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        self.file.truncate(new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
+        self.file.sync()
+    }
+
+    fn shutdown(&mut self) {
+        self.file.shutdown()
+    }
+}
+
+/// a formatter for the data file
+pub struct DataFormatter {
+    formatter: Formatter,
+    previous: Offset
+}
+
+impl DataFormatter {
+    /// create a new formatter
+    pub fn new(file: Box<PagedFile>, start: Offset, previous: Offset) -> Result<DataFormatter, BCDBError> {
+        Ok(DataFormatter { formatter: Formatter::new(file, start)?, previous })
+    }
+
+    /// append a slice at current position
+    pub fn append_slice(&mut self, payload: &[u8]) -> Result<(), BCDBError> {
+        self.formatter.append_slice(payload)
+    }
+
+
+    /// get a stored content at offset
+    pub fn get_payload(&self, offset: Offset) -> Result<Option<Payload>, BCDBError> {
+        // TODO: propagate errors from next()
+        if let Some(envelope) = ForwardEnvelopeIterator::new(&self.formatter, offset).next() {
+            return Ok(Some(Payload::deserialize(&mut Cursor::new(envelope.payload.as_slice()))?));
+        }
+        Ok(None)
+    }
+
+    /// append data
+    pub fn append_payload (&mut self, payload: Payload) -> Result<Offset, BCDBError> {
+        let mut content = Vec::new();
+        payload.serialize(&mut content);
+        let mut envelope = Vec::new();
+        Envelope{length: content.len() as u32 + 9, previous: self.previous, payload: content}.serialize(&mut envelope);
+        let me = self.formatter.position();
+        self.formatter.append_slice(envelope.as_slice())?;
+        self.previous = me;
+        Ok(me)
+    }
+}
+
+impl FileOps for DataFormatter {
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        self.formatter.flush()
+    }
+
+    fn len(&self) -> Result<u64, BCDBError> {
+        self.formatter.len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        self.formatter.truncate(new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
+        self.formatter.sync()
+    }
+
+    fn shutdown(&mut self) {
+        self.formatter.shutdown()
+    }
+}
+
+/// An iterator returning data in offset ascending order
 pub struct ForwardEnvelopeIterator<'file> {
-    reader: PagedFileIterator<'file>,
-    fence: Offset
+    reader: &'file Formatter,
+    start: Offset
 }
 
 impl<'file> ForwardEnvelopeIterator<'file> {
     /// create a new iterator returning envelopes in offset ascending order
-    /// iteration is limited to [start .. fence]
-    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset) -> ForwardEnvelopeIterator<'file> {
-        ForwardEnvelopeIterator{reader: PagedFileIterator::new(file, start), fence}
+    pub fn new (reader: &'file Formatter, start: Offset) -> ForwardEnvelopeIterator<'file> {
+        ForwardEnvelopeIterator {reader, start}
     }
 }
 
@@ -257,28 +357,31 @@ impl<'file> Iterator for ForwardEnvelopeIterator<'file> {
     type Item = Envelope;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if self.reader.position() >= self.fence {
-            return None;
+        if let Some(header) = self.reader.get_slice(self.start, 9).unwrap() {
+            let mut cursor = Cursor::new(header);
+            let length = cursor.read_u24::<BigEndian>().unwrap() as u64;
+            let previous = Offset::from(cursor.read_u48::<BigEndian>().unwrap());
+            if let Some(payload) = self.reader.get_slice(self.start + 9, length - 9).unwrap() {
+                self.start += length;
+                return Some(Envelope{length: length as u32, previous, payload})
+            }
         }
-        let length = self.reader.read_u24::<BigEndian>().unwrap() as usize;
-        let mut buf = vec!(0u8; length - 3);
-        self.reader.read(&mut buf).unwrap();
-        Some(Envelope::deserialize(&mut Cursor::new(&buf[6..])).unwrap())
+        None
     }
 }
 
-/// An iterator returning envelopes in offset descending order
+/// An iterator returning data in offset descending order
 pub struct BackwardEnvelopeIterator<'file> {
-    file: &'file PagedFile,
-    reader: PagedFileIterator<'file>,
+    reader: &'file Formatter,
+    start: Offset,
     fence: Offset
 }
 
 impl<'file> BackwardEnvelopeIterator<'file> {
-    /// create a new iterator returning envelopes in offset ascending order
+    /// create a new iterator returning data in offset ascending order
     /// iteration is limited to [fence .. start]
-    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset) -> BackwardEnvelopeIterator<'file> {
-        BackwardEnvelopeIterator{file, reader: PagedFileIterator::new(file, start), fence}
+    pub fn new (reader: &'file Formatter, start: Offset, fence: Offset) -> BackwardEnvelopeIterator<'file> {
+        BackwardEnvelopeIterator { reader, start, fence}
     }
 }
 
@@ -289,12 +392,16 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
         if self.reader.position() < self.fence {
             return None;
         }
-        let length = self.reader.read_u24::<BigEndian>().unwrap() as usize;
-        let previous = Offset::from(self.reader.read_u48::<BigEndian>().unwrap());
-        let mut buf = vec!(0u8; length - 9);
-        self.reader.read(&mut buf).unwrap();
-        self.reader = PagedFileIterator::new(self.file, previous);
-        Some(Envelope::deserialize(&mut Cursor::new(&buf)).unwrap())
+        if let Some(header) = self.reader.get_slice(self.start, 9).unwrap() {
+            let mut cursor = Cursor::new(header);
+            let length = cursor.read_u24::<BigEndian>().unwrap() as u64;
+            let previous = Offset::from(cursor.read_u48::<BigEndian>().unwrap());
+            if let Some(payload) = self.reader.get_slice(self.start + 9, length - 9).unwrap() {
+                self.start = previous;
+                return Some(Envelope { length: length as u32, previous, payload })
+            }
+        }
+        None
     }
 }
 
@@ -302,15 +409,13 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
 /// An iterator returning uniform length slices of data in offset ascending order
 pub struct ForwardSliceIterator<'file> {
     length: u64,
-    reader: PagedFileIterator<'file>,
-    fence: Offset
+    reader: PagedFileIterator<'file>
 }
 
 impl<'file> ForwardSliceIterator<'file> {
     /// create a new iterator returning uniform length slices of data in offset ascending order
-    /// iteration is limited to [start .. fence]
-    pub fn new (file: &'file PagedFile, start: Offset, fence: Offset, length: u64) -> ForwardSliceIterator<'file> {
-        ForwardSliceIterator {reader: PagedFileIterator::new(file, start), fence, length}
+    pub fn new (file: &'file PagedFile, start: Offset, length: u64) -> ForwardSliceIterator<'file> {
+        ForwardSliceIterator {reader: PagedFileIterator::new(file, start), length}
     }
 }
 
@@ -318,12 +423,12 @@ impl<'file> Iterator for ForwardSliceIterator<'file> {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if self.reader.position() >= self.fence {
-            return None;
-        }
         let mut buf = vec!(0u8; self.length as usize);
-        self.reader.read(&mut buf).unwrap();
-        Some(buf)
+        let length = self.reader.read(&mut buf).unwrap();
+        if length > 0 {
+            return Some(buf);
+        }
+        None
     }
 }
 
