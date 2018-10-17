@@ -316,24 +316,6 @@ impl DataEntry {
     pub fn new_data_extension (data: &[u8]) -> DataEntry {
         DataEntry{data_type: DataType::Extension, data: data.to_vec()}
     }
-
-    pub fn new_link (links: Vec<(u32, Offset)>, next: Offset) -> DataEntry {
-        let mut sp = Vec::new();
-        sp.write_u8(links.len() as u8).unwrap();
-        sp.extend( links.iter().fold(Vec::new(), |mut buf, s| {
-            buf.write_u32::<BigEndian>(s.0).unwrap();
-            buf
-        }));
-
-        let offsets = links.iter().fold(Vec::new(), |mut buf, s| {
-            buf.write_u48::<BigEndian>(s.1.as_u64()).unwrap();
-            buf
-        });
-
-        sp.extend(offsets);
-        sp.write_u48::<BigEndian>(next.as_u64()).unwrap();
-        DataEntry{data_type: DataType::Link, data: sp.to_vec()}
-    }
 }
 
 pub(crate) struct DataIterator<'file> {

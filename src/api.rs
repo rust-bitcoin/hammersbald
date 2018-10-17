@@ -82,11 +82,6 @@ impl BCDB {
         self.data.iter()
     }
 
-    /// get link iterator - this also includes no longer used links
-    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<(u32, Offset)>, Offset)> + 'a {
-        self.mem.link_iterator()
-    }
-
     /// get hash table bucket iterator
     pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=Offset> +'a {
         self.mem.iter()

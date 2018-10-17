@@ -138,11 +138,6 @@ impl MemTable {
         Ok(data_len)
     }
 
-    /// get link iterator - this also includes no longer used links
-    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<(u32, Offset)>, Offset)> + 'a {
-        self.link_file.iter()
-    }
-
     pub fn flush (&mut self) -> Result<(), BCDBError> {
         if self.dirty.is_dirty() {
             // first page
@@ -151,44 +146,13 @@ impl MemTable {
             page.write_offset(6, Offset::from(self.step as u64))?;
             page.write_u64(12, self.sip0)?;
             page.write_u64(20, self.sip1)?;
-            for b in 0 .. min(self.buckets.len(), BUCKETS_FIRST_PAGE) {
-                self.write_offset_to_page(b, &mut page, b, FIRST_PAGE_HEAD)?;
-            }
-            self.table_file.write_table_page(page)?;
 
-            // other pages
-            let flags : Vec<bool> = self.dirty.page_flags().collect();
-            for (pn_1 /* page number - 1 */, dirty) in flags.iter().skip(1).enumerate() {
-                if *dirty {
-                    page = TablePage::new(Offset::from((pn_1+1) as u64 * PAGE_SIZE as u64));
-                    let start = BUCKETS_PER_PAGE*pn_1 + BUCKETS_FIRST_PAGE;
-                    let end = min(self.buckets.len(), (pn_1+1)*BUCKETS_PER_PAGE + BUCKETS_FIRST_PAGE);
-                    for (n, b) in (start .. end).enumerate() {
-                        self.write_offset_to_page(b, &mut page, n, 0)?;
-                    }
-                    self.table_file.write_table_page(page)?;
-                }
-            }
+            // TODO
 
             self.link_file.flush()?;
             self.table_file.flush()?;
         }
         Ok(())
-    }
-
-    fn write_offset_to_page(&mut self, bucket: usize, page: &mut TablePage, i: usize, head: usize) -> Result<(), BCDBError> {
-        let ref mut bucket = self.buckets[bucket];
-        let mut link = Offset::invalid();
-        let links = bucket.hashes.iter().zip(bucket.offsets.iter())
-            .fold(Vec::new(), |mut a, e|
-                {
-                    a.push((*e.0, Offset::from(*e.1)));
-                    a
-                });
-        for chunk in links.chunks(255) {
-            link = self.link_file.append_link(chunk.to_vec(), link)?;
-        }
-        page.write_offset(i * BUCKET_SIZE + head, link)
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
@@ -338,10 +302,6 @@ impl Dirty {
         self.bits.iter().any(|n| *n != 0)
     }
 
-    pub fn page_flags<'m>(&'m self) -> impl Iterator<Item=bool> + 'm {
-        PageIterator::new(&self)
-    }
-
     pub fn append(&mut self) {
         self.used += 1;
         if self.used >= (self.bits.len() << 6) {
@@ -370,18 +330,18 @@ impl<'a> Iterator for BucketIterator<'a> {
     }
 }
 
-struct PageIterator<'b> {
+struct DirtyIterator<'b> {
     bits: &'b Dirty,
     page: usize
 }
 
-impl<'b> PageIterator<'b> {
-    pub fn new(bits: &'b Dirty) -> PageIterator<'b> {
-        PageIterator {bits, page: 0}
+impl<'b> DirtyIterator<'b> {
+    pub fn new(bits: &'b Dirty) -> DirtyIterator<'b> {
+        DirtyIterator {bits, page: 0}
     }
 }
 
-impl<'b> Iterator for PageIterator<'b> {
+impl<'b> Iterator for DirtyIterator<'b> {
     type Item = bool;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
