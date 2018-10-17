@@ -148,7 +148,7 @@ impl PagedFile for RolledFile {
         Ok(None)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let chunk = (self.len / self.chunk_size) as u16;
 
         if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
@@ -158,8 +158,9 @@ impl PagedFile for RolledFile {
         }
 
         if let Some (file) = self.files.get_mut(&chunk) {
-            self.len = file.append_page(page)? + chunk as u64 * self.chunk_size;
-            return Ok(self.len)
+            file.append_page(page)?;
+            self.len += chunk as u64 * self.chunk_size;
+            return Ok(())
         }
         else {
             return Err(BCDBError::Corrupted(format!("missing chunk in append {}", chunk)));
@@ -236,11 +237,11 @@ impl PagedFile for SingleFile {
         Ok(Some(Page::from_buf(buffer)))
     }
 
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut file = self.file.lock().unwrap();
         file.write(&page.finish()[..])?;
         self.len += PAGE_SIZE as u64;
-        Ok(self.len)
+        Ok(())
     }
 
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {

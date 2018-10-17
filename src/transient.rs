@@ -28,6 +28,7 @@ use offset::Offset;
 use page::{Page,PAGE_SIZE};
 use pagedfile::PagedFile;
 use asyncfile::AsyncFile;
+use cachedfile::CachedFile;
 
 use std::io::Read;
 use std::io::Write;
@@ -36,6 +37,8 @@ use std::io::SeekFrom;
 use std::io;
 use std::cmp::min;
 use std::sync::Mutex;
+
+const READ_CACHE: usize = 10;
 
 /// in memory representation of a file
 pub struct Transient {
@@ -57,9 +60,14 @@ impl Transient {
 
 impl BCDBFactory for Transient {
     fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
-        let log = LogFile::new(Box::new(Transient::new(true)));
+        let log = LogFile::new(
+            Box::new(AsyncFile::new(
+            Box::new(Transient::new(true)))?));
         let table = TableFile::new(Box::new(Transient::new(false)))?;
-        let data = DataFile::new(Box::new(AsyncFile::new(Box::new(Transient::new(true)))?))?;
+        let data = DataFile::new(
+            Box::new(CachedFile::new(
+                Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
+                READ_CACHE)?))?;
         let link = LinkFile::new(Box::new(Transient::new(true)))?;
 
         BCDB::new(log, table, data, link)
@@ -97,10 +105,10 @@ impl PagedFile for Transient {
         Ok(Some(Page::from_buf(buffer)))
     }
 
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.finish()[..])?;
-        Ok(inner.data.len() as u64)
+        Ok(())
     }
 
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {

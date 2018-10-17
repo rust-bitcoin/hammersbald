@@ -48,8 +48,9 @@ impl Persistent {
 
 impl BCDBFactory for Persistent {
     fn new_db (name: &str) -> Result<BCDB, BCDBError> {
-        let log = LogFile::new(Box::new(
-            RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?));
+        let log = LogFile::new(
+            Box::new(AsyncFile::new(
+            Box::new(RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))?));
         let table = TableFile::new(Box::new(Persistent::new(
             RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?
         )))?;
@@ -84,7 +85,7 @@ impl PagedFile for Persistent {
         self.file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.append_page(page)
     }
 

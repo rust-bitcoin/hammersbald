@@ -96,7 +96,7 @@ impl PagedFile for TableFile {
         self.file.read_page(offset)
     }
 
-    fn append_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
 

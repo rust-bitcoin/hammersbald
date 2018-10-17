@@ -173,7 +173,7 @@ impl DataFileImpl {
             self.append_pos = Offset::from(self.append_pos.as_u64() + have as u64);
             if self.append_pos.this_page() == self.append_pos {
                 let page = self.page.clone();
-                self.append_pos = Offset::from(self.append_page(page)?);
+                self.append_page(page)?;
                 self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
             }
         }
@@ -185,7 +185,8 @@ impl PagedFile for DataFileImpl {
     fn flush(&mut self) -> Result<(), BCDBError> {
         if self.append_pos.in_page_pos() > 0 {
             let page = self.page.clone();
-            self.append_pos = Offset::from(self.append_page(page)?);
+            self.append_page(page)?;
+            self.append_pos = self.append_pos.this_page() + PAGE_SIZE as u64;
             self.page.payload[0..PAGE_SIZE].copy_from_slice(&[0u8; PAGE_SIZE]);
         }
         self.file.flush()
@@ -212,7 +213,7 @@ impl PagedFile for DataFileImpl {
         self.file.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.append_page(page)
     }
 

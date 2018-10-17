@@ -51,7 +51,7 @@ impl LogFile {
         PagedFileIterator::new(self, Offset::from(0))
     }
 
-    pub fn append_table_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
+    pub fn append_table_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
         self.append_page(page.page)
     }
 
@@ -89,7 +89,7 @@ impl PagedFile for LogFile {
         self.rw.read_page(offset)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.rw.append_page(page)
     }
 

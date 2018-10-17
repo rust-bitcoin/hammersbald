@@ -38,7 +38,7 @@ mod page;
 mod pagedfile;
 mod logfile;
 mod tablefile;
-mod cache;
+mod cachedfile;
 mod rolled;
 mod asyncfile;
 mod linkfile;

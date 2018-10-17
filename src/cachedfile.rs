@@ -14,34 +14,98 @@
 // limitations under the License.
 //
 //!
-//! # a disk page cache
+//! # read cached file
 //!
 
 use page::{Page, PAGE_SIZE};
+use pagedfile::PagedFile;
 use offset::Offset;
+use error::BCDBError;
 
 use std::collections::{HashMap,VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::cmp::max;
 
-// read cache size
-pub const READ_CACHE_PAGES: usize = 100;
+
+pub struct CachedFile {
+    file: Box<PagedFile>,
+    cache: RwLock<Cache>
+}
+
+impl CachedFile {
+    /// create a read cached file with a page cache of given size
+    pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, BCDBError> {
+        let len = file.len()?;
+        Ok(CachedFile{file, cache: RwLock::new(Cache::new(len, pages))})
+    }
+}
+
+impl PagedFile for CachedFile {
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        self.file.flush()
+    }
+
+    fn len(&self) -> Result<u64, BCDBError> {
+        self.file.len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        self.cache.write().unwrap().reset_len(new_len);
+        self.file.truncate(new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
+        self.file.sync()
+    }
+
+    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+        {
+            let cache = self.cache.read().unwrap();
+            if let Some(page) = cache.get(offset) {
+                return Ok(Some(page));
+            }
+        }
+        if let Some(page) = self.file.read_page (offset)? {
+            let mut cache = self.cache.write().unwrap();
+            cache.cache(offset, Arc::new(page.clone()));
+            return Ok(Some(page));
+        }
+        Ok(None)
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        let mut cache = self.cache.write().unwrap();
+        cache.append(page.clone());
+        self.file.append_page(page)
+
+    }
+
+    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
+        unimplemented!()
+    }
+
+    fn shutdown(&mut self) {
+        self.file.shutdown()
+    }
+}
+
 
 pub struct Cache {
     reads: HashMap<Offset, Arc<Page>>,
     age_desc: VecDeque<Offset>,
-    len: u64
+    len: u64,
+    size:  usize
 }
 
 impl Cache {
-    pub fn new (len: u64) -> Cache {
-        Cache { reads: HashMap::new(), age_desc: VecDeque::new(), len }
+    pub fn new (len: u64, size: usize) -> Cache {
+        Cache { reads: HashMap::new(), age_desc: VecDeque::new(), len, size }
     }
 
     pub fn cache (&mut self, offset: Offset, page: Arc<Page>) {
         if self.reads.insert(offset, page).is_none() {
             self.age_desc.push_back(offset);
-            if self.reads.len() > READ_CACHE_PAGES {
+            if self.reads.len() > self.size {
                 while let Some(old) = self.age_desc.pop_front() {
                     if self.reads.remove(&old).is_some() {
                         break;
