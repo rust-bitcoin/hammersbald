@@ -29,6 +29,7 @@ use page::Page;
 use pagedfile::PagedFile;
 use rolled::RolledFile;
 use asyncfile::AsyncFile;
+use cachedfile::CachedFile;
 
 const TABLE_CHUNK_SIZE: u64 = 1024*1024*1024;
 const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
@@ -47,7 +48,7 @@ impl Persistent {
 }
 
 impl BCDBFactory for Persistent {
-    fn new_db (name: &str) -> Result<BCDB, BCDBError> {
+    fn new_db (name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))?));
@@ -56,9 +57,10 @@ impl BCDBFactory for Persistent {
         )))?;
         let link = LinkFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
         let data = DataFile::new(
+            Box::new(CachedFile::new(
             Box::new(AsyncFile::new(
             Box::new(RolledFile::new(
-                name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?))?;
+                name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
 
         BCDB::new(log, table, data, link)
     }

@@ -13,7 +13,7 @@ use std::env::args;
 
 pub fn main () {
     if find_opt("help") {
-        println!("{} [--help] [--stats data|links|accessible] [--db database] [--log trace|debug|info|warn|error]", args().next().unwrap());
+        println!("{} [--help] [--stats data|links|accessible] [--db database] [--log trace|debug|info|warn|error] --cache pages", args().next().unwrap());
         println!("--stats what:");
         println!("        accessible: accessible stored data and links");
         println!("        data: all stored data even if no longer accessible");
@@ -24,6 +24,7 @@ pub fn main () {
         println!("--log info");
         println!("--stats accessible");
         println!("--db testdb");
+        println!("--cache 100");
         return;
     }
 
@@ -40,11 +41,16 @@ pub fn main () {
             simple_logger::init_with_level(Level::Info).unwrap();
     }
 
+    let mut cache = 100;
+    if let Some(path) = find_arg("cache") {
+        cache = path.parse::<usize>().unwrap();
+    }
+
     let mut db;
     if let Some(path) = find_arg("db") {
-        db = Persistent::new_db(path.as_str()).unwrap();
+        db = Persistent::new_db(path.as_str(), cache).unwrap();
     } else {
-        db = Persistent::new_db("testdb").unwrap();
+        db = Persistent::new_db("testdb", cache).unwrap();
     }
 
     db.init().unwrap();

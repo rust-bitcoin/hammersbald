@@ -27,7 +27,7 @@ use error::{BCDBError};
 /// a trait to create a new db
 pub trait BCDBFactory {
     /// create a new db
-    fn new_db (name: &str) -> Result<BCDB, BCDBError>;
+    fn new_db (name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError>;
 }
 
 /// The blockchain db
@@ -167,7 +167,7 @@ mod test {
 
     #[test]
     fn test_two_batches () {
-        let mut db = Transient::new_db("first").unwrap();
+        let mut db = Transient::new_db("first", 1).unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

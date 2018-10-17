@@ -13,7 +13,7 @@ use std::time::{Instant};
 
 pub fn main () {
     simple_logger::init_with_level(log::Level::Info).unwrap();
-    let mut db = Persistent::new_db("testdb").unwrap();
+    let mut db = Persistent::new_db("testdb", 100).unwrap();
     db.init().unwrap();
 
     // transaction size assumed 500 bytes

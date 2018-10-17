@@ -499,7 +499,7 @@ mod test {
 
         #[test]
     fn test() {
-        let mut db = Transient::new_db("first").unwrap();
+        let mut db = Transient::new_db("first", 1).unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

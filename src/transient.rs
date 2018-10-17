@@ -38,8 +38,6 @@ use std::io;
 use std::cmp::min;
 use std::sync::Mutex;
 
-const READ_CACHE: usize = 10;
-
 /// in memory representation of a file
 pub struct Transient {
     inner: Mutex<Inner>
@@ -59,7 +57,7 @@ impl Transient {
 }
 
 impl BCDBFactory for Transient {
-    fn new_db (_name: &str) -> Result<BCDB, BCDBError> {
+    fn new_db (_name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));
@@ -67,7 +65,7 @@ impl BCDBFactory for Transient {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
-                READ_CACHE)?))?;
+                cached_data_pages)?))?;
         let link = LinkFile::new(Box::new(Transient::new(true)))?;
 
         BCDB::new(log, table, data, link)
