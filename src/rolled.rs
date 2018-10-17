@@ -41,8 +41,8 @@ pub struct RolledFile {
 }
 
 impl RolledFile {
-    pub fn new (name: String, extension: String, append_only: bool, chunk_size: u64) -> Result<RolledFile, BCDBError> {
-        let mut rolled = RolledFile { name, extension, files: HashMap::new(), len: 0, append_only, chunk_size};
+    pub fn new (name: &str, extension: &str, append_only: bool, chunk_size: u64) -> Result<RolledFile, BCDBError> {
+        let mut rolled = RolledFile { name: name.to_string(), extension: extension.to_string(), files: HashMap::new(), len: 0, append_only, chunk_size};
         rolled.open()?;
         Ok(rolled)
     }

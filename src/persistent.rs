@@ -53,15 +53,17 @@ impl BCDBFactory for Persistent {
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(
                     Box::new(RolledFile::new(
-                        name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
+                        name, "bc", true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
+
         let log = LogFile::new(
             Box::new(AsyncFile::new(
-                Box::new(RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))?));
+                Box::new(RolledFile::new(name, "lg", true, LOG_CHUNK_SIZE)?))?));
+
+        let link = LinkFile::new(
+            Box::new(RolledFile::new(name, "bl", true, DATA_CHUNK_SIZE)?))?;
 
         let table = TableFile::new(
-            Box::new(RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?))?;
-        let link = LinkFile::new(
-            Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
+            Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?))?;
 
         BCDB::new(log, table, data, link)
     }
