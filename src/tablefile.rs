@@ -19,7 +19,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use pagedfile::PagedFile;
+use pagedfile::{PagedFile, RandomWritePagedFile};
 use error::BCDBError;
 use offset::Offset;
 
@@ -30,11 +30,11 @@ pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
-    file: Box<PagedFile>
+    file: Box<RandomWritePagedFile>
 }
 
 impl TableFile {
-    pub fn new (file: Box<PagedFile>) -> Result<TableFile, BCDBError> {
+    pub fn new (file: Box<RandomWritePagedFile>) -> Result<TableFile, BCDBError> {
         Ok(TableFile {file})
     }
 
@@ -94,11 +94,13 @@ impl PagedFile for TableFile {
         unimplemented!()
     }
 
+    fn shutdown (&mut self) {}
+}
+
+impl RandomWritePagedFile for TableFile {
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         self.file.write_page(offset, page)
     }
-
-    fn shutdown (&mut self) {}
 }
 
 /// a page of the hash table

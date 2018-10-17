@@ -27,7 +27,7 @@ use linkfile::LinkFile;
 use logfile::LogFile;
 use offset::Offset;
 use page::Page;
-use pagedfile::PagedFile;
+use pagedfile::{PagedFile, RandomWritePagedFile};
 use rolledfile::RolledFile;
 use tablefile::TableFile;
 
@@ -94,9 +94,11 @@ impl PagedFile for Persistent {
         self.file.append_page(page)
     }
 
+    fn shutdown(&mut self) {}
+}
+
+impl RandomWritePagedFile for Persistent {
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         self.file.write_page(offset, page)
     }
-
-    fn shutdown(&mut self) {}
 }

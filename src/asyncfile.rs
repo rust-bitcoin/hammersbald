@@ -107,10 +107,6 @@ impl PagedFile for AsyncFile {
         Ok(())
     }
 
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
-        unimplemented!()
-    }
-
     fn shutdown (&mut self) {
         let mut queue = self.inner.queue.lock().unwrap();
         self.inner.work.notify_one();

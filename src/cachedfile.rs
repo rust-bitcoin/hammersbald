@@ -84,10 +84,6 @@ impl PagedFile for CachedFile {
 
     }
 
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
-        unimplemented!()
-    }
-
     fn shutdown(&mut self) {
         self.file.shutdown()
     }

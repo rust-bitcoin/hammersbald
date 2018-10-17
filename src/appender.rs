@@ -52,7 +52,7 @@ impl Appender {
                 wrote += space;
                 self.append_pos += space as u64;
                 if self.append_pos.in_page_pos() == 0 {
-                    self.file.write_page(self.page_offset, page.clone())?;
+                    self.file.append_page(page.clone())?;
                     self.page_offset = self.append_pos;
                 }
             }
@@ -109,10 +109,6 @@ impl PagedFile for Appender {
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         self.file.append_page(page)
-    }
-
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        unimplemented!()
     }
 
     fn shutdown(&mut self) {

@@ -19,7 +19,7 @@
 //!
 
 use error::BCDBError;
-use pagedfile::PagedFile;
+use pagedfile::{PagedFile, RandomWritePagedFile};
 use page::{PAGE_SIZE, Page};
 use offset::Offset;
 
@@ -90,6 +90,10 @@ impl PagedFile for SingleFile {
         Ok(())
     }
 
+    fn shutdown (&mut self) {}
+}
+
+impl RandomWritePagedFile for SingleFile {
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         let o = offset.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
@@ -103,6 +107,4 @@ impl PagedFile for SingleFile {
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(self.len)
     }
-
-    fn shutdown (&mut self) {}
 }

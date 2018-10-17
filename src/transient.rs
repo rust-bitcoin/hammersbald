@@ -26,7 +26,7 @@ use datafile::DataFile;
 use linkfile::LinkFile;
 use offset::Offset;
 use page::{Page,PAGE_SIZE};
-use pagedfile::PagedFile;
+use pagedfile::{PagedFile, RandomWritePagedFile};
 use asyncfile::AsyncFile;
 use cachedfile::CachedFile;
 
@@ -109,14 +109,16 @@ impl PagedFile for Transient {
         Ok(())
     }
 
+    fn shutdown (&mut self) {
+    }
+}
+
+impl RandomWritePagedFile for Transient {
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
         inner.write(&page.finish()[..])?;
         Ok(inner.data.len() as u64)
-    }
-
-    fn shutdown (&mut self) {
     }
 }
 

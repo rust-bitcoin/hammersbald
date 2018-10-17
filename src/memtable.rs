@@ -25,7 +25,7 @@ use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE
 use linkfile::LinkFile;
 use logfile::LogFile;
 use page::{PAGE_SIZE};
-use pagedfile::PagedFile;
+use pagedfile::{PagedFile, RandomWritePagedFile};
 use tablefile::TablePage;
 
 use siphasher::sip::SipHasher;

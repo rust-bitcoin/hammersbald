@@ -217,10 +217,6 @@ impl PagedFile for DataFileImpl {
         self.file.append_page(page)
     }
 
-    fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {
-        unimplemented!()
-    }
-
     fn shutdown (&mut self) {
     }
 }

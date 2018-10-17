@@ -40,10 +40,13 @@ pub trait PagedFile: Send + Sync {
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError>;
     /// append a page (ignore offset in the Page)
     fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
-    /// write a page at its position as specified in page.offset
-    fn write_page (&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError>;
     /// shutdown async processing
     fn shutdown (&mut self);
+}
+
+pub trait RandomWritePagedFile : PagedFile {
+    /// write a page at its position as specified in page.offset
+    fn write_page (&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError>;
 }
 
 /// iterate through pages of a paged file
