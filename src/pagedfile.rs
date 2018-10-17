@@ -25,8 +25,7 @@ use std::io;
 use std::io::Read;
 use std::cmp::min;
 
-/// a read-write-seak-able storage with added methods
-/// synchronized in its implementation
+/// a read-write-seek-able storage
 pub trait PagedFile: Send + Sync {
     /// flush buffered writes
     fn flush(&mut self) -> Result<(), BCDBError>;
@@ -36,16 +35,16 @@ pub trait PagedFile: Send + Sync {
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError>;
     /// tell OS to flush buffers to disk
     fn sync (&self) -> Result<(), BCDBError>;
-    /// read a page at given offset
+    /// read a page at offset
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError>;
-    /// append a page (ignore offset in the Page)
+    /// append a page
     fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
-    /// shutdown async processing
+    /// shutdown async write
     fn shutdown (&mut self);
 }
 
 pub trait RandomWritePagedFile : PagedFile {
-    /// write a page at its position as specified in page.offset
+    /// write a page at any position
     fn write_page (&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError>;
 }
 
@@ -96,15 +95,16 @@ impl<'file> Read for PagedFileIterator<'file> {
             if self.page.is_none() {
                 self.page = self.file.read_page(Offset::from(self.pagenumber))?;
             }
+
             if let Some(ref page) = self.page {
                 let have = min(PAGE_SIZE - self.pos, buf.len() - read);
                 buf[read..read + have].copy_from_slice(&page.payload[self.pos..self.pos + have]);
                 self.pos += have;
                 read += have;
+            } else {
+                return Ok(read)
             }
-                else {
-                    return Ok(read)
-                }
+
             if read == buf.len() {
                 break;
             } else {
