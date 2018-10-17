@@ -22,14 +22,11 @@ use error::BCDBError;
 use offset::Offset;
 use page::{Page, PAGE_SIZE};
 use pagedfile::PagedFile;
-
+use singlefile::SingleFile;
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::Path;
-use std::sync::Mutex;
-use std::io::{Read,Write,Seek,SeekFrom};
-use std::cmp::max;
 
 pub struct RolledFile {
     name: String,
@@ -74,7 +71,7 @@ impl RolledFile {
                                                 let filename = path.clone().to_string_lossy().to_string();
                                                 let file = Self::open_file(self.append_only, filename)?;
                                                 self.files.insert(number,
-                                                                  SingleFile::new(file, number as u64 * self.chunk_size, self.chunk_size)?);
+                                                                  SingleFile::new_chunk(file, number as u64 * self.chunk_size, self.chunk_size)?);
                                             }
                                         }
                                     }
@@ -154,7 +151,7 @@ impl PagedFile for RolledFile {
         if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
             let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
                 + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new(file, self.len, self.chunk_size)?);
+            self.files.insert(chunk, SingleFile::new_chunk(file, self.len, self.chunk_size)?);
         }
 
         if let Some (file) = self.files.get_mut(&chunk) {
@@ -174,7 +171,7 @@ impl PagedFile for RolledFile {
         if !self.files.contains_key(&chunk) {
             let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
                 + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new(file, (n_offset/self.chunk_size) * self.chunk_size, self.chunk_size)?);
+            self.files.insert(chunk, SingleFile::new_chunk(file, (n_offset/self.chunk_size) * self.chunk_size, self.chunk_size)?);
         }
 
         if let Some(file) = self.files.get_mut(&chunk) {
@@ -183,79 +180,6 @@ impl PagedFile for RolledFile {
         } else {
             return Err(BCDBError::Corrupted(format!("missing chunk in write {}", chunk)));
         }
-    }
-
-    fn shutdown (&mut self) {}
-}
-
-struct SingleFile {
-    file: Mutex<File>,
-    base: u64,
-    len: u64,
-    chunk_size: u64
-}
-
-impl SingleFile {
-    pub fn new (mut file: File, base: u64, chunk_size: u64) -> Result<SingleFile, BCDBError> {
-        let len = file.seek(SeekFrom::End(0))?;
-        Ok(SingleFile{file: Mutex::new(file), base, len, chunk_size})
-    }
-}
-
-impl PagedFile for SingleFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        Ok(self.file.lock().unwrap().flush()?)
-    }
-
-    fn len(&self) -> Result<u64, BCDBError> {
-        Ok(self.len)
-    }
-
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
-        self.len = new_len;
-        Ok(self.file.lock().unwrap().set_len(new_len)?)
-    }
-
-    fn sync(&self) -> Result<(), BCDBError> {
-        Ok(self.file.lock().unwrap().sync_data()?)
-    }
-
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        let o = offset.as_u64();
-        if o < self.base || o >= self.base + self.chunk_size {
-            return Err(BCDBError::Corrupted("read from wrong file".to_string()));
-        }
-        let pos = o - self.base;
-        if pos >= self.len {
-            return Ok(None);
-        }
-
-        let mut file = self.file.lock().unwrap();
-        let mut buffer = [0u8; PAGE_SIZE];
-        file.seek(SeekFrom::Start(pos))?;
-        file.read(&mut buffer)?;
-        Ok(Some(Page::from_buf(buffer)))
-    }
-
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        let mut file = self.file.lock().unwrap();
-        file.write(&page.finish()[..])?;
-        self.len += PAGE_SIZE as u64;
-        Ok(())
-    }
-
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        let o = offset.as_u64();
-        if o < self.base || o >= self.base + self.chunk_size {
-            return Err(BCDBError::Corrupted("write to wrong file".to_string()));
-        }
-        let pos = o - self.base;
-
-        let mut file = self.file.lock().unwrap();
-        file.seek(SeekFrom::Start(pos))?;
-        file.write(&page.finish()[..])?;
-        self.len = max(self.len, pos + PAGE_SIZE as u64);
-        Ok(self.len)
     }
 
     fn shutdown (&mut self) {}

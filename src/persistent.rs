@@ -28,7 +28,7 @@ use logfile::LogFile;
 use offset::Offset;
 use page::Page;
 use pagedfile::PagedFile;
-use rolled::RolledFile;
+use rolledfile::RolledFile;
 use tablefile::TableFile;
 
 const TABLE_CHUNK_SIZE: u64 = 1024 * 1024 * 1024;
