@@ -18,22 +18,22 @@
 //!
 //! Implements persistent store
 
-use error::BCDBError;
-use logfile::LogFile;
-use tablefile::TableFile;
+use api::{BCDB, BCDBFactory};
+use asyncfile::AsyncFile;
+use cachedfile::CachedFile;
 use datafile::DataFile;
+use error::BCDBError;
 use linkfile::LinkFile;
-use api::{BCDBFactory, BCDB};
+use logfile::LogFile;
 use offset::Offset;
 use page::Page;
 use pagedfile::PagedFile;
 use rolled::RolledFile;
-use asyncfile::AsyncFile;
-use cachedfile::CachedFile;
+use tablefile::TableFile;
 
-const TABLE_CHUNK_SIZE: u64 = 1024*1024*1024;
-const DATA_CHUNK_SIZE: u64 = 1024*1024*1024;
-const LOG_CHUNK_SIZE: u64 = 1024*1024*1024;
+const TABLE_CHUNK_SIZE: u64 = 1024 * 1024 * 1024;
+const DATA_CHUNK_SIZE: u64 = 1024 * 1024 * 1024;
+const LOG_CHUNK_SIZE: u64 = 1024 * 1024 * 1024;
 
 /// Implements persistent storage
 pub struct Persistent {
@@ -42,25 +42,26 @@ pub struct Persistent {
 
 impl Persistent {
     /// create a new persistent DB
-    pub fn new (file: RolledFile) -> Persistent {
-        Persistent {file: file}
+    pub fn new(file: RolledFile) -> Persistent {
+        Persistent { file: file }
     }
 }
 
 impl BCDBFactory for Persistent {
-    fn new_db (name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError> {
-        let log = LogFile::new(
-            Box::new(AsyncFile::new(
-            Box::new(RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))?));
-        let table = TableFile::new(Box::new(Persistent::new(
-            RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?
-        )))?;
-        let link = LinkFile::new(Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
+    fn new_db(name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError> {
         let data = DataFile::new(
             Box::new(CachedFile::new(
+                Box::new(AsyncFile::new(
+                    Box::new(RolledFile::new(
+                        name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
+        let log = LogFile::new(
             Box::new(AsyncFile::new(
-            Box::new(RolledFile::new(
-                name.to_string(), "bc".to_string(), true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
+                Box::new(RolledFile::new(name.to_string(), "lg".to_string(), true, LOG_CHUNK_SIZE)?))?));
+
+        let table = TableFile::new(
+            Box::new(RolledFile::new(name.to_string(), "tb".to_string(), false, TABLE_CHUNK_SIZE)?))?;
+        let link = LinkFile::new(
+            Box::new(RolledFile::new(name.to_string(), "bl".to_string(), true, DATA_CHUNK_SIZE)?))?;
 
         BCDB::new(log, table, data, link)
     }
@@ -95,6 +96,5 @@ impl PagedFile for Persistent {
         self.file.write_page(offset, page)
     }
 
-    fn shutdown (&mut self) {
-    }
+    fn shutdown(&mut self) {}
 }
