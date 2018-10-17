@@ -20,6 +20,7 @@ use error::BCDBError;
 use offset::Offset;
 use page::{Page, PAGE_SIZE};
 use pagedfile::{PagedFileIterator, PagedFile};
+use appender::Appender;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
@@ -203,19 +204,17 @@ impl Link {
 }
 
 /// An Envelope writer for PagedFile
-pub struct EnvelopeAppender<'file> {
-    appender: SliceAppender<'file>,
+pub struct EnvelopeAppender {
+    appender: Appender,
     previous: Offset,
 }
 
-impl<'file> EnvelopeAppender<'file> {
+impl EnvelopeAppender {
     /// create a new envelope appender for a file
     /// envelope will be appended at next
     /// assumes that previous is the offset of the last appended envelope
-    pub fn new (file: &'file mut PagedFile, current: Offset, previous: Offset) -> EnvelopeAppender<'file> {
-        EnvelopeAppender {appender:
-            SliceAppender{file, page: None, pos: current.in_page_pos(), page_offset: current.this_page(), current},
-            previous}
+    pub fn new (file: Box<PagedFile>, start: Offset, previous: Offset) -> Result<EnvelopeAppender, BCDBError> {
+        Ok(EnvelopeAppender {appender: Appender::new(file, start)?, previous})
     }
 
     /// wrap some data into an envelope and append to the file
@@ -299,61 +298,6 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
     }
 }
 
-/// An Envelope writer for PagedFile
-pub struct SliceAppender<'file> {
-    file: &'file mut PagedFile,
-    page: Option<Page>,
-    pos: usize,
-    page_offset: Offset,
-    current: Offset,
-}
-
-impl<'file> SliceAppender<'file> {
-    /// create a new slice appender for a file
-    pub fn new (file: &'file mut PagedFile, current: Offset) -> SliceAppender<'file> {
-        SliceAppender {file, page: None, pos: current.in_page_pos(), page_offset: current.this_page(), current }
-    }
-
-    /// append a slice at current position
-    pub fn append_slice(&mut self, payload: &[u8]) -> Result<(), BCDBError> {
-        let mut wrote = 0;
-        while wrote < payload.len() {
-            if self.page.is_none() {
-                self.page = Some(self.file.read_page(self.page_offset)?.unwrap_or(Page::new()));
-                self.pos = 0;
-            }
-            if let Some(ref mut page) = self.page {
-                let space = min(PAGE_SIZE - self.pos, payload.len() - wrote);
-                page.payload[self.pos .. self.pos + space].copy_from_slice(&payload[wrote .. wrote + space]);
-                wrote += space;
-                self.pos += space;
-                if self.pos == PAGE_SIZE {
-                    self.file.write_page(self.page_offset, page.clone())?;
-                }
-            }
-            if self.pos == PAGE_SIZE {
-                self.page_offset = Offset::from(self.page_offset.as_u64() + PAGE_SIZE as u64);
-                self.page = None;
-                self.pos = 0;
-            }
-        }
-        self.current += payload.len() as u64;
-        Ok(())
-    }
-
-    /// return next append position
-    pub fn position (&self) -> Offset {
-        self.current
-    }
-
-    /// extend with contents from an iterator
-    pub fn extend(&mut self, mut from: impl Iterator<Item=Vec<u8>>) -> Result<Offset, BCDBError> {
-        while let Some(payload) = from.next() {
-            self.append_slice(payload.as_slice())?;
-        }
-        Ok(self.current)
-    }
-}
 
 /// An iterator returning uniform length slices of data in offset ascending order
 pub struct ForwardSliceIterator<'file> {
