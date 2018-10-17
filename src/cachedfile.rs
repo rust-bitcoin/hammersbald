@@ -24,8 +24,12 @@ use error::BCDBError;
 
 use std::collections::{HashMap,VecDeque};
 use std::sync::{Arc, RwLock};
-use std::cmp::max;
+use std::cmp::{max, min};
 
+// does not make sense to have a bigger cache
+// until age_desc is iterated sequentially
+// TODO: find a better cache collection
+const MAX_CACHE: usize = 1000;
 
 pub struct CachedFile {
     file: Box<PagedFile>,
@@ -36,7 +40,7 @@ impl CachedFile {
     /// create a read cached file with a page cache of given size
     pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, BCDBError> {
         let len = file.len()?;
-        Ok(CachedFile{file, cache: RwLock::new(Cache::new(len, pages))})
+        Ok(CachedFile{file, cache: RwLock::new(Cache::new(len, min(MAX_CACHE,pages)))})
     }
 }
 
