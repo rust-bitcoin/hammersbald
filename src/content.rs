@@ -76,9 +76,9 @@ impl Payload {
                 result.write_u8(0).unwrap();
                 indexed.serialize(result);
             },
-            Payload::Referred(owned) => {
+            Payload::Referred(referred) => {
                 result.write_u8(1).unwrap();
-                owned.serialize(result);
+                referred.serialize(result);
             },
             // Link and Table are not serialized with a type
             _ => {}
@@ -103,7 +103,7 @@ pub struct IndexedData {
     /// data
     pub data: Vec<u8>,
     /// further accessible data (OwnedData)
-    pub owned: Vec<Offset>
+    pub referred: Vec<Offset>
 }
 
 impl IndexedData {
@@ -113,8 +113,8 @@ impl IndexedData {
         result.write(self.key.as_slice()).unwrap();
         result.write_u8(self.data.len() as u8).unwrap();
         result.write(self.data.as_slice()).unwrap();
-        result.write_u16::<BigEndian>(self.owned.len() as u16).unwrap();
-        for offset in &self.owned {
+        result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
+        for offset in &self.referred {
             result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
         }
     }
@@ -130,11 +130,11 @@ impl IndexedData {
         reader.read(data.as_mut_slice())?;
 
         let owned_len = reader.read_u16::<BigEndian>()? as usize;
-        let mut owned = Vec::new();
+        let mut referred = Vec::new();
         for _ in 0 .. owned_len {
-            owned.push(Offset::from(reader.read_u48::<BigEndian>()?));
+            referred.push(Offset::from(reader.read_u48::<BigEndian>()?));
         }
-        Ok(IndexedData{key, data, owned})
+        Ok(IndexedData{key, data, referred })
     }
 }
 
@@ -143,7 +143,7 @@ pub struct ReferredData {
     /// data
     pub data: Vec<u8>,
     /// further accessible data (OwnedData)
-    pub owned: Vec<Offset>
+    pub referred: Vec<Offset>
 }
 
 impl ReferredData {
@@ -151,8 +151,8 @@ impl ReferredData {
     pub fn serialize (&self, result: &mut Write) {
         result.write_u8(self.data.len() as u8).unwrap();
         result.write(self.data.as_slice()).unwrap();
-        result.write_u16::<BigEndian>(self.owned.len() as u16).unwrap();
-        for offset in &self.owned {
+        result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
+        for offset in &self.referred {
             result.write_u48::<BigEndian>(offset.as_u64()).unwrap();
         }
     }
@@ -164,11 +164,11 @@ impl ReferredData {
         reader.read(data.as_mut_slice())?;
 
         let owned_len = reader.read_u16::<BigEndian>()? as usize;
-        let mut owned = Vec::new();
+        let mut referred = Vec::new();
         for _ in 0 .. owned_len {
-            owned.push(Offset::from(reader.read_u48::<BigEndian>()?));
+            referred.push(Offset::from(reader.read_u48::<BigEndian>()?));
         }
-        Ok(ReferredData {data, owned})
+        Ok(ReferredData {data, referred })
     }
 }
 
