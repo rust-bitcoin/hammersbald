@@ -112,7 +112,7 @@ impl PagedFile for Appender {
     }
 
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        self.file.write_page(offset, page)
+        unimplemented!()
     }
 
     fn shutdown(&mut self) {
