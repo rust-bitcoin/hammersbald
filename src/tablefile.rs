@@ -30,14 +30,12 @@ pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
-    file: Box<PagedFile>,
-    pub last_len: u64
+    file: Box<PagedFile>
 }
 
 impl TableFile {
     pub fn new (file: Box<PagedFile>) -> Result<TableFile, BCDBError> {
-        let last_len = file.len()?;
-        Ok(TableFile {file, last_len})
+        Ok(TableFile {file})
     }
 
     fn table_offset (bucket: u32) -> Offset {
@@ -53,10 +51,6 @@ impl TableFile {
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
         BucketIterator{file: self, n:0}
-    }
-
-    pub fn patch_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.file.write_page(page.offset, page.page)
     }
 
     pub fn read_table_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {

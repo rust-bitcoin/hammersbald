@@ -18,11 +18,10 @@
 //!
 use offset::Offset;
 use logfile::LogFile;
-use tablefile::{TableFile, TablePage};
+use tablefile::TableFile;
 use datafile::{DataFile, Content};
 use linkfile::LinkFile;
 use memtable::MemTable;
-use pagedfile::PagedFile;
 use error::{BCDBError};
 
 /// a trait to create a new db
@@ -34,10 +33,7 @@ pub trait BCDBFactory {
 /// The blockchain db
 pub struct BCDB {
     mem: MemTable,
-    pub(crate) table: TableFile,
-    pub(crate) link: LinkFile,
-    pub(crate) data: DataFile,
-    log: LogFile
+    data: DataFile
 }
 
 /// public API to the blockchain db
@@ -68,41 +64,18 @@ pub trait BCDBAPI {
 impl BCDB {
     /// create a new db with key and data file
     pub fn new(log: LogFile, table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
-        let mut db = BCDB { mem: MemTable::load(&table, &link)?, table, link, data, log };
+        let mut mem = MemTable::new(log, link, table);
+        mem.load()?;
+        let mut db = BCDB { mem, data };
         db.recover()?;
         db.batch()?;
         Ok(db)
     }
 
     fn recover(&mut self) -> Result<(), BCDBError> {
-        let mut first = true;
-        debug!("recover");
-        for page in self.log.page_iter() {
-            if !first {
-                let table_page = TablePage::from(page);
-                self.table.patch_page(table_page)?;
-            }
-            else {
-                let mut size = [0u8; 6];
-                page.read(2, &mut size)?;
-                let data_len = Offset::from(&size[..]).as_u64();
-                self.data.truncate(data_len)?;
-
-                page.read(8, &mut size)?;
-                let table_len = Offset::from(&size[..]).as_u64();
-                self.table.truncate(table_len)?;
-
-                page.read(14, &mut size)?;
-                let link_len = Offset::from(&size[..]).as_u64();
-                self.link.truncate(link_len)?;
-
-                first = false;
-                debug!("recover BCDB: set lengths to table: {} link: {} data: {}", link_len, table_len, data_len);
-            }
-        }
-        Ok(())
+        let data_len = self.mem.recover()?;
+        self.data.truncate(data_len)
     }
-
 
     /// get data iterator - this also includes no longer referenced data
     pub fn data_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<u8>, Vec<u8>)> + 'a {
@@ -111,12 +84,7 @@ impl BCDB {
 
     /// get link iterator - this also includes no longer used links
     pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<(u32, Offset)>, Offset)> + 'a {
-        self.link.iter()
-    }
-
-    /// get a link
-    pub fn get_link(&self, offset: Offset) -> Result<(Vec<(u32, Offset)>, Offset), BCDBError> {
-        self.link.get_link(offset)
+        self.mem.link_iterator()
     }
 
     /// get hash table bucket iterator
@@ -129,9 +97,7 @@ impl BCDBAPI for BCDB {
     /// initialize a db
     fn init (&mut self) -> Result<(), BCDBError> {
         self.data.init()?;
-        self.link.init()?;
-        self.log.init(0, 0, 0)?;
-        Ok(())
+        self.mem.init()
     }
 
 
@@ -142,24 +108,13 @@ impl BCDBAPI for BCDB {
         self.data.sync()?;
         let data_len = self.data.len()?;
         debug!("data length {}", data_len);
-        self.mem.flush(&mut self.log, &mut self.table, &mut self.link)?;
-        self.link.sync()?;
-        let link_len = self.link.len()?;
-        debug!("link length {}", link_len);
-        self.table.sync()?;
-        let table_len = self.table.len()?;
-        debug!("table length {}", table_len);
-        self.log.init(data_len, table_len, link_len)?;
-        self.log.sync()?;
-        debug!("batch start");
-
-        Ok(())
+        self.mem.batch(data_len)
     }
 
     /// stop background writer
     fn shutdown (&mut self) {
         self.data.shutdown();
-        self.link.shutdown();
+        self.mem.shutdown()
     }
 
     /// store data with a key

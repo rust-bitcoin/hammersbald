@@ -15,23 +15,25 @@
 //
 //!
 //! # The log file
-//! A synchronous append writer of a log file.
+//! The writer of the log file.
 //!
 
 use page::Page;
 use pagedfile::{PagedFile, PagedFileIterator};
-use tablefile::{TableFile, TablePage};
 use error::BCDBError;
 use offset::Offset;
 
-/// The buffer pool
+use std::collections::HashSet;
+
 pub struct LogFile {
-    rw: Box<PagedFile>
+    file: Box<PagedFile>,
+    logged: HashSet<Offset>,
+    source_len: u64
 }
 
 impl LogFile {
     pub fn new(rw: Box<PagedFile>) -> LogFile {
-        LogFile { rw }
+        LogFile { file: rw, logged: HashSet::new(), source_len:0 }
     }
 
     pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), BCDBError> {
@@ -51,46 +53,44 @@ impl LogFile {
         PagedFileIterator::new(self, Offset::from(0))
     }
 
-    pub fn append_table_page(&mut self, page: TablePage) -> Result<(), BCDBError> {
-        self.append_page(page.page)
-    }
-
-    pub fn log_pages (&mut self, offsets: Vec<Offset>, table_file: &TableFile) -> Result<(), BCDBError> {
-        for offset in offsets {
-            if let Some(page) = table_file.read_page(offset)? {
+    pub fn log_page(&mut self, offset: Offset, source: &PagedFile) -> Result<(), BCDBError>{
+        if offset.as_u64() < self.source_len && self.logged.insert(offset) {
+            if let Some(page) = source.read_page(offset)? {
                 self.append_page(page)?;
-            } else {
-                return Err(BCDBError::Corrupted(format!("can not find pre-image to log {}", offset)));
             }
         }
-        self.flush()?;
-        self.sync()
+        Ok(())
+    }
+
+    pub fn reset(&mut self, len: u64) {
+        self.source_len = len;
+        self.logged.clear();
     }
 }
 
 impl PagedFile for LogFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
-        Ok(self.rw.flush()?)
+        Ok(self.file.flush()?)
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
-        self.rw.len()
+        self.file.len()
     }
 
     fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
-        self.rw.truncate(len)
+        self.file.truncate(len)
     }
 
     fn sync(&self) -> Result<(), BCDBError> {
-        self.rw.sync()
+        self.file.sync()
     }
 
     fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        self.rw.read_page(offset)
+        self.file.read_page(offset)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        self.rw.append_page(page)
+        self.file.append_page(page)
     }
 
     fn write_page(&mut self, _: Offset, _: Page) -> Result<u64, BCDBError> {

@@ -159,7 +159,7 @@ impl PagedFile for RolledFile {
 
         if let Some (file) = self.files.get_mut(&chunk) {
             file.append_page(page)?;
-            self.len += chunk as u64 * self.chunk_size;
+            self.len += PAGE_SIZE as u64;
             return Ok(())
         }
         else {

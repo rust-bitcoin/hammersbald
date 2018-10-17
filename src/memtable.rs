@@ -46,36 +46,45 @@ pub struct MemTable {
     sip0: u64,
     sip1: u64,
     buckets: Vec<Bucket>,
-    dirty: Dirty
+    dirty: Dirty,
+    log_file: LogFile,
+    link_file: LinkFile,
+    table_file: TableFile,
 }
 
 impl MemTable {
-    pub fn new () -> MemTable {
+    pub fn new (log_file: LogFile, link_file: LinkFile, table_file: TableFile) -> MemTable {
         let mut rng = thread_rng();
 
         MemTable {log_mod: INIT_LOGMOD as u32, step: 0,
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
-            dirty: Dirty::new(INIT_BUCKETS)}
+            dirty: Dirty::new(INIT_BUCKETS), log_file, link_file, table_file}
     }
 
-    pub fn load (table_file: &TableFile, link_file: &LinkFile) -> Result<MemTable, BCDBError>{
-        if let Some(first) = table_file.read_table_page(Offset::from(0))? {
+    pub fn init (&mut self) -> Result<(), BCDBError> {
+        self.link_file.init()?;
+        self.log_file.init(0, 0, 0)?;
+        Ok(())
+    }
+
+    pub fn load (&mut self) -> Result<(), BCDBError>{
+        if let Some(first) = self.table_file.read_table_page(Offset::from(0))? {
             let n_buckets = first.read_offset(0)?.as_u64() as u32;
-            let step = first.read_offset(6)?.as_u64() as usize;
-            let log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
-            let sip0 = first.read_u64(12)?;
-            let sip1 = first.read_u64(20)?;
+            self.step = first.read_offset(6)?.as_u64() as usize;
+            self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
+            self.sip0 = first.read_u64(12)?;
+            self.sip1 = first.read_u64(20)?;
 
             let mut bucket_to_link = HashMap::with_capacity(n_buckets as usize);
-            for (n, bucket) in table_file.iter().enumerate() {
+            for (n, bucket) in self.table_file.iter().enumerate() {
                 if bucket.is_valid() {
                     bucket_to_link.insert(bucket, n);
                 }
             }
             let mut buckets = vec!(Bucket::default(); n_buckets as usize);
-            for (self_offset, mut links, mut next) in link_file.iter() {
+            for (self_offset, mut links, mut next) in self.link_file.iter() {
                 if let Some(bucket_index) = bucket_to_link.get(&self_offset) {
                     let bucket = &mut buckets[*bucket_index];
                     bucket.link = self_offset;
@@ -99,36 +108,94 @@ impl MemTable {
                             break;
                         }
 
-                        let (l, n) = link_file.get_link(next)?;
+                        let (l, n) = self.link_file.get_link(next)?;
                         links = l;
                         next = n;
                     }
 
                 }
             }
-            Ok(MemTable {log_mod, step, sip0, sip1, buckets, dirty: Dirty::new(n_buckets as usize) })
         }
-        else {
-            Ok(MemTable::new())
-        }
+        Ok(())
     }
 
-    pub fn flush (&mut self, log_file: &mut LogFile, table_file: &mut TableFile, link_file: &mut LinkFile) -> Result<(), BCDBError> {
-        if self.dirty.is_dirty() {
-            if table_file.last_len > 0 {
-                let mut to_log = Vec::new();
-                to_log.push(Offset::from(0));
-                for (page_number, dirty) in self.dirty.page_flags().skip(1).enumerate() {
-                    let offset = Offset::from((page_number + 1) as u64 * PAGE_SIZE as u64);
-                    if offset.as_u64() >= table_file.last_len {
-                        break;
-                    }
-                    if dirty {
-                        to_log.push(offset);
-                    }
-                }
-                log_file.log_pages(to_log, &table_file)?;
+    /// end current batch and start a new batch
+    pub fn batch (&mut self, data_len: u64)  -> Result<(), BCDBError> {
+
+        self.log_file.flush()?;
+        self.log_file.sync()?;
+
+        self.flush()?;
+        self.dirty.clear();
+
+        self.link_file.sync()?;
+        let link_len = self.link_file.len()?;
+        debug!("link length {}", link_len);
+
+        self.table_file.sync()?;
+        let table_len = self.table_file.len()?;
+        debug!("table length {}", table_len);
+
+        self.log_file.reset(table_len);
+        self.log_file.init(data_len, table_len, link_len)?;
+        self.log_file.flush()?;
+        self.log_file.sync()?;
+        debug!("batch start");
+
+        Ok(())
+    }
+
+    /// stop background writer
+    pub fn shutdown (&mut self) {
+        self.table_file.shutdown();
+        self.link_file.shutdown();
+        self.log_file.shutdown();
+    }
+
+    pub fn recover(&mut self) -> Result<u64, BCDBError> {
+        debug!("recover");
+        let mut data_len = 0;
+        let mut table_len = 0;
+        let mut link_len = 0;
+        if let Some(page) = self.log_file.read_page(Offset::from(0))? {
+            let mut size = [0u8; 6];
+            page.read(2, &mut size)?;
+            data_len = Offset::from(&size[..]).as_u64();
+
+            page.read(8, &mut size)?;
+            table_len = Offset::from(&size[..]).as_u64();
+            self.table_file.truncate(table_len)?;
+
+            page.read(14, &mut size)?;
+            link_len = Offset::from(&size[..]).as_u64();
+            self.link_file.truncate(link_len)?;
+        }
+
+        if self.log_file.len()? > PAGE_SIZE as u64 {
+            for page in self.log_file.page_iter().skip(1) {
+                let table_page = TablePage::from(page);
+                self.table_file.write_page(table_page.offset, table_page.page)?;
             }
+            self.table_file.flush()?;
+
+            self.table_file.sync()?;
+            self.link_file.sync()?;
+            self.log_file.reset(table_len);
+            self.log_file.init(data_len, table_len, link_len)?;
+            self.log_file.flush()?;
+            self.log_file.sync()?;
+        }
+
+        Ok(data_len)
+    }
+
+    /// get link iterator - this also includes no longer used links
+    pub fn link_iterator<'a>(&'a self) -> impl Iterator<Item=(Offset, Vec<(u32, Offset)>, Offset)> + 'a {
+        self.link_file.iter()
+    }
+
+    pub fn flush (&mut self) -> Result<(), BCDBError> {
+        if self.dirty.is_dirty() {
             // first page
             let mut page = TablePage::new(Offset::from(0));
             page.write_offset(0, Offset::from(self.buckets.len() as u64))?;
@@ -136,32 +203,32 @@ impl MemTable {
             page.write_u64(12, self.sip0)?;
             page.write_u64(20, self.sip1)?;
             for b in 0 .. min(self.buckets.len(), BUCKETS_FIRST_PAGE) {
-                Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, b, FIRST_PAGE_HEAD)?;
+                self.write_offset_to_page(b, &mut page, b, FIRST_PAGE_HEAD)?;
             }
-            table_file.write_table_page(page)?;
+            self.table_file.write_table_page(page)?;
 
             // other pages
-            for (pn_1 /* page number - 1 */, dirty) in self.dirty.page_flags().skip(1).enumerate() {
-                if dirty {
+            let flags : Vec<bool> = self.dirty.page_flags().collect();
+            for (pn_1 /* page number - 1 */, dirty) in flags.iter().skip(1).enumerate() {
+                if *dirty {
                     page = TablePage::new(Offset::from((pn_1+1) as u64 * PAGE_SIZE as u64));
                     let start = BUCKETS_PER_PAGE*pn_1 + BUCKETS_FIRST_PAGE;
                     let end = min(self.buckets.len(), (pn_1+1)*BUCKETS_PER_PAGE + BUCKETS_FIRST_PAGE);
                     for (n, b) in (start .. end).enumerate() {
-                        Self::write_offset_to_page(&mut self.buckets[b], link_file, &mut page, n, 0)?;
+                        self.write_offset_to_page(b, &mut page, n, 0)?;
                     }
-                    table_file.write_table_page(page)?;
+                    self.table_file.write_table_page(page)?;
                 }
             }
-            self.dirty.clear();
 
-            link_file.flush()?;
-            table_file.flush()?;
-            table_file.last_len = table_file.len()?;
+            self.link_file.flush()?;
+            self.table_file.flush()?;
         }
         Ok(())
     }
 
-    fn write_offset_to_page(bucket: &mut Bucket, link_file: &mut LinkFile, page: &mut TablePage, i: usize, head: usize) -> Result<(), BCDBError> {
+    fn write_offset_to_page(&mut self, bucket: usize, page: &mut TablePage, i: usize, head: usize) -> Result<(), BCDBError> {
+        let ref mut bucket = self.buckets[bucket];
         let mut link = Offset::invalid();
         let links = bucket.hashes.iter().zip(bucket.offsets.iter())
             .fold(Vec::new(), |mut a, e|
@@ -170,7 +237,7 @@ impl MemTable {
                     a
                 });
         for chunk in links.chunks(255) {
-            link = link_file.append_link(chunk.to_vec(), link)?;
+            link = self.link_file.append_link(chunk.to_vec(), link)?;
         }
         page.write_offset(i * BUCKET_SIZE + head, link)
     }
@@ -209,7 +276,7 @@ impl MemTable {
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
-        self.dirty.set(bucket);
+        self.modify_bucket(bucket)?;
         Ok(())
     }
 
@@ -236,9 +303,19 @@ impl MemTable {
                 }
             }
             self.buckets[bucket] = new_bucket_store;
-            self.dirty.set(bucket);
+            self.modify_bucket(bucket)?;
         }
         Ok(())
+    }
+
+    fn modify_bucket(&mut self, bucket: usize) -> Result<(), BCDBError> {
+        self.dirty.set(bucket);
+        let bucket_page = if bucket < BUCKETS_FIRST_PAGE { 
+            Offset::from(0) 
+        } else {
+            Offset::from(((bucket - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE + 1) as u64 * PAGE_SIZE as u64)
+        };
+        self.log_file.log_page(bucket_page, &self.table_file)
     }
 
     // get the data last associated with the key
