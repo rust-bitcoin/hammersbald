@@ -70,52 +70,6 @@ impl MemTable {
     }
 
     pub fn load (&mut self) -> Result<(), BCDBError>{
-        if let Some(first) = self.table_file.read_table_page(Offset::from(0))? {
-            let n_buckets = first.read_offset(0)?.as_u64() as u32;
-            self.step = first.read_offset(6)?.as_u64() as usize;
-            self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
-            self.sip0 = first.read_u64(12)?;
-            self.sip1 = first.read_u64(20)?;
-
-            let mut bucket_to_link = HashMap::with_capacity(n_buckets as usize);
-            for (n, bucket) in self.table_file.iter().enumerate() {
-                if bucket.is_valid() {
-                    bucket_to_link.insert(bucket, n);
-                }
-            }
-            let mut buckets = vec!(Bucket::default(); n_buckets as usize);
-            for (self_offset, mut links, mut next) in self.link_file.iter() {
-                if let Some(bucket_index) = bucket_to_link.get(&self_offset) {
-                    let bucket = &mut buckets[*bucket_index];
-                    bucket.link = self_offset;
-                    loop {
-
-                        let mut hashes = links.iter().fold(Vec::new(), |mut a, e| {
-                            a.push(e.0);
-                            a
-                        });
-                        hashes.extend(bucket.hashes.iter());
-                        bucket.hashes = hashes;
-
-                        let mut offsets = links.iter().fold(Vec::new(), |mut a, e| {
-                            a.push(e.1.as_u64());
-                            a
-                        });
-                        offsets.extend(bucket.offsets.iter());
-                        bucket.offsets = offsets;
-
-                        if !next.is_valid() {
-                            break;
-                        }
-
-                        let (l, n) = self.link_file.get_link(next)?;
-                        links = l;
-                        next = n;
-                    }
-
-                }
-            }
-        }
         Ok(())
     }
 
@@ -158,16 +112,11 @@ impl MemTable {
         let mut table_len = 0;
         let mut link_len = 0;
         if let Some(page) = self.log_file.read_page(Offset::from(0))? {
-            let mut size = [0u8; 6];
-            page.read(2, &mut size)?;
-            data_len = Offset::from(&size[..]).as_u64();
+            data_len = page.read_offset(2)?.as_u64();
+            table_len = page.read_offset(8)?.as_u64();
+            link_len = page.read_offset(14)?.as_u64();
 
-            page.read(8, &mut size)?;
-            table_len = Offset::from(&size[..]).as_u64();
             self.table_file.truncate(table_len)?;
-
-            page.read(14, &mut size)?;
-            link_len = Offset::from(&size[..]).as_u64();
             self.link_file.truncate(link_len)?;
         }
 
