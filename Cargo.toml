@@ -6,7 +6,7 @@ license = "Apache-2.0"
 homepage = "https://github.com/rust-bitcoin/rust-blockchain-store/"
 repository = "https://github.com/rust-bitcoin/rust-blockchain-store/"
 documentation = "https://github.com/rust-bitcoin/rust-blockchain-store/"
-description = "Persistent blockchain store and a convenience library for a blockchain"
+description = "Persistent store and a convenience library for a blockchain"
 keywords = [ "blockchain", "bitcoin" ]
 readme = "README.md"
 

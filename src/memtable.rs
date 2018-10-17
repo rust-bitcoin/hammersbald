@@ -441,6 +441,7 @@ mod test {
         for (k, (o, data)) in check {
             assert_eq!(db.get_unique(&k[..]).unwrap().unwrap(), (o, k.to_vec(), data));
         }
+        db.shutdown();
     }
 }
 

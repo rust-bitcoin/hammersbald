@@ -18,66 +18,53 @@
 //! an append only file written in background
 //!
 
-use page::{Page, PAGE_SIZE};
+use page::Page;
 use pagedfile::PagedFile;
 
 use cache::Cache;
 use error::BCDBError;
 use offset::Offset;
 
-use std::sync::{Mutex,Arc,Condvar};
+use std::sync::{Mutex, Arc, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 pub struct AsyncFile {
-    inner: Arc<AsyncFileInner>
+    inner: Arc<AsyncFileInner>,
+    sender: Mutex<mpsc::Sender<Option<Page>>>
 }
 
 struct AsyncFileInner {
     file: Mutex<Box<PagedFile>>,
     cache: Mutex<Cache>,
-    work: Condvar,
-    run: AtomicBool,
+    run: AtomicBool
 }
 
 impl AsyncFileInner {
     pub fn new (file: Box<PagedFile>) -> Result<AsyncFileInner, BCDBError> {
         let len = file.len()?;
-        Ok(AsyncFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)),
-            work: Condvar::new(), run: AtomicBool::new(true)})
+        Ok(AsyncFileInner { file: Mutex::new(file), cache: Mutex::new(Cache::new(len)), run: AtomicBool::new(true)})
     }
 }
 
 impl AsyncFile {
     pub fn new (file: Box<PagedFile>) -> Result<AsyncFile, BCDBError> {
+        let (sender, receiver) = mpsc::channel();
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
-        thread::spawn(move || { AsyncFile::background(inner2) });
-        Ok(AsyncFile { inner })
+        thread::spawn(move || { AsyncFile::background(inner2, receiver) });
+        Ok(AsyncFile { inner, sender: Mutex::new(sender) })
     }
 
-    fn background (inner: Arc<AsyncFileInner>) {
-        let mut cache = inner.cache.lock().expect("cache lock poisoned");
+    fn background (inner: Arc<AsyncFileInner>, receiver: mpsc::Receiver<Option<Page>>) {
         loop {
-            while cache.has_writes() && inner.run.load(Ordering::Acquire) {
-                cache = inner.work.wait(cache).expect("cache lock poisoned while waiting for work");
-            }
             if inner.run.load(Ordering::Acquire) == false {
                 break;
             }
-            let mut file = inner.file.lock().expect("file lock poisoned");
-            let mut next = file.len().unwrap();
-            for (o, page) in cache.new_writes() {
-                use std::ops::Deref;
-
-                if o.as_u64() != next as u64 {
-                    panic!("non consecutive append {} {}", next, o);
-                }
-                next = o.as_u64() + PAGE_SIZE as u64;
-                file.append_page(page.deref().clone()).expect("can not extend data file");
+            if let Some(page) = receiver.recv().expect("call AsyncFile::shutdown () to avoid this error") {
+                let mut file = inner.file.lock().expect("file lock poisoned");
+                file.append_page(page).expect("can not extend data file");
             }
-            cache.clear_writes();
-            inner.work.notify_one();
         }
     }
 
@@ -92,10 +79,7 @@ impl AsyncFile {
 impl PagedFile for AsyncFile {
     #[allow(unused_assignments)]
     fn flush(&mut self) -> Result<(), BCDBError> {
-        let mut cache = self.inner.cache.lock().unwrap();
-        while !cache.has_writes() {
-            cache = self.inner.work.wait(cache).expect("cache lock poisoned while waiting for flush");
-        }
+        self.sender.lock().unwrap().send(None)?;
         self.inner.file.lock().unwrap().flush()
     }
 
@@ -105,7 +89,6 @@ impl PagedFile for AsyncFile {
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
         let mut cache = self.inner.cache.lock().unwrap();
-        cache.clear_writes();
         cache.reset_len(new_len);
         self.inner.file.lock().unwrap().truncate(new_len)
     }
@@ -127,9 +110,9 @@ impl PagedFile for AsyncFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        self.sender.lock().unwrap().send(Some(page.clone()))?;
         let mut cache = self.inner.cache.lock().unwrap();
         let len = cache.append(page);
-        self.inner.work.notify_all();
         Ok(len)
     }
 
@@ -138,8 +121,8 @@ impl PagedFile for AsyncFile {
     }
 
     fn shutdown (&mut self) {
+        self.sender.lock().unwrap().send(None).unwrap();
         let _cache = self.inner.cache.lock().unwrap();
         self.inner.run.store(false, Ordering::Release);
-        self.inner.work.notify_all();
     }
 }

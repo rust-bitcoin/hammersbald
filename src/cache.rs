@@ -28,7 +28,6 @@ use std::cmp::max;
 pub const READ_CACHE_PAGES: usize = 100;
 
 pub struct Cache {
-    writes: Vec<(Offset, Arc<Page>)>,
     reads: HashMap<Offset, Arc<Page>>,
     age_desc: VecDeque<Offset>,
     len: u64
@@ -36,7 +35,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn new (len: u64) -> Cache {
-        Cache { writes: Vec::new(), reads: HashMap::new(), age_desc: VecDeque::new(), len }
+        Cache { reads: HashMap::new(), age_desc: VecDeque::new(), len }
     }
 
     pub fn cache (&mut self, offset: Offset, page: Arc<Page>) {
@@ -61,7 +60,6 @@ impl Cache {
     pub fn append (&mut self, page: Page) ->u64 {
         let offset = Offset::from(self.len);
         let page = Arc::new(page);
-        self.writes.push((offset, page.clone()));
         self.cache(offset, page);
         self.len = max(self.len, offset.as_u64() + PAGE_SIZE as u64);
         self.len
@@ -73,18 +71,6 @@ impl Cache {
             return Some(content.deref().clone())
         }
         None
-    }
-
-    pub fn has_writes(&self) -> bool {
-        return self.writes.is_empty()
-    }
-
-    pub fn new_writes(&mut self) -> impl Iterator<Item=&(Offset, Arc<Page>)> {
-        self.writes.iter()
-    }
-
-    pub fn clear_writes(&mut self) {
-        self.writes.clear()
     }
 
     pub fn reset_len(&mut self, len: u64) {

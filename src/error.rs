@@ -40,7 +40,9 @@ pub enum BCDBError {
     #[cfg(feature="bitcoin_support")]
     Util(util::Error),
     /// Lock poisoned
-    Poisoned(String)
+    Poisoned(String),
+    /// Queue error
+    Queue(String)
 }
 
 impl Error for BCDBError {
@@ -52,7 +54,8 @@ impl Error for BCDBError {
             BCDBError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
             BCDBError::Util(_) => "Bitcoin Util Error",
-            BCDBError::Poisoned(ref s) => s.as_str()
+            BCDBError::Poisoned(ref s) => s.as_str(),
+            BCDBError::Queue(ref s) => s.as_str()
         }
     }
 
@@ -64,7 +67,8 @@ impl Error for BCDBError {
             BCDBError::IO(ref e) => Some(e),
             #[cfg(feature="bitcoin_support")]
             BCDBError::Util(ref e) => Some(e),
-            BCDBError::Poisoned(_) => None
+            BCDBError::Poisoned(_) => None,
+            BCDBError::Queue(_) => None
         }
     }
 }
@@ -96,5 +100,11 @@ impl convert::From<BCDBError> for io::Error {
 impl<T> convert::From<sync::PoisonError<T>> for BCDBError {
     fn from(err: sync::PoisonError<T>) -> BCDBError {
         BCDBError::Poisoned(err.to_string())
+    }
+}
+
+impl<T> convert::From<sync::mpsc::SendError<T>> for BCDBError {
+    fn from(err: sync::mpsc::SendError<T>) -> BCDBError {
+        BCDBError::Queue(err.to_string())
     }
 }
