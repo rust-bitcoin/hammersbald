@@ -41,7 +41,7 @@ pub fn main () {
         thread_rng().fill(&mut data[..]);
         thread_rng().fill(&mut key[..]);
 
-        let offset = db.put(&key, &data, vec!()).unwrap();
+        let offset = db.put(&key, &data, &vec!()).unwrap();
         if i % 1000 == 0 {
             check.push ((offset, key.to_vec(), data.to_vec()));
         }
@@ -63,7 +63,7 @@ pub fn main () {
     println!("Reading data in random order...");
     now = Instant::now();
     for (offset, key, data) in &check {
-        assert_eq!(db.get_unique(key.as_slice()).unwrap(), Some((*offset, key.clone(), data.clone())));
+        assert_eq!(db.get(key.as_slice()).unwrap(), Some((*offset, data.clone(), vec!())));
     }
     elapsed = now.elapsed().as_secs();
     if elapsed > 0 {

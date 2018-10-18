@@ -291,12 +291,12 @@ impl DataFormatter {
 
 
     /// get a stored content at offset
-    pub fn get_payload(&self, offset: Offset) -> Result<Option<Payload>, BCDBError> {
+    pub fn get_payload(&self, offset: Offset) -> Result<Payload, BCDBError> {
         // TODO: propagate errors from next()
         if let Some(envelope) = ForwardEnvelopeIterator::new(&self.formatter, offset).next() {
-            return Ok(Some(Payload::deserialize(&mut Cursor::new(envelope.payload.as_slice()))?));
+            return Ok(Payload::deserialize(&mut Cursor::new(envelope.payload.as_slice()))?);
         }
-        Ok(None)
+        Err(BCDBError::Corrupted("offset should point to data".to_string()))
     }
 
     /// append data

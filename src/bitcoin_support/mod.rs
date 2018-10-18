@@ -18,7 +18,7 @@
 //!
 
 use api::{BCDB, BCDBAPI};
-use offset::{Offset, OffsetReader};
+use offset::Offset;
 use error::BCDBError;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
@@ -58,7 +58,7 @@ impl BitcoinAdapter {
     /// Fetch a header by its id
     pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCDBError> {
         let key = id.data();
-        if let Some((_,_,stored)) = self.bcdb.get_unique(&key)? {
+        if let Some((_,_,stored)) = self.bcdb.get(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             Offset::from(data.read_u48::<BigEndian>()?); // do not care of transaction
@@ -96,7 +96,7 @@ impl BitcoinAdapter {
     /// Fetch a block by its id
     pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCDBError> {
         let key = id.data();
-        if let Some((_, _,stored)) = self.bcdb.get_unique(&key)? {
+        if let Some((_, _,stored)) = self.bcdb.get(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             let txdata_offset = Offset::from(data.read_u48::<BigEndian>()?);
@@ -137,20 +137,12 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError> {
         self.bcdb.put(key, data)
     }
 
     fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
-        self.bcdb.get_unique(key)
-    }
-
-    fn put_content(&mut self, data: &[u8]) -> Result<Offset, BCDBError> {
-        self.bcdb.put_content(data)
-    }
-
-    fn get_content(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>), BCDBError> {
-        self.bcdb.get_content(offset)
+        self.bcdb.get(key)
     }
 }
 
@@ -184,7 +176,7 @@ mod test {
         let data = encode(&Sha256dHash::default()).unwrap();
         let key = encode(&Sha256dHash::default()).unwrap();
         let offset = db.put(&key[..], data.as_slice()).unwrap();
-        assert_eq!(db.get_unique(&key[..]).unwrap(), Some((offset, key, data)));
+        assert_eq!(db.get(&key[..]).unwrap(), Some((offset, key, data)));
         db.shutdown();
     }
 

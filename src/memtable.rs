@@ -232,17 +232,20 @@ impl MemTable {
     }
 
     // get the data last associated with the key
-    pub fn get_unique(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
+    pub fn get(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<u8>, Vec<Offset>)>, BCDBError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
                     let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
-                    if let Some(Payload::Indexed(indexed)) = data_file.get_payload(data_offset)? {
+                    if let Payload::Indexed(indexed) = data_file.get_payload(data_offset)? {
                         if indexed.key.as_slice() == key {
-                            return Ok(Some((data_offset, indexed.key, indexed.data.data)));
+                            return Ok(Some((data_offset, indexed.data.data, indexed.data.referred)));
                         }
+                    }
+                    else {
+                        return Err(BCDBError::Corrupted("offset should point to indexed data".to_string()));
                     }
                 }
             }
@@ -419,13 +422,13 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let o = db.put(&key, &data, vec!()).unwrap();
+            let o = db.put(&key, &data, &vec!()).unwrap();
             check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, (o, data)) in check {
-            assert_eq!(db.get_unique(&k[..]).unwrap().unwrap(), (o, k.to_vec(), data));
+            assert_eq!(db.get(&k[..]).unwrap().unwrap(), (o, data, vec!()));
         }
         db.shutdown();
     }

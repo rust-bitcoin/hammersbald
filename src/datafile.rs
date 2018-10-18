@@ -47,14 +47,20 @@ impl DataFile {
     }
 
     /// get a stored content at offset
-    pub fn get_payload(&self, offset: Offset) -> Result<Option<Payload>, BCDBError> {
+    pub fn get_payload(&self, offset: Offset) -> Result<Payload, BCDBError> {
         self.formatter.get_payload(offset)
     }
 
-    /// append data
-    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError> {
-        let indexed = IndexedData { key: key.to_vec(), data: Data{data: data.to_vec(), referred} };
+    /// append indexed data
+    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError> {
+        let indexed = IndexedData { key: key.to_vec(), data: Data{data: data.to_vec(), referred: referred.clone()} };
         self.formatter.append_payload(Payload::Indexed(indexed))
+    }
+
+    /// append referred data
+    pub fn append_referred (&mut self, data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError> {
+        let data = Data{data: data.to_vec(), referred: referred.clone()};
+        self.formatter.append_payload(Payload::Referred(data))
     }
 
     /// truncate file

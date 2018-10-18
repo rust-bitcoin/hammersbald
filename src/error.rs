@@ -32,8 +32,8 @@ pub enum BCDBError {
     InvalidOffset,
     /// corrupted data
     Corrupted(String),
-    /// Data does not fit into the block
-    DoesNotFit,
+    /// attempt to reference forward
+    ForwardReference,
     /// wrapped IO error
     IO(io::Error),
     /// Wrapped bitcoin util error
@@ -49,7 +49,7 @@ impl Error for BCDBError {
     fn description(&self) -> &str {
         match *self {
             BCDBError::InvalidOffset => "invalid offset",
-            BCDBError::DoesNotFit => "data does not fit into the page",
+            BCDBError::ForwardReference => "forward reference",
             BCDBError::Corrupted (ref s) => s.as_str(),
             BCDBError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
@@ -62,7 +62,7 @@ impl Error for BCDBError {
     fn cause(&self) -> Option<&Error> {
         match *self {
             BCDBError::InvalidOffset => None,
-            BCDBError::DoesNotFit => None,
+            BCDBError::ForwardReference => None,
             BCDBError::Corrupted (_) => None,
             BCDBError::IO(ref e) => Some(e),
             #[cfg(feature="bitcoin_support")]

@@ -22,7 +22,8 @@ use tablefile::TableFile;
 use datafile::DataFile;
 use linkfile::LinkFile;
 use memtable::MemTable;
-use error::{BCDBError};
+use format::Payload;
+use error::BCDBError;
 
 /// a trait to create a new db
 pub trait BCDBFactory {
@@ -48,10 +49,20 @@ pub trait BCDBAPI {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError>;
+    /// returns the offset the data was stored
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError>;
 
     /// retrieve single data by key
-    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError>;
+    /// returns (offset, data, referred)
+    fn get(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<Offset>)>, BCDBError>;
+
+    /// store referred data
+    /// returns the offset the data was stored
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError>;
+
+    /// get data
+    /// returns (key, data, referred)
+    fn get_data(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>, Vec<Offset>), BCDBError>;
 }
 
 impl BCDB {
@@ -102,22 +113,45 @@ impl BCDBAPI for BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaddressable
-    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
-                return Err(BCDBError::DoesNotFit);
+                return Err(BCDBError::ForwardReference);
             }
         }
-
         let data_offset = self.data.append_data(key, data, referred)?;
+        #[cfg(debug_assertions)]
+        {
+            if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
+                return Err(BCDBError::ForwardReference);
+            }
+        }
         self.mem.put(key, data_offset)?;
         Ok(data_offset)
     }
 
-    /// retrieve the single data associated with this key
-    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
-        self.mem.get_unique(key,  &self.data)
+    fn get(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<Offset>)>, BCDBError> {
+        self.mem.get(key,  &self.data)
+    }
+
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError> {
+        let data_offset = self.data.append_referred(data, referred)?;
+        #[cfg(debug_assertions)]
+        {
+            if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
+                return Err(BCDBError::ForwardReference);
+            }
+        }
+        Ok(data_offset)
+    }
+
+    fn get_data(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>, Vec<Offset>), BCDBError> {
+        match self.data.get_payload(offset)? {
+            Payload::Referred(referred) => return Ok((vec!(), referred.data, referred.referred)),
+            Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred)),
+            _ => return Err(BCDBError::Corrupted("offset should point to data".to_string()))
+        }
     }
 }
 
@@ -147,25 +181,25 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let offset = db.put(&key, &data, vec!()).unwrap();
+            let offset = db.put(&key, &data, &vec!()).unwrap();
             check.insert(key, (offset, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get_unique(&k[..]).unwrap(), Some((*o, k.to_vec(), v.to_vec())));
+            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), vec!())));
         }
 
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let offset = db.put(&key, &data, vec!()).unwrap();
+            let offset = db.put(&key, &data, &vec!()).unwrap();
             check.insert(key, (offset, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get_unique(&k[..]).unwrap(), Some((*o, k.to_vec(), v.to_vec())));
+            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), vec!())));
         }
         db.shutdown();
     }
