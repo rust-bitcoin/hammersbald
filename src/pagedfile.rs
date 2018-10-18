@@ -17,7 +17,7 @@
 //! # a file that is read and wrote by pages
 //!
 
-use page::{Page, PAGE_SIZE};
+use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use error::BCDBError;
 use offset::Offset;
 
@@ -100,7 +100,7 @@ impl<'file> Read for PagedFileIterator<'file> {
             }
 
             if let Some(ref page) = self.page {
-                let have = min(PAGE_SIZE - self.pos, buf.len() - read);
+                let have = min(PAGE_PAYLOAD_SIZE - self.pos, buf.len() - read);
                 page.read(self.pos, &mut buf[read .. read + have]);
                 self.pos += have;
                 read += have;

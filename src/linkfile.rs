@@ -37,14 +37,15 @@ impl LinkFile {
 
     /// initialize
     pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.appender.append_slice(&[0xBC, 0xDB])
+        self.appender.append_slice(&[0xBC, 0xDB], Offset::from(2))
     }
 
     /// append data
     pub fn append_link (&mut self, link: Link) -> Result<(), BCDBError> {
+        let me = self.appender.position();
         let mut ls = Vec::new();
         link.serialize(&mut ls);
-        self.appender.append_slice(ls.as_slice())
+        self.appender.append_slice(ls.as_slice(), me)
     }
 }
 

@@ -141,7 +141,7 @@ impl MemTable {
     pub fn flush (&mut self) -> Result<(), BCDBError> {
         if self.dirty.is_dirty() {
             // first page
-            let mut page = Page::new();
+            let mut page = Page::new(Offset::from(0));
             page.write_offset(0, Offset::from(self.buckets.len() as u64));
             page.write_offset(6, Offset::from(self.step as u64));
             page.write_u64(12, self.sip0);

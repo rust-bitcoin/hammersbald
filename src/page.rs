@@ -34,8 +34,10 @@ pub struct Page {
 
 impl Page {
     /// create an empty page
-    pub fn new () -> Page {
-        Page{ content: [0u8; PAGE_SIZE] }
+    pub fn new (offset: Offset) -> Page {
+        let mut page = Page{ content: [0u8; PAGE_SIZE] };
+        page.write_offset(PAGE_PAYLOAD_SIZE, offset);
+        page
     }
 
     /// create a Page from read buffer

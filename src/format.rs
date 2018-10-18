@@ -18,7 +18,7 @@
 //!
 use error::BCDBError;
 use offset::Offset;
-use page::{Page, PAGE_SIZE};
+use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use pagedfile::{PagedFileIterator, PagedFile, FileOps};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
@@ -203,19 +203,21 @@ impl Formatter {
     }
 
     /// append a slice at current position
-    pub fn append_slice(&mut self, payload: &[u8]) -> Result<(), BCDBError> {
+    pub fn append_slice(&mut self, payload: &[u8], lep: Offset) -> Result<(), BCDBError> {
         let mut wrote = 0;
         while wrote < payload.len() {
             let pos = self.append_pos.in_page_pos();
             if self.page.is_none() {
-                self.page = Some(self.file.read_page(self.page_offset)?.unwrap_or(Page::new()));
+                self.page = Some(self.file.read_page(self.page_offset)?.unwrap_or(Page::new(lep)));
             }
             if let Some(ref mut page) = self.page {
-                let space = min(PAGE_SIZE - pos, payload.len() - wrote);
+                let space = min(PAGE_PAYLOAD_SIZE - pos, payload.len() - wrote);
                 page.write(pos, &payload[wrote .. wrote + space]);
                 wrote += space;
                 self.append_pos += space as u64;
-                if self.append_pos.in_page_pos() == 0 {
+                if self.append_pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
+                    page.write_offset(PAGE_PAYLOAD_SIZE, lep);
+                    self.append_pos += 6;
                     self.file.append_page(page.clone())?;
                     self.page_offset = self.append_pos;
                 }
@@ -237,14 +239,6 @@ impl Formatter {
     /// return next append position
     pub fn position (&self) -> Offset {
         self.append_pos
-    }
-
-    /// extend with contents from an iterator
-    pub fn extend(&mut self, mut from: impl Iterator<Item=Vec<u8>>) -> Result<Offset, BCDBError> {
-        while let Some(payload) = from.next() {
-            self.append_slice(payload.as_slice())?;
-        }
-        Ok(self.append_pos)
     }
 }
 
@@ -291,8 +285,8 @@ impl DataFormatter {
     }
 
     /// append a slice at current position
-    pub fn append_slice(&mut self, payload: &[u8]) -> Result<(), BCDBError> {
-        self.formatter.append_slice(payload)
+    pub fn append_slice(&mut self, payload: &[u8], lep: Offset) -> Result<(), BCDBError> {
+        self.formatter.append_slice(payload, lep)
     }
 
 
@@ -312,7 +306,7 @@ impl DataFormatter {
         let mut envelope = Vec::new();
         Envelope{length: content.len() as u32 + 9, previous: self.previous, payload: content}.serialize(&mut envelope);
         let me = self.formatter.position();
-        self.formatter.append_slice(envelope.as_slice())?;
+        self.formatter.append_slice(envelope.as_slice(), me)?;
         self.previous = me;
         Ok(me)
     }

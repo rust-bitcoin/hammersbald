@@ -38,7 +38,7 @@ impl DataFile {
 
     /// initialize
     pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.formatter.append_slice (&[0xBC, 0xDA])
+        self.formatter.append_slice (&[0xBC, 0xDA], Offset::from(2))
     }
 
     /// shutdown
