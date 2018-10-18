@@ -95,8 +95,8 @@ impl PagedFile for TableFile {
 }
 
 impl RandomWritePagedFile for TableFile {
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        self.file.write_page(offset, page)
+    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        self.file.write_page(page)
     }
 }
 

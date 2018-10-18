@@ -96,8 +96,8 @@ impl PagedFile for SingleFile {
 }
 
 impl RandomWritePagedFile for SingleFile {
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        let o = offset.as_u64();
+    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        let o = page.offset().as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("write to wrong file".to_string()));
         }

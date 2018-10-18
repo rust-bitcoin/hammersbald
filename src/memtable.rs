@@ -123,7 +123,7 @@ impl MemTable {
 
         if self.log_file.len()? > PAGE_SIZE as u64 {
             for page in self.log_file.page_iter().skip(1) {
-                self.table_file.write_page(page.offset(), page)?;
+                self.table_file.write_page(page)?;
             }
             self.table_file.flush()?;
 

@@ -171,8 +171,8 @@ impl PagedFile for RolledFile {
 
 impl RandomWritePagedFile for RolledFile {
 
-    fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
-        let n_offset = offset.as_u64();
+    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        let n_offset = page.offset().as_u64();
         let chunk = (n_offset / self.chunk_size) as u16;
 
         if !self.files.contains_key(&chunk) {
@@ -182,7 +182,7 @@ impl RandomWritePagedFile for RolledFile {
         }
 
         if let Some(file) = self.files.get_mut(&chunk) {
-            self.len = file.write_page(offset, page)?  + chunk as u64 * self.chunk_size;
+            self.len = file.write_page(page)?  + chunk as u64 * self.chunk_size;
             Ok(self.len)
         } else {
             return Err(BCDBError::Corrupted(format!("missing chunk in write {}", chunk)));

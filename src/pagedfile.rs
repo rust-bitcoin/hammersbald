@@ -47,8 +47,8 @@ pub trait PagedFile: FileOps + Send + Sync {
 }
 
 pub trait RandomWritePagedFile : PagedFile {
-    /// write a page at any position
-    fn write_page (&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError>;
+    /// write a page at its position
+    fn write_page (&mut self, page: Page) -> Result<u64, BCDBError>;
 }
 
 /// iterate through pages of a paged file
