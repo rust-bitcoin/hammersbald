@@ -89,7 +89,7 @@ impl PagedFile for SingleFile {
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut file = self.file.lock().unwrap();
-        file.write(&page.finish()[..])?;
+        file.write(&page.into_buf())?;
         self.len += PAGE_SIZE as u64;
         Ok(())
     }
@@ -105,7 +105,7 @@ impl RandomWritePagedFile for SingleFile {
 
         let mut file = self.file.lock().unwrap();
         file.seek(SeekFrom::Start(pos))?;
-        file.write(&page.finish()[..])?;
+        file.write(&page.into_buf())?;
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(self.len)
     }

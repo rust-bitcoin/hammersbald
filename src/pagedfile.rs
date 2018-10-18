@@ -101,7 +101,7 @@ impl<'file> Read for PagedFileIterator<'file> {
 
             if let Some(ref page) = self.page {
                 let have = min(PAGE_SIZE - self.pos, buf.len() - read);
-                buf[read..read + have].copy_from_slice(&page.payload[self.pos..self.pos + have]);
+                page.read(self.pos, &mut buf[read .. read + have]);
                 self.pos += have;
                 read += have;
             } else {

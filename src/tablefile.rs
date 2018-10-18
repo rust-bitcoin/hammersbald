@@ -53,19 +53,14 @@ impl TableFile {
         BucketIterator{file: self, n:0}
     }
 
-    pub fn read_table_page(&self, offset: Offset) -> Result<Option<TablePage>, BCDBError> {
+    pub fn read_table_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
         if let Some(page) = self.read_page(offset)? {
-            let key_page = TablePage::from(page);
-            if key_page.offset.as_u64() != offset.as_u64() {
+            if page.offset().as_u64() != offset.as_u64() {
                 return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset)));
             }
-            return Ok(Some(key_page));
+            return Ok(Some(page));
         }
         Ok(None)
-    }
-
-    pub fn write_table_page(&mut self, page: TablePage) -> Result<u64, BCDBError> {
-        self.write_page(page.offset, page.page)
     }
 }
 
@@ -105,68 +100,6 @@ impl RandomWritePagedFile for TableFile {
     }
 }
 
-/// a page of the hash table
-#[derive(Clone)]
-pub struct TablePage {
-    pub page: Page,
-    pub offset: Offset
-}
-
-impl From<Page> for TablePage {
-    fn from(page: Page) -> Self {
-        let offset = Offset::from(&page.payload[PAGE_SIZE-6 ..]);
-        TablePage {page, offset}
-    }
-}
-
-impl TablePage {
-    /// create a new hash table page at offset
-    pub fn new (offset: Offset) -> TablePage {
-        let mut page = Page::new();
-        page.payload[PAGE_SIZE - 6 ..].copy_from_slice(offset.to_vec().as_slice());
-        TablePage {page, offset}
-    }
-
-    pub fn from_buf (payload: [u8; PAGE_SIZE]) -> TablePage {
-        TablePage {page: Page::from_buf(payload), offset: Offset::from(&payload[PAGE_SIZE-6 ..])}
-    }
-
-    /// append some data
-    /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCDBError> {
-        self.page.write(pos, data)
-    }
-
-    /// write an offset
-    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
-        self.page.write_offset(pos, offset)
-    }
-
-    /// read some data
-    /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCDBError> {
-        self.page.read(pos, data)
-    }
-
-    /// read a stored offset
-    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
-        self.page.read_offset(pos)
-    }
-
-    pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
-        self.page.read_u64(pos)
-    }
-
-    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
-        self.page.write_u64(pos, n)
-    }
-
-    /// finish a page after appends to write out
-    pub fn finish (&self) -> [u8; PAGE_SIZE] {
-        self.page.payload
-    }
-}
-
 struct BucketIterator<'a> {
     file: &'a TableFile,
     n: u32
@@ -179,32 +112,9 @@ impl<'a> Iterator for BucketIterator<'a> {
         let table_offset = TableFile::table_offset(self.n);
         if let Ok(Some(page)) = self.file.read_page(table_offset.this_page()) {
             self.n += 1;
-            return Some(page.read_offset(table_offset.in_page_pos()).unwrap())
+            return Some(page.read_offset(table_offset.in_page_pos()))
         }
         None
     }
 }
 
-#[cfg(test)]
-mod test {
-    extern crate hex;
-
-    use super::*;
-    #[test]
-    fn form_test () {
-        let mut key_page = TablePage::new(Offset::from(4711));
-        let payload: &[u8] = "hello world".as_bytes();
-        key_page.write(0,payload).unwrap();
-        let result = key_page.finish();
-
-        let mut check = [0u8; PAGE_SIZE];
-        check[0 .. payload.len()].copy_from_slice(payload);
-        check[PAGE_SIZE -1] = (4711 % 256) as u8;
-        check[PAGE_SIZE -2] = (4711 / 256) as u8;
-        assert_eq!(hex::encode(&result[..]), hex::encode(&check[..]));
-
-        let page2 = TablePage::from_buf(check);
-        assert_eq!(key_page.offset, page2.offset);
-        assert_eq!(hex::encode(&key_page.page.payload[..]), hex::encode(&page2.page.payload[..]));
-    }
-}

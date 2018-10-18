@@ -212,7 +212,7 @@ impl Formatter {
             }
             if let Some(ref mut page) = self.page {
                 let space = min(PAGE_SIZE - pos, payload.len() - wrote);
-                page.payload[pos .. pos + space].copy_from_slice(&payload[wrote .. wrote + space]);
+                page.write(pos, &payload[wrote .. wrote + space]);
                 wrote += space;
                 self.append_pos += space as u64;
                 if self.append_pos.in_page_pos() == 0 {

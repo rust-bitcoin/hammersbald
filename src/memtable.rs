@@ -26,8 +26,8 @@ use linkfile::LinkFile;
 use logfile::LogFile;
 use page::{PAGE_SIZE};
 use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
-use tablefile::TablePage;
 use format::Payload;
+use page::Page;
 
 use siphasher::sip::SipHasher;
 use rand::{thread_rng, RngCore};
@@ -113,9 +113,9 @@ impl MemTable {
         let mut table_len = 0;
         let mut link_len = 0;
         if let Some(page) = self.log_file.read_page(Offset::from(0))? {
-            data_len = page.read_offset(2)?.as_u64();
-            table_len = page.read_offset(8)?.as_u64();
-            link_len = page.read_offset(14)?.as_u64();
+            data_len = page.read_offset(2).as_u64();
+            table_len = page.read_offset(8).as_u64();
+            link_len = page.read_offset(14).as_u64();
 
             self.table_file.truncate(table_len)?;
             self.link_file.truncate(link_len)?;
@@ -123,8 +123,7 @@ impl MemTable {
 
         if self.log_file.len()? > PAGE_SIZE as u64 {
             for page in self.log_file.page_iter().skip(1) {
-                let table_page = TablePage::from(page);
-                self.table_file.write_page(table_page.offset, table_page.page)?;
+                self.table_file.write_page(page.offset(), page)?;
             }
             self.table_file.flush()?;
 
@@ -142,11 +141,11 @@ impl MemTable {
     pub fn flush (&mut self) -> Result<(), BCDBError> {
         if self.dirty.is_dirty() {
             // first page
-            let mut page = TablePage::new(Offset::from(0));
-            page.write_offset(0, Offset::from(self.buckets.len() as u64))?;
-            page.write_offset(6, Offset::from(self.step as u64))?;
-            page.write_u64(12, self.sip0)?;
-            page.write_u64(20, self.sip1)?;
+            let mut page = Page::new();
+            page.write_offset(0, Offset::from(self.buckets.len() as u64));
+            page.write_offset(6, Offset::from(self.step as u64));
+            page.write_u64(12, self.sip0);
+            page.write_u64(20, self.sip1);
 
             // TODO
 

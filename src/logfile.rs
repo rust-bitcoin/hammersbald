@@ -39,10 +39,10 @@ impl LogFile {
     pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), BCDBError> {
         self.truncate(0)?;
         let mut first = Page::new();
-        first.write(0, &[0xBC, 0x00]).unwrap();
-        first.write_offset(2, Offset::from(data_len)).unwrap();
-        first.write_offset(8, Offset::from(table_len)).unwrap();
-        first.write_offset(14, Offset::from(link_len)).unwrap();
+        first.write(0,&[0xBC, 0x00]);
+        first.write_offset(2, Offset::from(data_len));
+        first.write_offset(8, Offset::from(table_len));
+        first.write_offset(14, Offset::from(link_len));
 
         self.append_page(first)?;
         self.flush()?;

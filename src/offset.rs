@@ -20,9 +20,6 @@
 
 use page::PAGE_SIZE;
 
-use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
-
-use std::io::Cursor;
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
@@ -56,27 +53,9 @@ impl From<u64> for Offset {
     }
 }
 
-impl<'a> From<&'a [u8]> for Offset {
-    fn from(slice: &'a [u8]) -> Self {
-        Offset::from(Cursor::new(slice).read_u48::<BigEndian>().unwrap())
-    }
-}
-
 impl fmt::Display for Offset {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "{}", self.0)
-    }
-}
-
-/// can read offsets from this
-pub trait OffsetReader {
-    /// read offset
-    fn read_offset (&mut self) -> Offset;
-}
-
-impl OffsetReader for Cursor<Vec<u8>> {
-    fn read_offset(&mut self) -> Offset {
-        Offset(self.read_u48::<BigEndian>().unwrap())
     }
 }
 
@@ -121,13 +100,6 @@ impl ops::SubAssign<u64> for Offset {
 }
 
 impl Offset {
-    /// serialize to a vector of bytes
-    pub fn to_vec(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        v.write_u48::<BigEndian>(self.0).unwrap();
-        v
-    }
-
     /// construct an invalid offset
     pub fn invalid () -> Offset {
         Offset::from(0)
@@ -142,7 +114,6 @@ impl Offset {
     pub fn as_u64 (&self) -> u64 {
         return self.0;
     }
-
 
     /// offset of the page of this offset
     pub fn this_page(&self) -> Offset {

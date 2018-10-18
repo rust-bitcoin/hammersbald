@@ -110,7 +110,7 @@ impl PagedFile for Transient {
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
-        inner.write(&page.finish()[..])?;
+        inner.write(&page.into_buf())?;
         Ok(())
     }
 }
@@ -119,7 +119,7 @@ impl RandomWritePagedFile for Transient {
     fn write_page(&mut self, offset: Offset, page: Page) -> Result<u64, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(offset.as_u64()))?;
-        inner.write(&page.finish()[..])?;
+        inner.write(&page.into_buf())?;
         Ok(inner.data.len() as u64)
     }
 }

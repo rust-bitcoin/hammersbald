@@ -20,83 +20,71 @@
 //!
 //!
 
-use error::BCDBError;
 use offset::Offset;
-
-use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
-
-use std::io::Cursor;
+use byteorder::{ByteOrder, BigEndian};
 
 pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_PAYLOAD_SIZE: usize = 4090;
 
 /// A page of the persistent files
 #[derive(Clone)]
 pub struct Page {
-    pub payload: [u8; PAGE_SIZE]
+    content: [u8; PAGE_SIZE],
 }
 
 impl Page {
-    /// create a new empty page to be appended at given offset
+    /// create an empty page
     pub fn new () -> Page {
-        Page {payload: [0u8; PAGE_SIZE]}
+        Page{ content: [0u8; PAGE_SIZE] }
     }
 
     /// create a Page from read buffer
-    pub fn from_buf (payload: [u8; PAGE_SIZE]) -> Page {
-        Page {payload}
+    pub fn from_buf (content: [u8; PAGE_SIZE]) -> Page {
+        Page{ content }
     }
 
-    /// append some data
-    /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn write (&mut self, pos: usize, data: & [u8]) -> Result<(), BCDBError> {
-        if pos + data.len() > PAGE_SIZE {
-            return Err (BCDBError::DoesNotFit);
-        }
-        self.payload [pos .. pos + data.len()].copy_from_slice(&data[..]);
-        Ok(())
+    /// interpret the last 6 bytes as an offset
+    pub fn offset (&self) -> Offset {
+        self.read_offset(PAGE_PAYLOAD_SIZE)
     }
 
-    /// write an offset
-    pub fn write_offset (&mut self, pos: usize, offset: Offset) -> Result<(), BCDBError> {
-        if pos + 6 > PAGE_SIZE {
-            return Err (BCDBError::DoesNotFit);
-        }
-        self.payload[pos .. pos + 6].copy_from_slice(offset.to_vec().as_slice());
-        Ok(())
+    /// write slice at a position
+    pub fn write(&mut self, pos: usize, slice: &[u8]) {
+        self.content[pos .. pos + slice.len()].copy_from_slice(slice)
     }
 
-    /// read some data
-    /// will return Error::DoesNotFit if data does not fit into the page
-    pub fn read (&self, pos: usize, data: &mut [u8]) -> Result<(), BCDBError> {
-        if pos + data.len() > PAGE_SIZE {
-            return Err (BCDBError::DoesNotFit);
-        }
-        let len = data.len();
-        data[..].copy_from_slice(&self.payload [pos .. pos + len]);
-        Ok(())
+    /// read at position
+    pub fn read (&self, pos: usize, buf: &mut [u8]) {
+        let len = buf.len();
+        buf.copy_from_slice(&self.content[pos .. pos+len])
     }
 
-    /// read a stored offset
-    pub fn read_offset(&self, pos: usize) -> Result<Offset, BCDBError> {
-        let mut buf = [0u8;6];
-        self.read(pos, &mut buf)?;
-        Ok(Offset::from(&buf[..]))
+    /// write an offset into the page
+    pub fn write_offset (&mut self, pos: usize, offset: Offset) {
+        let mut buf = [0u8; 6];
+        BigEndian::write_u48(&mut buf, offset.as_u64());
+        self.content[pos..pos+6].copy_from_slice(&buf[..]);
     }
 
-    pub fn read_u64(&self, pos: usize) -> Result<u64, BCDBError> {
-        let mut buf = [0u8;8];
-        self.read(pos, &mut buf)?;
-        Ok(Cursor::new(buf).read_u64::<BigEndian>()?)
+    /// read an offset at a page position
+    pub fn read_offset(&self, pos: usize) -> Offset {
+        Offset::from(BigEndian::read_u64(&self.content[pos..pos+6]))
     }
 
-    pub fn write_u64(&mut self, pos: usize, n: u64) -> Result<(), BCDBError> {
-        let mut bytes = Vec::new();
-        bytes.write_u64::<BigEndian>(n)?;
-        self.write(pos, &bytes.as_slice())
+    /// write an offset into the page
+    pub fn write_u64 (&mut self, pos: usize, n: u64) {
+        let mut buf = [0u8; 8];
+        BigEndian::write_u64(&mut buf, n);
+        self.content[pos..pos+8].copy_from_slice(&buf[..]);
     }
 
-    /// finish a page after appends to write out
-    pub fn finish (&self) -> [u8; PAGE_SIZE] {
-        self.payload
+    /// read an offset at a page position
+    pub fn read_u64(&self, pos: usize) -> u64 {
+        BigEndian::read_u64(&self.content[pos..pos+8])
+    }
+
+    /// into write buffer
+    pub fn into_buf (self) -> [u8; PAGE_SIZE] {
+        self.content
     }
 }
