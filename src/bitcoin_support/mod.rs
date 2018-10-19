@@ -18,7 +18,7 @@
 //!
 
 use api::{BCDB, BCDBAPI};
-use offset::Offset;
+use pref::PRef;
 use error::BCDBError;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
@@ -43,14 +43,14 @@ impl BitcoinAdapter {
         BitcoinAdapter { bcdb }
     }
 
-    pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<Offset, BCDBError> {
+    pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<PRef, BCDBError> {
         let key = header.bitcoin_hash().data();
         let mut serialized_header = encode(header)?;
-        serialized_header.write_u48::<BigEndian>(Offset::invalid().as_u64())?; // no transactions
+        serialized_header.write_u48::<BigEndian>(PRef::invalid().as_u64())?; // no transactions
         serialized_header.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
-            let offset = self.bcdb.put_content(d.as_slice())?;
-            serialized_header.extend(offset.to_vec());
+            let pref = self.bcdb.put_content(d.as_slice())?;
+            serialized_header.extend(pref.to_vec());
         }
         self.bcdb.put(&key[..], serialized_header.as_slice())
     }
@@ -61,12 +61,12 @@ impl BitcoinAdapter {
         if let Some((_,_,stored)) = self.bcdb.get(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
-            Offset::from(data.read_u48::<BigEndian>()?); // do not care of transaction
+            PRef::from(data.read_u48::<BigEndian>()?); // do not care of transaction
             let next = data.read_u32::<BigEndian>()?;
             let mut extension = Vec::new();
             for _ in 0 .. next {
-                let offset = data.read_offset();
-                let (_, e) = self.bcdb.get_content(offset)?;
+                let pref = data.read_offset();
+                let (_, e) = self.bcdb.get_content(pref)?;
                 extension.push(e);
             }
 
@@ -76,19 +76,19 @@ impl BitcoinAdapter {
     }
 
     /// insert a block
-    pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<Offset, BCDBError> {
+    pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<PRef, BCDBError> {
         let key = block.bitcoin_hash().data();
         let mut serialized_block = encode(&block.header)?;
         let mut tx_offsets = Vec::new();
         for t in &block.txdata {
-            let offset = self.bcdb.put_content(encode(t)?.as_slice())?;
-            tx_offsets.write_u48::<BigEndian>(offset.as_u64())?;
+            let pref = self.bcdb.put_content(encode(t)?.as_slice())?;
+            tx_offsets.write_u48::<BigEndian>(pref.as_u64())?;
         }
         serialized_block.write_u48::<BigEndian>(self.bcdb.put_content(tx_offsets.as_slice())?.as_u64())?;
         serialized_block.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
-            let offset = self.bcdb.put_content(d.as_slice())?;
-            serialized_block.extend(offset.to_vec());
+            let pref = self.bcdb.put_content(d.as_slice())?;
+            serialized_block.extend(pref.to_vec());
         }
         self.bcdb.put(&key[..], serialized_block.as_slice())
     }
@@ -99,22 +99,22 @@ impl BitcoinAdapter {
         if let Some((_, _,stored)) = self.bcdb.get(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
-            let txdata_offset = Offset::from(data.read_u48::<BigEndian>()?);
+            let txdata_offset = PRef::from(data.read_u48::<BigEndian>()?);
             let mut txdata: Vec<Transaction> = Vec::new();
             if txdata_offset.is_valid() {
                 let (_, offsets) = self.get_content(txdata_offset)?;
                 let mut oc = Cursor::new(offsets);
                 while let Ok(o) = oc.read_u48::<BigEndian>() {
-                    let offset = Offset::from(o);
-                    let (_, tx) = self.bcdb.get_content(offset)?;
+                    let pref = PRef::from(o);
+                    let (_, tx) = self.bcdb.get_content(pref)?;
                     txdata.push(decode(tx)?);
                 }
             }
             let next = data.read_u32::<BigEndian>()?;
             let mut extension = Vec::new();
             for _ in 0 .. next {
-                let offset = data.read_offset();
-                let (_, e) = self.bcdb.get_content(offset)?;
+                let pref = data.read_offset();
+                let (_, e) = self.bcdb.get_content(pref)?;
                 extension.push(e);
             }
 
@@ -137,11 +137,11 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<Offset>) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: Vec<PRef>) -> Result<PRef, BCDBError> {
         self.bcdb.put(key, data)
     }
 
-    fn get_unique(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<u8>)>, BCDBError> {
+    fn get_unique(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<u8>)>, BCDBError> {
         self.bcdb.get(key)
     }
 }
@@ -175,8 +175,8 @@ mod test {
         db.init().unwrap();
         let data = encode(&Sha256dHash::default()).unwrap();
         let key = encode(&Sha256dHash::default()).unwrap();
-        let offset = db.put(&key[..], data.as_slice()).unwrap();
-        assert_eq!(db.get(&key[..]).unwrap(), Some((offset, key, data)));
+        let pref = db.put(&key[..], data.as_slice()).unwrap();
+        assert_eq!(db.get(&key[..]).unwrap(), Some((pref, key, data)));
         db.shutdown();
     }
 

@@ -20,7 +20,7 @@
 
 use pagedfile::{FileOps, PagedFile};
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 use format::{Formatter, Link};
 
 /// file storing data link chains from hash table to data
@@ -31,13 +31,13 @@ pub struct LinkFile {
 impl LinkFile {
     /// create new file
     pub fn new(file: Box<PagedFile>) -> Result<LinkFile, BCDBError> {
-        let start = Offset::from(file.len()?);
+        let start = PRef::from(file.len()?);
         Ok(LinkFile{ appender: Formatter::new(file, start)? })
     }
 
     /// initialize
     pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.appender.append_slice(&[0xBC, 0xDB], Offset::from(2))
+        self.appender.append_slice(&[0xBC, 0xDB], PRef::from(2))
     }
 
     /// append data

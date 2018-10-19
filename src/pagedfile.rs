@@ -19,7 +19,7 @@
 
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 
 use std::io;
 use std::io::Read;
@@ -40,8 +40,8 @@ pub trait FileOps {
 
 /// by page accessed storage
 pub trait PagedFile: FileOps + Send + Sync {
-    /// read a page at offset
-    fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError>;
+    /// read a page at pref
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError>;
     /// append a page
     fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
 }
@@ -66,13 +66,13 @@ pub struct PagedFileIterator<'file> {
 /// page iterator
 impl<'file> PagedFileIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file PagedFile, offset: Offset) -> PagedFileIterator {
-        PagedFileIterator {pagenumber: offset.page_number(), page: None, pos: offset.in_page_pos(), file}
+    pub fn new (file: &'file PagedFile, pref: PRef) -> PagedFileIterator {
+        PagedFileIterator {pagenumber: pref.page_number(), page: None, pos: pref.in_page_pos(), file}
     }
 
     /// return position next read would be reading from
-    pub fn position (&self) -> Offset {
-        Offset::from(self.pagenumber * PAGE_SIZE as u64 + self.pos as u64)
+    pub fn position (&self) -> PRef {
+        PRef::from(self.pagenumber * PAGE_SIZE as u64 + self.pos as u64)
     }
 }
 
@@ -81,8 +81,8 @@ impl<'file> Iterator for PagedFileIterator<'file> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber <= (1 << 35) / PAGE_SIZE as u64 {
-            let offset = Offset::from((self.pagenumber)* PAGE_SIZE as u64);
-            if let Ok(Some(page)) = self.file.read_page(offset) {
+            let pref = PRef::from((self.pagenumber)* PAGE_SIZE as u64);
+            if let Ok(Some(page)) = self.file.read_page(pref) {
                 self.pagenumber += 1;
                 return Some(page);
             }
@@ -96,7 +96,7 @@ impl<'file> Read for PagedFileIterator<'file> {
         let mut read = 0;
         loop {
             if self.page.is_none() {
-                self.page = self.file.read_page(Offset::from(self.pagenumber))?;
+                self.page = self.file.read_page(PRef::from(self.pagenumber))?;
             }
 
             if let Some(ref page) = self.page {

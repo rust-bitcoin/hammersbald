@@ -19,7 +19,7 @@
 //!
 //!
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 use datafile::DataFile;
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
@@ -112,7 +112,7 @@ impl MemTable {
         let mut data_len = 0;
         let mut table_len = 0;
         let mut link_len = 0;
-        if let Some(page) = self.log_file.read_page(Offset::from(0))? {
+        if let Some(page) = self.log_file.read_page(PRef::from(0))? {
             data_len = page.read_offset(2).as_u64();
             table_len = page.read_offset(8).as_u64();
             link_len = page.read_offset(14).as_u64();
@@ -141,9 +141,9 @@ impl MemTable {
     pub fn flush (&mut self) -> Result<(), BCDBError> {
         if self.dirty.is_dirty() {
             // first page
-            let mut page = Page::new(Offset::from(0));
-            page.write_offset(0, Offset::from(self.buckets.len() as u64));
-            page.write_offset(6, Offset::from(self.step as u64));
+            let mut page = Page::new(PRef::from(0));
+            page.write_offset(0, PRef::from(self.buckets.len() as u64));
+            page.write_offset(6, PRef::from(self.step as u64));
             page.write_u64(12, self.sip0);
             page.write_u64(20, self.sip1);
 
@@ -155,11 +155,11 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=PRef> +'a {
         BucketIterator{file: self, n:0}
     }
 
-    pub fn put (&mut self,  key: &[u8], data_offset: Offset) -> Result<(), BCDBError>{
+    pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), BCDBError>{
         let hash = self.hash(key);
         let bucket = self.bucket_for_hash(hash);
         self.store_to_bucket(bucket, hash, data_offset)?;
@@ -182,10 +182,10 @@ impl MemTable {
         Ok(())
     }
 
-    fn store_to_bucket(&mut self, bucket: usize, hash: u32, offset: Offset) -> Result<(), BCDBError> {
+    fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), BCDBError> {
         if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
             bucket.hashes.push(hash);
-            bucket.offsets.push(offset.as_u64());
+            bucket.offsets.push(pref.as_u64());
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
@@ -198,21 +198,21 @@ impl MemTable {
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
         if let Some(b) = self.buckets.get(bucket as usize) {
-            for (hash, offset) in b.hashes.iter().zip(b.offsets.iter()) {
+            for (hash, pref) in b.hashes.iter().zip(b.offsets.iter()) {
                 let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
-                    moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, Offset::from(*offset)));
+                    moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, PRef::from(*pref)));
                     rewrite = true;
                 } else {
                     new_bucket_store.hashes.push(*hash);
-                    new_bucket_store.offsets.push(*offset);
+                    new_bucket_store.offsets.push(*pref);
                 }
             }
         }
         if rewrite {
             for (bucket, added) in moves {
-                for (hash, offset) in added {
-                    self.store_to_bucket(bucket, hash, offset)?;
+                for (hash, pref) in added {
+                    self.store_to_bucket(bucket, hash, pref)?;
                 }
             }
             self.buckets[bucket] = new_bucket_store;
@@ -224,28 +224,28 @@ impl MemTable {
     fn modify_bucket(&mut self, bucket: usize) -> Result<(), BCDBError> {
         self.dirty.set(bucket);
         let bucket_page = if bucket < BUCKETS_FIRST_PAGE { 
-            Offset::from(0) 
+            PRef::from(0)
         } else {
-            Offset::from(((bucket - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE + 1) as u64 * PAGE_SIZE as u64)
+            PRef::from(((bucket - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE + 1) as u64 * PAGE_SIZE as u64)
         };
         self.log_file.log_page(bucket_page, &self.table_file)
     }
 
     // get the data last associated with the key
-    pub fn get(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(Offset, Vec<u8>, Vec<Offset>)>, BCDBError> {
+    pub fn get(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
             for (n, h) in bucket.hashes.iter().enumerate().rev() {
                 if *h == hash {
-                    let data_offset = Offset::from(*bucket.offsets.get(n).unwrap());
+                    let data_offset = PRef::from(*bucket.offsets.get(n).unwrap());
                     if let Payload::Indexed(indexed) = data_file.get_payload(data_offset)? {
                         if indexed.key.as_slice() == key {
                             return Ok(Some((data_offset, indexed.data.data, indexed.data.referred)));
                         }
                     }
                     else {
-                        return Err(BCDBError::Corrupted("offset should point to indexed data".to_string()));
+                        return Err(BCDBError::Corrupted("pref should point to indexed data".to_string()));
                     }
                 }
             }
@@ -323,7 +323,7 @@ struct BucketIterator<'a> {
 }
 
 impl<'a> Iterator for BucketIterator<'a> {
-    type Item = Offset;
+    type Item = PRef;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.file.buckets.get(self.n as usize) {
@@ -375,7 +375,7 @@ impl<'b> Iterator for DirtyIterator<'b> {
 
 #[derive(Clone, Default)]
 pub struct Bucket {
-    link: Offset,
+    link: PRef,
     hashes: Vec<u32>,
     offsets: Vec<u64>
 }

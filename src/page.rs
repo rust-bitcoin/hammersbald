@@ -20,7 +20,7 @@
 //!
 //!
 
-use offset::Offset;
+use pref::PRef;
 use byteorder::{ByteOrder, BigEndian};
 
 pub const PAGE_SIZE: usize = 4096;
@@ -34,9 +34,9 @@ pub struct Page {
 
 impl Page {
     /// create an empty page
-    pub fn new (offset: Offset) -> Page {
+    pub fn new (pref: PRef) -> Page {
         let mut page = Page{ content: [0u8; PAGE_SIZE] };
-        page.write_offset(PAGE_PAYLOAD_SIZE, offset);
+        page.write_offset(PAGE_PAYLOAD_SIZE, pref);
         page
     }
 
@@ -45,8 +45,8 @@ impl Page {
         Page{ content }
     }
 
-    /// interpret the last 6 bytes as an offset
-    pub fn offset (&self) -> Offset {
+    /// interpret the last 6 bytes as an pref
+    pub fn pref (&self) -> PRef {
         self.read_offset(PAGE_PAYLOAD_SIZE)
     }
 
@@ -61,26 +61,26 @@ impl Page {
         buf.copy_from_slice(&self.content[pos .. pos+len])
     }
 
-    /// write an offset into the page
-    pub fn write_offset (&mut self, pos: usize, offset: Offset) {
+    /// write an pref into the page
+    pub fn write_offset (&mut self, pos: usize, pref: PRef) {
         let mut buf = [0u8; 6];
-        BigEndian::write_u48(&mut buf, offset.as_u64());
+        BigEndian::write_u48(&mut buf, pref.as_u64());
         self.content[pos..pos+6].copy_from_slice(&buf[..]);
     }
 
-    /// read an offset at a page position
-    pub fn read_offset(&self, pos: usize) -> Offset {
-        Offset::from(BigEndian::read_u64(&self.content[pos..pos+6]))
+    /// read an pref at a page position
+    pub fn read_offset(&self, pos: usize) -> PRef {
+        PRef::from(BigEndian::read_u64(&self.content[pos..pos+6]))
     }
 
-    /// write an offset into the page
+    /// write an pref into the page
     pub fn write_u64 (&mut self, pos: usize, n: u64) {
         let mut buf = [0u8; 8];
         BigEndian::write_u64(&mut buf, n);
         self.content[pos..pos+8].copy_from_slice(&buf[..]);
     }
 
-    /// read an offset at a page position
+    /// read an pref at a page position
     pub fn read_u64(&self, pos: usize) -> u64 {
         BigEndian::read_u64(&self.content[pos..pos+8])
     }

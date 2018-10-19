@@ -14,9 +14,8 @@
 // limitations under the License.
 //
 //!
-//! # Types used in db files
-//! Offset an unsigned 48 bit integer used as file offset
-//! U24 an unsigned 24 bit integer for data element sizes
+//! # Reference to persistent data
+//! allows reference of a data space of 2^48
 
 use page::PAGE_SIZE;
 
@@ -26,86 +25,86 @@ use std::ops;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
 /// Pointer to persistent data. Limited to 2^48
-pub struct Offset(u64);
+pub struct PRef(u64);
 
-impl Ord for Offset {
+impl Ord for PRef {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl PartialOrd for Offset {
-    fn partial_cmp(&self, other: &Offset) -> Option<Ordering> {
+impl PartialOrd for PRef {
+    fn partial_cmp(&self, other: &PRef) -> Option<Ordering> {
         self.0.partial_cmp(&other.0)
     }
 }
 
-impl From<u64> for Offset {
+impl From<u64> for PRef {
     fn from(n: u64) -> Self {
         #[cfg(debug_assertions)]
         {
             if n > 0xffffffffffffu64 {
-                panic!("offset {} greater than 2^48-1", n);
+                panic!("pref {} greater than 2^48-1", n);
             }
         }
 
-        Offset(n & 0xffffffffffffu64)
+        PRef(n & 0xffffffffffffu64)
     }
 }
 
-impl fmt::Display for Offset {
+impl fmt::Display for PRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "{}", self.0)
     }
 }
 
-impl ops::Add<u64> for Offset {
-    type Output = Offset;
+impl ops::Add<u64> for PRef {
+    type Output = PRef;
 
     fn add(self, rhs: u64) -> <Self as ops::Add<u64>>::Output {
-        Offset::from(self.as_u64() + rhs)
+        PRef::from(self.as_u64() + rhs)
     }
 }
 
-impl ops::AddAssign<u64> for Offset {
+impl ops::AddAssign<u64> for PRef {
     fn add_assign(&mut self, rhs: u64) {
         #[cfg(debug_assertions)]
         {
             if self.0 + rhs > 0xffffffffffffu64 {
-                panic!("offset would become greater than 2^48-1");
+                panic!("pref would become greater than 2^48-1");
             }
         }
         self.0 += rhs;
     }
 }
 
-impl ops::Sub<u64> for Offset {
-    type Output = Offset;
+impl ops::Sub<u64> for PRef {
+    type Output = PRef;
 
     fn sub(self, rhs: u64) -> <Self as ops::Sub<u64>>::Output {
-        Offset::from(self.as_u64() - rhs)
+        PRef::from(self.as_u64() - rhs)
     }
 }
 
-impl ops::SubAssign<u64> for Offset {
+impl ops::SubAssign<u64> for PRef {
     fn sub_assign(&mut self, rhs: u64) {
         #[cfg(debug_assertions)]
         {
             if rhs >= self.0 {
-                panic!("offset would become invalid through subtraction");
+                panic!("pref would become invalid through subtraction");
             }
         }
         self.0 -= rhs;
     }
 }
 
-impl Offset {
-    /// construct an invalid offset
-    pub fn invalid () -> Offset {
-        Offset::from(0)
+impl PRef {
+    /// construct an invalid pref
+    pub fn invalid () -> PRef {
+        PRef::from(0)
     }
 
-    /// is this a valid offset?
+    /// is this a valid pref?
     pub fn is_valid (&self) -> bool {
         self.0 > 0 && self.0 < (1 << 47)
     }
@@ -115,17 +114,17 @@ impl Offset {
         return self.0;
     }
 
-    /// offset of the page of this offset
-    pub fn this_page(&self) -> Offset {
-        Offset::from((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64)
+    /// pref of the page of this pref
+    pub fn this_page(&self) -> PRef {
+        PRef::from((self.0/ PAGE_SIZE as u64)* PAGE_SIZE as u64)
     }
 
-    /// compute page number of an offset
+    /// compute page number of an pref
     pub fn page_number(&self) -> u64 {
         self.0/PAGE_SIZE as u64
     }
 
-    /// position within the offset's page
+    /// position within the pref's page
     pub fn in_page_pos(&self) -> usize {
         (self.0 % PAGE_SIZE as u64) as usize
     }

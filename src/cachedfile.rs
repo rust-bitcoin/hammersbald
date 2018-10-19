@@ -19,7 +19,7 @@
 
 use page::{Page, PAGE_SIZE};
 use pagedfile::{FileOps, PagedFile};
-use offset::Offset;
+use pref::PRef;
 use error::BCDBError;
 
 use std::collections::{HashMap,VecDeque};
@@ -68,16 +68,16 @@ impl FileOps for CachedFile {
 }
 
 impl PagedFile for CachedFile {
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
         {
             let cache = self.cache.read().unwrap();
-            if let Some(page) = cache.get(offset) {
+            if let Some(page) = cache.get(pref) {
                 return Ok(Some(page));
             }
         }
-        if let Some(page) = self.file.read_page (offset)? {
+        if let Some(page) = self.file.read_page (pref)? {
             let mut cache = self.cache.write().unwrap();
-            cache.cache(offset, Arc::new(page.clone()));
+            cache.cache(pref, Arc::new(page.clone()));
             return Ok(Some(page));
         }
         Ok(None)
@@ -93,8 +93,8 @@ impl PagedFile for CachedFile {
 
 
 pub struct Cache {
-    reads: HashMap<Offset, Arc<Page>>,
-    age_desc: VecDeque<Offset>,
+    reads: HashMap<PRef, Arc<Page>>,
+    age_desc: VecDeque<PRef>,
     len: u64,
     size:  usize
 }
@@ -104,9 +104,9 @@ impl Cache {
         Cache { reads: HashMap::new(), age_desc: VecDeque::new(), len, size }
     }
 
-    pub fn cache (&mut self, offset: Offset, page: Arc<Page>) {
-        if self.reads.insert(offset, page).is_none() {
-            self.age_desc.push_back(offset);
+    pub fn cache (&mut self, pref: PRef, page: Arc<Page>) {
+        if self.reads.insert(pref, page).is_none() {
+            self.age_desc.push_back(pref);
             if self.reads.len() > self.size {
                 while let Some(old) = self.age_desc.pop_front() {
                     if self.reads.remove(&old).is_some() {
@@ -116,7 +116,7 @@ impl Cache {
             }
         }
         else {
-            if let Some(pos) = self.age_desc.iter().rposition(|o| *o == offset) {
+            if let Some(pos) = self.age_desc.iter().rposition(|o| *o == pref) {
                 let last = self.age_desc.len() - 1;
                 self.age_desc.swap(pos, last);
             }
@@ -124,16 +124,16 @@ impl Cache {
     }
 
     pub fn append (&mut self, page: Page) ->u64 {
-        let offset = Offset::from(self.len);
+        let pref = PRef::from(self.len);
         let page = Arc::new(page);
-        self.cache(offset, page);
-        self.len = max(self.len, offset.as_u64() + PAGE_SIZE as u64);
+        self.cache(pref, page);
+        self.len = max(self.len, pref.as_u64() + PAGE_SIZE as u64);
         self.len
     }
 
-    pub fn get(&self, offset: Offset) -> Option<Page> {
+    pub fn get(&self, pref: PRef) -> Option<Page> {
         use std::ops::Deref;
-        if let Some(content) = self.reads.get(&offset) {
+        if let Some(content) = self.reads.get(&pref) {
             return Some(content.deref().clone())
         }
         None
@@ -152,7 +152,7 @@ impl Cache {
                 }
             }).collect();
         for o in to_delete {
-            self.reads.remove(&Offset::from(o));
+            self.reads.remove(&PRef::from(o));
         }
     }
 }

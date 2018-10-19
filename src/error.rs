@@ -28,7 +28,7 @@ use std::sync;
 
 /// Errors returned by this library
 pub enum BCDBError {
-    /// offset is invalid (> 2^48)
+    /// pref is invalid (> 2^48)
     InvalidOffset,
     /// corrupted data
     Corrupted(String),
@@ -48,7 +48,7 @@ pub enum BCDBError {
 impl Error for BCDBError {
     fn description(&self) -> &str {
         match *self {
-            BCDBError::InvalidOffset => "invalid offset",
+            BCDBError::InvalidOffset => "invalid pref",
             BCDBError::ForwardReference => "forward reference",
             BCDBError::Corrupted (ref s) => s.as_str(),
             BCDBError::IO(_) => "IO Error",

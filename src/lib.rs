@@ -48,7 +48,7 @@ pub mod format;
 pub mod api;
 pub mod datafile;
 pub mod error;
-pub mod offset;
+pub mod pref;
 pub mod transient;
 pub mod persistent;
 #[cfg(feature="bitcoin_support")]

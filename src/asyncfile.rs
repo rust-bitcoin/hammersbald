@@ -22,7 +22,7 @@ use page::Page;
 use pagedfile::{FileOps, PagedFile};
 
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -108,8 +108,8 @@ impl FileOps for AsyncFile {
 }
 
 impl PagedFile for AsyncFile {
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        self.inner.file.lock().unwrap().read_page(offset)
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.inner.file.lock().unwrap().read_page(pref)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {

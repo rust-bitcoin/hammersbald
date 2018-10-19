@@ -21,7 +21,7 @@
 use page::{Page, PAGE_SIZE};
 use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 
 pub const FIRST_PAGE_HEAD:usize = 28;
 pub const BUCKETS_FIRST_PAGE:usize = 677;
@@ -38,25 +38,25 @@ impl TableFile {
         Ok(TableFile {file})
     }
 
-    fn table_offset (bucket: u32) -> Offset {
+    fn table_offset (bucket: u32) -> PRef {
         if (bucket as u64) < BUCKETS_FIRST_PAGE as u64 {
-            Offset::from((bucket as u64 / BUCKETS_FIRST_PAGE as u64) * PAGE_SIZE as u64
+            PRef::from((bucket as u64 / BUCKETS_FIRST_PAGE as u64) * PAGE_SIZE as u64
                 + (bucket as u64 % BUCKETS_FIRST_PAGE as u64) * BUCKET_SIZE as u64 + FIRST_PAGE_HEAD as u64)
         }
         else {
-            Offset::from((((bucket as u64 - BUCKETS_FIRST_PAGE as u64) / BUCKETS_PER_PAGE as u64) + 1) * PAGE_SIZE as u64
+            PRef::from((((bucket as u64 - BUCKETS_FIRST_PAGE as u64) / BUCKETS_PER_PAGE as u64) + 1) * PAGE_SIZE as u64
                 + (bucket as u64 % BUCKETS_PER_PAGE as u64) * BUCKET_SIZE as u64)
         }
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Offset> +'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=PRef> +'a {
         BucketIterator{file: self, n:0}
     }
 
-    pub fn read_table_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        if let Some(page) = self.read_page(offset)? {
-            if page.offset().as_u64() != offset.as_u64() {
-                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the offset of its position", offset)));
+    pub fn read_table_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        if let Some(page) = self.read_page(pref)? {
+            if page.pref().as_u64() != pref.as_u64() {
+                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the pref of its position", pref)));
             }
             return Ok(Some(page));
         }
@@ -85,8 +85,8 @@ impl FileOps for TableFile {
 }
 
 impl PagedFile for TableFile {
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        self.file.read_page(offset)
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.file.read_page(pref)
     }
 
     fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
@@ -106,7 +106,7 @@ struct BucketIterator<'a> {
 }
 
 impl<'a> Iterator for BucketIterator<'a> {
-    type Item = Offset;
+    type Item = PRef;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         let table_offset = TableFile::table_offset(self.n);

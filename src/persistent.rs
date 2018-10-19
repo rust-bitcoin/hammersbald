@@ -25,7 +25,7 @@ use datafile::DataFile;
 use error::BCDBError;
 use linkfile::LinkFile;
 use logfile::LogFile;
-use offset::Offset;
+use pref::PRef;
 use page::Page;
 use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use rolledfile::RolledFile;
@@ -53,7 +53,7 @@ impl BCDBFactory for Persistent {
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(
                     Box::new(RolledFile::new(
-                        name, "bc", true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?), Offset::invalid())?;
+                        name, "bc", true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?), PRef::invalid())?;
 
         let log = LogFile::new(
             Box::new(AsyncFile::new(
@@ -90,8 +90,8 @@ impl FileOps for Persistent {
 }
 
 impl PagedFile for Persistent {
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        self.file.read_page(offset)
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.file.read_page(pref)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {

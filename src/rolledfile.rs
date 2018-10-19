@@ -19,7 +19,7 @@
 //! A file that is split into chunks
 //!
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 use page::{Page, PAGE_SIZE};
 use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use singlefile::SingleFile;
@@ -141,10 +141,10 @@ impl FileOps for RolledFile {
 }
 
 impl PagedFile for RolledFile {
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        let chunk = (offset.as_u64() / self.chunk_size) as u16;
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        let chunk = (pref.as_u64() / self.chunk_size) as u16;
         if let Some(file) = self.files.get(&chunk) {
-            return file.read_page(offset);
+            return file.read_page(pref);
         }
         Ok(None)
     }
@@ -172,7 +172,7 @@ impl PagedFile for RolledFile {
 impl RandomWritePagedFile for RolledFile {
 
     fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
-        let n_offset = page.offset().as_u64();
+        let n_offset = page.pref().as_u64();
         let chunk = (n_offset / self.chunk_size) as u16;
 
         if !self.files.contains_key(&chunk) {

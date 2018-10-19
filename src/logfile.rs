@@ -21,13 +21,13 @@
 use page::Page;
 use pagedfile::{FileOps, PagedFile, PagedFileIterator};
 use error::BCDBError;
-use offset::Offset;
+use pref::PRef;
 
 use std::collections::HashSet;
 
 pub struct LogFile {
     file: Box<PagedFile>,
-    logged: HashSet<Offset>,
+    logged: HashSet<PRef>,
     source_len: u64
 }
 
@@ -38,11 +38,11 @@ impl LogFile {
 
     pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), BCDBError> {
         self.truncate(0)?;
-        let mut first = Page::new(Offset::from(0));
+        let mut first = Page::new(PRef::from(0));
         first.write(0,&[0xBC, 0x00]);
-        first.write_offset(2, Offset::from(data_len));
-        first.write_offset(8, Offset::from(table_len));
-        first.write_offset(14, Offset::from(link_len));
+        first.write_offset(2, PRef::from(data_len));
+        first.write_offset(8, PRef::from(table_len));
+        first.write_offset(14, PRef::from(link_len));
 
         self.append_page(first)?;
         self.flush()?;
@@ -50,12 +50,12 @@ impl LogFile {
     }
 
     pub fn page_iter (&self) -> PagedFileIterator {
-        PagedFileIterator::new(self, Offset::from(0))
+        PagedFileIterator::new(self, PRef::from(0))
     }
 
-    pub fn log_page(&mut self, offset: Offset, source: &PagedFile) -> Result<(), BCDBError>{
-        if offset.as_u64() < self.source_len && self.logged.insert(offset) {
-            if let Some(page) = source.read_page(offset)? {
+    pub fn log_page(&mut self, pref: PRef, source: &PagedFile) -> Result<(), BCDBError>{
+        if pref.as_u64() < self.source_len && self.logged.insert(pref) {
+            if let Some(page) = source.read_page(pref)? {
                 self.append_page(page)?;
             }
         }
@@ -89,8 +89,8 @@ impl FileOps for LogFile {
 }
 
 impl PagedFile for LogFile {
-    fn read_page (&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        self.file.read_page(offset)
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.file.read_page(pref)
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {

@@ -21,7 +21,7 @@
 use error::BCDBError;
 use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
 use page::{PAGE_SIZE, Page};
-use offset::Offset;
+use pref::PRef;
 
 use std::sync::Mutex;
 use std::fs::File;
@@ -70,8 +70,8 @@ impl FileOps for SingleFile {
 }
 
 impl PagedFile for SingleFile {
-    fn read_page(&self, offset: Offset) -> Result<Option<Page>, BCDBError> {
-        let o = offset.as_u64();
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        let o = pref.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("read from wrong file".to_string()));
         }
@@ -97,7 +97,7 @@ impl PagedFile for SingleFile {
 
 impl RandomWritePagedFile for SingleFile {
     fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
-        let o = page.offset().as_u64();
+        let o = page.pref().as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("write to wrong file".to_string()));
         }

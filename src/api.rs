@@ -16,7 +16,7 @@
 //!
 //! # The blockchain db
 //!
-use offset::Offset;
+use pref::PRef;
 use logfile::LogFile;
 use tablefile::TableFile;
 use datafile::DataFile;
@@ -49,20 +49,20 @@ pub trait BCDBAPI {
 
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
-    /// returns the offset the data was stored
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError>;
+    /// returns the pref the data was stored
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError>;
 
     /// retrieve single data by key
-    /// returns (offset, data, referred)
-    fn get(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<Offset>)>, BCDBError>;
+    /// returns (pref, data, referred)
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError>;
 
     /// store referred data
-    /// returns the offset the data was stored
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError>;
+    /// returns the pref the data was stored
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError>;
 
     /// get data
     /// returns (key, data, referred)
-    fn get_data(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>, Vec<Offset>), BCDBError>;
+    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError>;
 }
 
 impl BCDB {
@@ -82,7 +82,7 @@ impl BCDB {
     }
 
     /// get hash table bucket iterator
-    pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=Offset> +'a {
+    pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=PRef> +'a {
         self.mem.iter()
     }
 }
@@ -113,7 +113,7 @@ impl BCDBAPI for BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaddressable
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
@@ -131,11 +131,11 @@ impl BCDBAPI for BCDB {
         Ok(data_offset)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<(Offset, Vec<u8>, Vec<Offset>)>, BCDBError> {
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
         self.mem.get(key,  &self.data)
     }
 
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<Offset>) -> Result<Offset, BCDBError> {
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
         let data_offset = self.data.append_referred(data, referred)?;
         #[cfg(debug_assertions)]
         {
@@ -146,11 +146,11 @@ impl BCDBAPI for BCDB {
         Ok(data_offset)
     }
 
-    fn get_data(&self, offset: Offset) -> Result<(Vec<u8>, Vec<u8>, Vec<Offset>), BCDBError> {
-        match self.data.get_payload(offset)? {
+    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
+        match self.data.get_payload(pref)? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data, referred.referred)),
             Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred)),
-            _ => return Err(BCDBError::Corrupted("offset should point to data".to_string()))
+            _ => return Err(BCDBError::Corrupted("pref should point to data".to_string()))
         }
     }
 }
@@ -181,8 +181,8 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let offset = db.put(&key, &data, &vec!()).unwrap();
-            check.insert(key, (offset, data));
+            let pref = db.put(&key, &data, &vec!()).unwrap();
+            check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
@@ -193,8 +193,8 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let offset = db.put(&key, &data, &vec!()).unwrap();
-            check.insert(key, (offset, data));
+            let pref = db.put(&key, &data, &vec!()).unwrap();
+            check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
