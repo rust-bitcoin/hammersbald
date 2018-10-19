@@ -105,7 +105,7 @@ pub struct Data {
 impl Data {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
-        result.write_u8(self.data.len() as u8).unwrap();
+        result.write_u24::<BigEndian>(self.data.len() as u32).unwrap();
         result.write(self.data.as_slice()).unwrap();
         result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
         for pref in &self.referred {
@@ -115,7 +115,7 @@ impl Data {
 
     /// deserialize from storage
     pub fn deserialize(reader: &mut Read) -> Result<Data, BCDBError> {
-        let data_len = reader.read_u8()? as usize;
+        let data_len = reader.read_u24::<BigEndian>()? as usize;
         let mut data = vec!(0u8; data_len);
         reader.read(data.as_mut_slice())?;
 
