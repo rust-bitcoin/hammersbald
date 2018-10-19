@@ -94,9 +94,10 @@ impl<'file> Iterator for PagedFileIterator<'file> {
 impl<'file> Read for PagedFileIterator<'file> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         let mut read = 0;
-        loop {
-            if self.page.is_none() {
-                self.page = self.file.read_page(PRef::from(self.pagenumber))?;
+        while read < buf.len() {
+            if self.pos == PAGE_PAYLOAD_SIZE || self.page.is_none() {
+                self.page = self.next();
+                self.pos = 0;
             }
 
             if let Some(ref page) = self.page {
@@ -104,18 +105,11 @@ impl<'file> Read for PagedFileIterator<'file> {
                 page.read(self.pos, &mut buf[read .. read + have]);
                 self.pos += have;
                 read += have;
-            } else {
-                return Ok(read)
             }
-
-            if read == buf.len() {
+            else {
                 break;
-            } else {
-                self.page = None;
-                self.pagenumber += 1;
-                self.pos = 0;
             }
         }
-        Ok(buf.len())
+        Ok(read)
     }
 }

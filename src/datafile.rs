@@ -83,4 +83,3 @@ impl DataFile {
         self.formatter.len()
     }
 }
-

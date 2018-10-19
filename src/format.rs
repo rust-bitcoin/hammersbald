@@ -229,7 +229,7 @@ impl Formatter {
     /// read a slice of data
     pub fn get_slice (&self, pref: PRef, length: u64) -> Result<Option<Vec<u8>>, BCDBError> {
         // TODO : error propagation
-        Ok(ForwardSliceIterator::new(self.file.as_ref(), pref, length).next())
+        Ok(ForwardSliceIterator::new(self, pref, length).next())
     }
 
     /// return next append position
@@ -265,6 +265,21 @@ impl FileOps for Formatter {
 
     fn shutdown(&mut self) {
         self.file.shutdown()
+    }
+}
+
+impl PagedFile for Formatter {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        if pref == self.page_offset && self.page.is_some() {
+            return Ok(self.page.clone());
+        }
+        else {
+            self.file.read_page(pref)
+        }
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        self.file.append_page(page)
     }
 }
 
