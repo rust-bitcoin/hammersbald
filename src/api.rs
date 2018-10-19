@@ -62,7 +62,7 @@ pub trait BCDBAPI {
 
     /// get data
     /// returns (key, data, referred)
-    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError>;
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError>;
 }
 
 impl BCDB {
@@ -146,7 +146,7 @@ impl BCDBAPI for BCDB {
         Ok(data_offset)
     }
 
-    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
         match self.data.get_payload(pref)? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data, referred.referred)),
             Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred)),
