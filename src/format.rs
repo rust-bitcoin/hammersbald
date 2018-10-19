@@ -100,7 +100,7 @@ impl Payload {
 pub struct Data {
     /// data
     pub data: Vec<u8>,
-    /// further accessible data (OwnedData)
+    /// further accessible data
     pub referred: Vec<PRef>
 }
 
@@ -157,13 +157,11 @@ impl IndexedData {
     }
 }
 
-/// A link to IndexedData
+/// A link to data
 pub struct Link {
     /// hash of the key
     pub hash: u32,
-    /// data category
-    pub cat: u16,
-    /// pointer to the Envelope of an IndexedData
+    /// pointer to the Envelope
     pub envelope: PRef,
     /// pointer to previous link
     pub previous: PRef
@@ -173,7 +171,6 @@ impl Link {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         result.write_u32::<BigEndian>(self.hash).unwrap();
-        result.write_u16::<BigEndian>(self.cat).unwrap();
         result.write_u48::<BigEndian>(self.envelope.as_u64()).unwrap();
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
     }
@@ -181,10 +178,9 @@ impl Link {
     /// deserialize from storage
     pub fn deserialize(reader: &mut Read) -> Result<Link, BCDBError> {
         let hash = reader.read_u32::<BigEndian>()?;
-        let cat = reader.read_u16::<BigEndian>()?;
         let envelope = PRef::from(reader.read_u48::<BigEndian>()?);
         let previous = PRef::from(reader.read_u48::<BigEndian>()?);
-        Ok(Link{hash, cat, envelope, previous})
+        Ok(Link{hash, envelope, previous})
     }
 }
 
