@@ -28,8 +28,6 @@ use std::cmp::min;
 
 /// Content envelope wrapping payload in data and link files
 pub struct Envelope {
-    /// length of this entry. Useful for forward iteration
-    pub length: u32,
     /// pointer to previous entry. Useful for backward iteration
     pub previous: PRef,
     /// payload
@@ -51,7 +49,7 @@ impl Envelope {
         let previous = PRef::from(reader.read_u48::<BigEndian>()?);
         let mut payload = vec!(0u8; length as usize - 9);
         reader.read(&mut payload)?;
-        Ok(Envelope{length, previous, payload})
+        Ok(Envelope{previous, payload})
     }
 }
 
@@ -315,7 +313,7 @@ impl DataFormatter {
         let mut content = Vec::new();
         payload.serialize(&mut content);
         let mut envelope = Vec::new();
-        Envelope{length: content.len() as u32 + 9, previous: self.previous, payload: content}.serialize(&mut envelope);
+        Envelope{previous: self.previous, payload: content}.serialize(&mut envelope);
         let me = self.formatter.position();
         self.formatter.append_slice(envelope.as_slice(), me)?;
         self.previous = me;
@@ -368,7 +366,7 @@ impl<'file> Iterator for ForwardEnvelopeIterator<'file> {
             let previous = PRef::from(cursor.read_u48::<BigEndian>().unwrap());
             if let Some(payload) = self.reader.get_slice(self.start + 9, length - 9).unwrap() {
                 self.start += length;
-                return Some(Envelope{length: length as u32, previous, payload})
+                return Some(Envelope{previous, payload})
             }
         }
         None
@@ -403,7 +401,7 @@ impl<'file> Iterator for BackwardEnvelopeIterator<'file> {
             let previous = PRef::from(cursor.read_u48::<BigEndian>().unwrap());
             if let Some(payload) = self.reader.get_slice(self.start + 9, length - 9).unwrap() {
                 self.start = previous;
-                return Some(Envelope { length: length as u32, previous, payload })
+                return Some(Envelope { previous, payload })
             }
         }
         None
