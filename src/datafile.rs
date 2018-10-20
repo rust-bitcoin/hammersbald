@@ -18,68 +18,101 @@
 //! Specific implementation details to data file
 //!
 
-use pagedfile::{FileOps, PagedFile};
-use format::{DataFormatter, Payload, Data, IndexedData};
-
+use page::{PAGE_PAYLOAD_SIZE, PAGE_SIZE};
+use pagedfile::{PagedFile, PagedFileAppender, PagedFileWrite, PagedFileRead};
+use format::{Envelope, Payload, Data, IndexedData};
 use error::BCDBError;
 use pref::PRef;
 
+use byteorder::{ByteOrder, BigEndian};
+
+use std::io::Cursor;
+
 /// file storing indexed and referred data
 pub struct DataFile {
-    formatter: DataFormatter
+    appender: PagedFileAppender
 }
 
 impl DataFile {
     /// create new file
-    pub fn new(file: Box<PagedFile>, previous: PRef) -> Result<DataFile, BCDBError> {
-        let start = PRef::from(file.len()?);
-        Ok(DataFile{ formatter: DataFormatter::new(file, start, previous)?})
-    }
-
-    /// initialize
-    pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.formatter.append_slice (&[0xBC, 0xDA], PRef::from(2))
+    pub fn new(file: Box<PagedFile>) -> Result<DataFile, BCDBError> {
+        let len = file.len()?;
+        if len % PAGE_SIZE as u64 != 0 {
+            return Err(BCDBError::Corrupted("data file does not end at page boundary".to_string()));
+        }
+        if len > 0 {
+            if let Some(last) = file.read_page(PRef::from(len - PAGE_SIZE as u64))? {
+                let lep = last.read_offset(PAGE_PAYLOAD_SIZE);
+                return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len), lep)});
+            }
+            else {
+                Err(BCDBError::Corrupted("missing first data page".to_string()))
+            }
+        }
+        else {
+            let mut appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
+            appender.append(&[0xBC, 0xDA])?;
+            appender.advance();
+            return Ok(DataFile{appender})
+        }
     }
 
     /// shutdown
     pub fn shutdown (&mut self) {
-        self.formatter.shutdown()
+        self.appender.shutdown()
     }
 
     /// get a stored content at pref
     pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
-        self.formatter.get_payload(pref)
+        let mut header = [0u8; 9];
+        self.appender.read(pref, &mut header)?;
+        let length = BigEndian::read_u24(&header[0..3]) as usize;
+        let mut payload = vec!(0u8; length - 9);
+        self.appender.read(pref + 9, &mut payload)?;
+        Payload::deserialize(&mut Cursor::new(payload))
     }
 
     /// append indexed data
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
         let indexed = IndexedData { key: key.to_vec(), data: Data{data: data.to_vec(), referred: referred.clone()} };
-        self.formatter.append_payload(Payload::Indexed(indexed))
+        let mut payload = vec!();
+        Payload::Indexed(indexed).serialize(&mut payload);
+        let mut envelope= vec!();
+        Envelope{previous: self.appender.advance(), payload}.serialize(&mut envelope);
+        let me = self.appender.position();
+        self.appender.append(&envelope)?;
+        Ok(me)
     }
 
     /// append referred data
     pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        let data = Data{data: data.to_vec(), referred: referred.clone()};
-        self.formatter.append_payload(Payload::Referred(data))
+        let referred = Data { data: data.to_vec(), referred: referred.clone() };
+        let mut payload = vec!();
+        Payload::Referred(referred).serialize(&mut payload);
+        let mut envelope= vec!();
+        Envelope{previous: self.appender.advance(), payload}.serialize(&mut envelope);
+        let me = self.appender.position();
+        self.appender.append(&envelope)?;
+        Ok(me)
     }
 
     /// truncate file
     pub fn truncate(&mut self, pref: u64) -> Result<(), BCDBError> {
-        self.formatter.truncate (pref)
+        self.appender.truncate (pref)
     }
 
     /// flush buffers
     pub fn flush (&mut self) -> Result<(), BCDBError> {
-        self.formatter.flush()
+        self.appender.flush()
     }
 
     /// sync file on file system
     pub fn sync (&self) -> Result<(), BCDBError> {
-        self.formatter.sync()
+        self.appender.sync()
     }
 
     /// get file length
     pub fn len (&self) -> Result<u64, BCDBError> {
-        self.formatter.len()
+        self.appender.len()
     }
 }

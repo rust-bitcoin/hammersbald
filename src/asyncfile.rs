@@ -19,7 +19,7 @@
 //!
 
 use page::Page;
-use pagedfile::{FileOps, PagedFile};
+use pagedfile::PagedFile;
 
 use error::BCDBError;
 use pref::PRef;
@@ -34,7 +34,7 @@ pub struct AsyncFile {
 }
 
 struct AsyncFileInner {
-    file: Mutex<Box<PagedFile>>,
+    file: Mutex<Box<PagedFile + Send + Sync>>,
     work: Condvar,
     flushed: Condvar,
     run: AtomicBool,
@@ -42,7 +42,7 @@ struct AsyncFileInner {
 }
 
 impl AsyncFileInner {
-    pub fn new (file: Box<PagedFile>) -> Result<AsyncFileInner, BCDBError> {
+    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, BCDBError> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
             queue: Mutex::new(VecDeque::new())})
@@ -50,7 +50,7 @@ impl AsyncFileInner {
 }
 
 impl AsyncFile {
-    pub fn new (file: Box<PagedFile>) -> Result<AsyncFile, BCDBError> {
+    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFile, BCDBError> {
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
@@ -72,15 +72,9 @@ impl AsyncFile {
     }
 }
 
-impl FileOps for AsyncFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        let mut queue = self.inner.queue.lock().unwrap();
-        self.inner.work.notify_one();
-        while !queue.is_empty() {
-            queue = self.inner.flushed.wait(queue).unwrap();
-        }
-        let mut file = self.inner.file.lock().unwrap();
-        file.flush()
+impl PagedFile for AsyncFile {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.inner.file.lock().unwrap().read_page(pref)
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
@@ -105,17 +99,25 @@ impl FileOps for AsyncFile {
         file.flush().unwrap();
         self.inner.run.store(false, Ordering::Release)
     }
-}
-
-impl PagedFile for AsyncFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        self.inner.file.lock().unwrap().read_page(pref)
-    }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut queue = self.inner.queue.lock().unwrap();
         queue.push_back(page);
         self.inner.work.notify_one();
         Ok(())
+    }
+
+    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        let mut queue = self.inner.queue.lock().unwrap();
+        self.inner.work.notify_one();
+        while !queue.is_empty() {
+            queue = self.inner.flushed.wait(queue).unwrap();
+        }
+        let mut file = self.inner.file.lock().unwrap();
+        file.flush()
     }
 }

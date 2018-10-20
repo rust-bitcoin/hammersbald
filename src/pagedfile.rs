@@ -21,13 +21,12 @@ use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use error::BCDBError;
 use pref::PRef;
 
-use std::io;
-use std::io::Read;
 use std::cmp::min;
 
-pub trait FileOps {
-    /// flush buffered writes
-    fn flush(&mut self) -> Result<(), BCDBError>;
+/// a paged file
+pub trait PagedFile {
+    /// read a page at pref
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError>;
     /// length of the storage
     fn len (&self) -> Result<u64, BCDBError>;
     /// truncate storage
@@ -36,29 +35,148 @@ pub trait FileOps {
     fn sync (&self) -> Result<(), BCDBError>;
     /// shutdown async write
     fn shutdown (&mut self);
-}
-
-/// by page accessed storage
-pub trait PagedFile: FileOps + Send + Sync {
-    /// read a page at pref
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError>;
     /// append a page
     fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
+    /// write a page at its position
+    fn update_page (&mut self, page: Page) -> Result<u64, BCDBError>;
+    /// flush buffered writes
+    fn flush(&mut self) -> Result<(), BCDBError>;
 }
 
-pub trait RandomWritePagedFile : PagedFile {
-    /// write a page at its position
-    fn write_page (&mut self, page: Page) -> Result<u64, BCDBError>;
+pub trait PagedFileRead {
+    /// read a slice from a paged file
+    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<usize, BCDBError>;
+}
+
+pub trait PagedFileWrite {
+    /// write a slice to a paged file
+    fn append(&mut self, buf: &[u8]) -> Result<usize, BCDBError>;
+}
+
+/// a reader for a paged file
+pub struct PagedFileAppender {
+    file: Box<PagedFile>,
+    pos: PRef,
+    page: Option<Page>,
+    lep: PRef
+}
+
+impl PagedFileAppender {
+    /// create a reader that starts at a position
+    pub fn new (file: Box<PagedFile>, pos: PRef, lep: PRef) -> PagedFileAppender {
+        PagedFileAppender {file, pos, page: None, lep}
+    }
+
+    pub fn position (&self) -> PRef {
+        self.pos
+    }
+
+    pub fn advance (&mut self) -> PRef {
+        let lep = self.lep;
+        self.lep = self.pos;
+        lep
+    }
+}
+
+impl PagedFileWrite for PagedFileAppender {
+    fn append(&mut self, buf: &[u8]) -> Result<usize, BCDBError> {
+        let mut wrote = 0;
+        while wrote < buf.len() {
+            if self.page.is_none () {
+                self.page = Some(Page::new(self.lep));
+            }
+            if let Some(ref mut page) = self.page {
+                let space = min(PAGE_PAYLOAD_SIZE - self.pos.in_page_pos(), buf.len() - wrote);
+                page.write(self.pos.in_page_pos(), &buf[wrote..wrote + space]);
+                wrote += space;
+                self.pos += space as u64;
+                if self.pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
+                    self.file.append_page(page.clone())?;
+                    self.pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
+                }
+            }
+        }
+        Ok(wrote)
+    }
+}
+
+impl PagedFileRead for PagedFileAppender {
+    fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<usize, BCDBError> {
+        let mut read = 0;
+        while read < buf.len() {
+            if let Some(ref page) = self.read_page(pos.this_page())? {
+                let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
+                page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
+                pos += have as u64;
+                if pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
+                    pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
+                }
+                read += have;
+            }
+            else {
+                break;
+            }
+        }
+        Ok(read)
+    }
+}
+
+impl PagedFile for PagedFileAppender {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        if let Some(ref page) = self.page {
+            if self.pos.this_page() == pref {
+                return Ok(Some(page.clone()))
+            }
+        }
+        return self.file.read_page(pref)
+    }
+
+    fn len(&self) -> Result<u64, BCDBError> {
+        self.file.len()
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        self.file.truncate(new_len)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
+        self.file.sync()
+    }
+
+    fn shutdown(&mut self) {
+        self.file.shutdown()
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        if let Some (ref page) = self.page {
+            if self.pos.in_page_pos() > 0 {
+                self.file.append_page(page.clone())?;
+                self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
+            }
+        }
+        self.pos += PAGE_SIZE as u64;
+        self.file.append_page(page)
+    }
+
+    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        if let Some(ref page) = self.page {
+            if self.pos.in_page_pos() > 0 {
+                self.file.append_page(page.clone())?;
+                self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
+            }
+        }
+        Ok(self.file.flush()?)
+    }
 }
 
 /// iterate through pages of a paged file
 pub struct PagedFileIterator<'file> {
     // the current page of the iterator
     pagenumber: u64,
-    // the current page
-    page: Option<Page>,
-    // position on current page
-    pos: usize,
     // the iterated file
     file: &'file PagedFile
 }
@@ -67,12 +185,7 @@ pub struct PagedFileIterator<'file> {
 impl<'file> PagedFileIterator<'file> {
     /// create a new iterator starting at given page
     pub fn new (file: &'file PagedFile, pref: PRef) -> PagedFileIterator {
-        PagedFileIterator {pagenumber: pref.page_number(), page: None, pos: pref.in_page_pos(), file}
-    }
-
-    /// return position next read would be reading from
-    pub fn position (&self) -> PRef {
-        PRef::from(self.pagenumber * PAGE_SIZE as u64 + self.pos as u64)
+        PagedFileIterator {pagenumber: pref.page_number(), file}
     }
 }
 
@@ -88,28 +201,5 @@ impl<'file> Iterator for PagedFileIterator<'file> {
             }
         }
         None
-    }
-}
-
-impl<'file> Read for PagedFileIterator<'file> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
-        let mut read = 0;
-        while read < buf.len() {
-            if self.pos == PAGE_PAYLOAD_SIZE || self.page.is_none() {
-                self.page = self.next();
-                self.pos = 0;
-            }
-
-            if let Some(ref page) = self.page {
-                let have = min(PAGE_PAYLOAD_SIZE - self.pos, buf.len() - read);
-                page.read(self.pos, &mut buf[read .. read + have]);
-                self.pos += have;
-                read += have;
-            }
-            else {
-                break;
-            }
-        }
-        Ok(read)
     }
 }

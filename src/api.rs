@@ -90,7 +90,6 @@ impl BCDB {
 impl BCDBAPI for BCDB {
     /// initialize a db
     fn init (&mut self) -> Result<(), BCDBError> {
-        self.data.init()?;
         self.mem.init()
     }
 

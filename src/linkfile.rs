@@ -18,40 +18,53 @@
 //! Specific implementation details to link file
 //!
 
-use pagedfile::{FileOps, PagedFile};
+use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
+use pagedfile::{PagedFile, PagedFileAppender, PagedFileWrite};
 use error::BCDBError;
 use pref::PRef;
-use format::{Formatter, Link};
+use format::Link;
 
 /// file storing data link chains from hash table to data
 pub struct LinkFile {
-    appender: Formatter
+    appender: PagedFileAppender
 }
 
 impl LinkFile {
     /// create new file
     pub fn new(file: Box<PagedFile>) -> Result<LinkFile, BCDBError> {
-        let start = PRef::from(file.len()?);
-        Ok(LinkFile{ appender: Formatter::new(file, start)? })
-    }
-
-    /// initialize
-    pub fn init(&mut self) -> Result<(), BCDBError> {
-        self.appender.append_slice(&[0xBC, 0xDB], PRef::from(2))
+        let len = file.len()?;
+        if len % PAGE_SIZE as u64 != 0 {
+            return Err(BCDBError::Corrupted("link file does not end at page boundary".to_string()));
+        }
+        if len > 0 {
+            if let Some(last) = file.read_page(PRef::from(len - PAGE_SIZE as u64))? {
+                let lep = last.read_offset(PAGE_PAYLOAD_SIZE);
+                return Ok(LinkFile{appender: PagedFileAppender::new(file, PRef::from(len), lep)});
+            }
+            else {
+                Err(BCDBError::Corrupted("missing first link page".to_string()))
+            }
+        }
+        else {
+            let mut appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
+            appender.append(&[0xBC, 0xDB])?;
+            appender.advance();
+            return Ok(LinkFile{appender})
+        }
     }
 
     /// append data
     pub fn append_link (&mut self, link: Link) -> Result<(), BCDBError> {
-        let me = self.appender.position();
         let mut ls = Vec::new();
         link.serialize(&mut ls);
-        self.appender.append_slice(ls.as_slice(), me)
+        self.appender.append(ls.as_slice())?;
+        Ok(())
     }
 }
 
-impl FileOps for LinkFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        self.appender.flush()
+impl PagedFile for LinkFile {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.appender.read_page(pref)
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
@@ -68,5 +81,17 @@ impl FileOps for LinkFile {
 
     fn shutdown(&mut self) {
         self.appender.shutdown()
+    }
+
+    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+        self.appender.append_page(page)
+    }
+
+    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        self.appender.flush()
     }
 }

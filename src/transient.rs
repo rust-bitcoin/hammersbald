@@ -26,7 +26,7 @@ use datafile::DataFile;
 use linkfile::LinkFile;
 use pref::PRef;
 use page::{Page,PAGE_SIZE};
-use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
+use pagedfile::PagedFile;
 use asyncfile::AsyncFile;
 use cachedfile::CachedFile;
 
@@ -65,15 +65,25 @@ impl BCDBFactory for Transient {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
-                cached_data_pages)?), PRef::invalid())?;
+                cached_data_pages)?))?;
         let link = LinkFile::new(Box::new(Transient::new(true)))?;
 
         BCDB::new(log, table, data, link)
     }
 }
 
-impl FileOps for Transient {
-    fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
+impl PagedFile for Transient {
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        let mut inner = self.inner.lock().unwrap();
+        let mut buffer = [0u8; PAGE_SIZE];
+        let len = inner.seek(SeekFrom::End(0))?;
+        if pref.as_u64() >= len {
+            return Ok(None);
+        }
+        inner.seek(SeekFrom::Start(pref.as_u64()))?;
+        inner.read(&mut buffer)?;
+        Ok(Some(Page::from_buf(buffer)))
+    }
 
     fn len(&self) -> Result<u64, BCDBError> {
         let inner = self.inner.lock().unwrap();
@@ -93,35 +103,21 @@ impl FileOps for Transient {
 
     fn shutdown (&mut self) {
     }
-}
-
-impl PagedFile for Transient {
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        let mut inner = self.inner.lock().unwrap();
-        let mut buffer = [0u8; PAGE_SIZE];
-        let len = inner.seek(SeekFrom::End(0))?;
-        if pref.as_u64() >= len {
-            return Ok(None);
-        }
-        inner.seek(SeekFrom::Start(pref.as_u64()))?;
-        inner.read(&mut buffer)?;
-        Ok(Some(Page::from_buf(buffer)))
-    }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.into_buf())?;
         Ok(())
     }
-}
 
-impl RandomWritePagedFile for Transient {
-    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(page.pref().as_u64()))?;
         inner.write(&page.into_buf())?;
         Ok(inner.data.len() as u64)
     }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
 }
 
 impl Read for Inner {

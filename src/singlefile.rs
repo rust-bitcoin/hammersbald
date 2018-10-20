@@ -19,7 +19,7 @@
 //!
 
 use error::BCDBError;
-use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
+use pagedfile::PagedFile;
 use page::{PAGE_SIZE, Page};
 use pref::PRef;
 
@@ -48,27 +48,6 @@ impl SingleFile {
     }
 }
 
-impl FileOps for SingleFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        Ok(self.file.lock().unwrap().flush()?)
-    }
-
-    fn len(&self) -> Result<u64, BCDBError> {
-        Ok(self.len)
-    }
-
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
-        self.len = new_len;
-        Ok(self.file.lock().unwrap().set_len(new_len)?)
-    }
-
-    fn sync(&self) -> Result<(), BCDBError> {
-        Ok(self.file.lock().unwrap().sync_data()?)
-    }
-
-    fn shutdown (&mut self) {}
-}
-
 impl PagedFile for SingleFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
         let o = pref.as_u64();
@@ -87,16 +66,29 @@ impl PagedFile for SingleFile {
         Ok(Some(Page::from_buf(buffer)))
     }
 
+    fn len(&self) -> Result<u64, BCDBError> {
+        Ok(self.len)
+    }
+
+    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        self.len = new_len;
+        Ok(self.file.lock().unwrap().set_len(new_len)?)
+    }
+
+    fn sync(&self) -> Result<(), BCDBError> {
+        Ok(self.file.lock().unwrap().sync_data()?)
+    }
+
+    fn shutdown (&mut self) {}
+
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut file = self.file.lock().unwrap();
         file.write(&page.into_buf())?;
         self.len += PAGE_SIZE as u64;
         Ok(())
     }
-}
 
-impl RandomWritePagedFile for SingleFile {
-    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         let o = page.pref().as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(BCDBError::Corrupted("write to wrong file".to_string()));
@@ -108,5 +100,9 @@ impl RandomWritePagedFile for SingleFile {
         file.write(&page.into_buf())?;
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(self.len)
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        Ok(self.file.lock().unwrap().flush()?)
     }
 }

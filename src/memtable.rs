@@ -24,8 +24,8 @@ use datafile::DataFile;
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use linkfile::LinkFile;
 use logfile::LogFile;
-use page::{PAGE_SIZE};
-use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
+use page::PAGE_SIZE;
+use pagedfile::{PagedFile, PagedFileWrite};
 use format::Payload;
 use page::Page;
 
@@ -65,7 +65,6 @@ impl MemTable {
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
-        self.link_file.init()?;
         self.log_file.init(0, 0, 0)?;
         Ok(())
     }
@@ -123,7 +122,7 @@ impl MemTable {
 
         if self.log_file.len()? > PAGE_SIZE as u64 {
             for page in self.log_file.page_iter().skip(1) {
-                self.table_file.write_page(page)?;
+                self.table_file.update_page(page)?;
             }
             self.table_file.flush()?;
 

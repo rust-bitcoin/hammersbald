@@ -19,7 +19,7 @@
 //!
 
 use page::Page;
-use pagedfile::{FileOps, PagedFile, PagedFileIterator};
+use pagedfile::{PagedFile, PagedFileIterator};
 use error::BCDBError;
 use pref::PRef;
 
@@ -68,9 +68,9 @@ impl LogFile {
     }
 }
 
-impl FileOps for LogFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        Ok(self.file.flush()?)
+impl PagedFile for LogFile {
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        self.file.read_page(pref)
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
@@ -86,14 +86,16 @@ impl FileOps for LogFile {
     }
 
     fn shutdown (&mut self) {}
-}
-
-impl PagedFile for LogFile {
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        self.file.read_page(pref)
-    }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        self.file.append_page(page)
+         self.file.append_page(page)
+     }
+
+    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        Ok(self.file.flush()?)
     }
 }

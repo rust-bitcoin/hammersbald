@@ -18,7 +18,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use pagedfile::{FileOps, PagedFile};
+use pagedfile::PagedFile;
 use pref::PRef;
 use error::BCDBError;
 
@@ -44,9 +44,20 @@ impl CachedFile {
     }
 }
 
-impl FileOps for CachedFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        self.file.flush()
+impl PagedFile for CachedFile {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        {
+            let cache = self.cache.read().unwrap();
+            if let Some(page) = cache.get(pref) {
+                return Ok(Some(page));
+            }
+        }
+        if let Some(page) = self.file.read_page (pref)? {
+            let mut cache = self.cache.write().unwrap();
+            cache.cache(pref, Arc::new(page.clone()));
+            return Ok(Some(page));
+        }
+        Ok(None)
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
@@ -65,29 +76,20 @@ impl FileOps for CachedFile {
     fn shutdown(&mut self) {
         self.file.shutdown()
     }
-}
-
-impl PagedFile for CachedFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        {
-            let cache = self.cache.read().unwrap();
-            if let Some(page) = cache.get(pref) {
-                return Ok(Some(page));
-            }
-        }
-        if let Some(page) = self.file.read_page (pref)? {
-            let mut cache = self.cache.write().unwrap();
-            cache.cache(pref, Arc::new(page.clone()));
-            return Ok(Some(page));
-        }
-        Ok(None)
-    }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let mut cache = self.cache.write().unwrap();
         cache.append(page.clone());
         self.file.append_page(page)
 
+    }
+
+    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        self.file.flush()
     }
 }
 

@@ -21,7 +21,7 @@
 use error::BCDBError;
 use pref::PRef;
 use page::{Page, PAGE_SIZE};
-use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
+use pagedfile::PagedFile;
 use singlefile::SingleFile;
 
 use std::collections::HashMap;
@@ -101,12 +101,13 @@ impl RolledFile {
     }
 }
 
-impl FileOps for RolledFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
-        for file in &mut self.files.values_mut() {
-            file.flush()?;
+impl PagedFile for RolledFile {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+        let chunk = (pref.as_u64() / self.chunk_size) as u16;
+        if let Some(file) = self.files.get(&chunk) {
+            return file.read_page(pref);
         }
-        Ok(())
+        Ok(None)
     }
 
     fn len(&self) -> Result<u64, BCDBError> {
@@ -138,16 +139,6 @@ impl FileOps for RolledFile {
     }
 
     fn shutdown (&mut self) {}
-}
-
-impl PagedFile for RolledFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        let chunk = (pref.as_u64() / self.chunk_size) as u16;
-        if let Some(file) = self.files.get(&chunk) {
-            return file.read_page(pref);
-        }
-        Ok(None)
-    }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
         let chunk = (self.len / self.chunk_size) as u16;
@@ -167,11 +158,8 @@ impl PagedFile for RolledFile {
             return Err(BCDBError::Corrupted(format!("missing chunk in append {}", chunk)));
         }
     }
-}
 
-impl RandomWritePagedFile for RolledFile {
-
-    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
         let n_offset = page.pref().as_u64();
         let chunk = (n_offset / self.chunk_size) as u16;
 
@@ -182,10 +170,17 @@ impl RandomWritePagedFile for RolledFile {
         }
 
         if let Some(file) = self.files.get_mut(&chunk) {
-            self.len = file.write_page(page)?  + chunk as u64 * self.chunk_size;
+            self.len = file.update_page(page)?  + chunk as u64 * self.chunk_size;
             Ok(self.len)
         } else {
             return Err(BCDBError::Corrupted(format!("missing chunk in write {}", chunk)));
         }
+    }
+
+    fn flush(&mut self) -> Result<(), BCDBError> {
+        for file in &mut self.files.values_mut() {
+            file.flush()?;
+        }
+        Ok(())
     }
 }

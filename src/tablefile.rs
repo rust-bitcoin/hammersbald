@@ -19,7 +19,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use pagedfile::{FileOps, PagedFile, RandomWritePagedFile};
+use pagedfile::PagedFile;
 use error::BCDBError;
 use pref::PRef;
 
@@ -30,11 +30,11 @@ pub const BUCKET_SIZE: usize = 6;
 
 /// The key file
 pub struct TableFile {
-    file: Box<RandomWritePagedFile>
+    file: Box<PagedFile>
 }
 
 impl TableFile {
-    pub fn new (file: Box<RandomWritePagedFile>) -> Result<TableFile, BCDBError> {
+    pub fn new (file: Box<PagedFile>) -> Result<TableFile, BCDBError> {
         Ok(TableFile {file})
     }
 
@@ -52,19 +52,9 @@ impl TableFile {
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=PRef> +'a {
         BucketIterator{file: self, n:0}
     }
-
-    pub fn read_table_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        if let Some(page) = self.read_page(pref)? {
-            if page.pref().as_u64() != pref.as_u64() {
-                return Err(BCDBError::Corrupted(format!("hash table page {} does not have the pref of its position", pref)));
-            }
-            return Ok(Some(page));
-        }
-        Ok(None)
-    }
 }
 
-impl FileOps for TableFile {
+impl PagedFile for TableFile {
     fn flush(&mut self) -> Result<(), BCDBError> {
         self.file.flush()
     }
@@ -82,21 +72,22 @@ impl FileOps for TableFile {
     }
 
     fn shutdown (&mut self) {}
-}
 
-impl PagedFile for TableFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
-        self.file.read_page(pref)
+        if let Some(page) = self.file.read_page(pref)? {
+            if page.pref() != pref {
+                return Err(BCDBError::Corrupted(format!("table page {} does not have the pref of its position", pref)));
+            }
+            return Ok(Some(page));
+        }
+        Ok(None)
     }
 
     fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
         unimplemented!()
     }
-}
-
-impl RandomWritePagedFile for TableFile {
-    fn write_page(&mut self, page: Page) -> Result<u64, BCDBError> {
-        self.file.write_page(page)
+    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        self.file.update_page(page)
     }
 }
 
