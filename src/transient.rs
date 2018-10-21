@@ -60,7 +60,9 @@ impl BCDBFactory for Transient {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));
-        let table = TableFile::new(Box::new(Transient::new(false)))?;
+        let table = TableFile::new(
+            Box::new(CachedFile::new(
+            Box::new(Transient::new(false)), cached_data_pages)?))?;
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),

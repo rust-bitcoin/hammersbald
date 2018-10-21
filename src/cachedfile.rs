@@ -29,7 +29,7 @@ use std::cmp::{max, min};
 // does not make sense to have a bigger cache
 // until age_desc is iterated sequentially
 // TODO: find a better cache collection
-const MAX_CACHE: usize = 1000;
+const MAX_CACHE: usize = 100;
 
 pub struct CachedFile {
     file: Box<PagedFile>,
@@ -84,8 +84,10 @@ impl PagedFile for CachedFile {
 
     }
 
-    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
-        unimplemented!()
+    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+        let mut cache = self.cache.write().unwrap();
+        cache.update(page.clone());
+        self.file.update_page(page)
     }
 
     fn flush(&mut self) -> Result<(), BCDBError> {
@@ -130,6 +132,14 @@ impl Cache {
         let page = Arc::new(page);
         self.cache(pref, page);
         self.len = max(self.len, pref.as_u64() + PAGE_SIZE as u64);
+        self.len
+    }
+
+    pub fn update (&mut self, page: Page) ->u64 {
+        let pref = page.pref();
+        let page = Arc::new(page);
+        self.cache(pref, page);
+        self.len = max(self.len, pref.as_u64());
         self.len
     }
 

@@ -59,7 +59,8 @@ impl BCDBFactory for Persistent {
                 Box::new(RolledFile::new(name, "lg", true, LOG_CHUNK_SIZE)?))?));
 
         let table = TableFile::new(
-            Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?))?;
+            Box::new(CachedFile::new(
+            Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?), cached_data_pages)?))?;
 
         BCDB::new(log, table, data)
     }
