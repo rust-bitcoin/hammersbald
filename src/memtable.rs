@@ -228,6 +228,9 @@ impl MemTable {
     pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), BCDBError>{
         let hash = self.hash(key);
         let bucket = self.bucket_for_hash(hash);
+
+        self.remove_duplicate(key, hash, bucket)?;
+
         self.store_to_bucket(bucket, hash, data_offset)?;
 
         if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
@@ -244,6 +247,24 @@ impl MemTable {
 
             self.buckets.push(Bucket::default());
             self.dirty.append();
+        }
+        Ok(())
+    }
+
+    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket: usize) -> Result<(), BCDBError> {
+        if let Some(bucket) = self.buckets.get_mut(bucket) {
+            let mut remove = None;
+            for (n, (_, pref)) in bucket.slots.iter().enumerate()
+                .filter(|s| (s.1).0 == hash) {
+                if let Payload::Indexed(indexed) = self.data_file.get_payload(*pref)? {
+                    if indexed.key.as_slice() == key {
+                        remove = Some(n);
+                    }
+                }
+            }
+            if let Some(r) = remove {
+                bucket.slots.remove(r);
+            }
         }
         Ok(())
     }
