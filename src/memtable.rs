@@ -35,7 +35,6 @@ use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
 
-const BUCKET_FILL_TARGET: u32 = 128;
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
 
@@ -165,7 +164,7 @@ impl MemTable {
                     (PRef::from(0), n)
                 }
                 else {
-                    (PRef::from(((n - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE * PAGE_SIZE) as u64),
+                    (PRef::from((((n - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE + 1)* PAGE_SIZE) as u64),
                         (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
                 };
                 let bucket = self.buckets.get(n).unwrap();
@@ -173,16 +172,14 @@ impl MemTable {
                 for (hash, data) in &bucket.slots {
                     previous = self.data_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
                 }
-                if let Some(ref mut page) = self.table_file.read_page(p)
-                    .unwrap_or(Some(Self::invalid_offsets_page(p))) {
-                    if p.as_u64() == 0 {
-                        page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, previous);
-                    }
-                    else {
-                        page.write_offset(b * BUCKET_SIZE, previous);
-                    }
-                    self.table_file.update_page(page.clone())?;
+                let mut page = self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p));
+                if p.as_u64() == 0 {
+                    page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, previous);
                 }
+                else {
+                    page.write_offset(b * BUCKET_SIZE, previous);
+                }
+                self.table_file.update_page(page.clone())?;
             }
 
             self.data_file.flush()?;
@@ -227,7 +224,7 @@ impl MemTable {
         let bucket = self.bucket_for_hash(hash);
         self.store_to_bucket(bucket, hash, data_offset)?;
 
-        if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
+        if self.step < (1 << 31) {
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
                 self.rehash_bucket(step)?;
