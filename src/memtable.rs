@@ -35,6 +35,7 @@ use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
 
+const BUCKET_FILL_TARGET: u32 = 4;
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
 
@@ -224,7 +225,7 @@ impl MemTable {
         let bucket = self.bucket_for_hash(hash);
         self.store_to_bucket(bucket, hash, data_offset)?;
 
-        if self.step < (1 << 31) {
+        if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
                 self.rehash_bucket(step)?;
@@ -393,12 +394,12 @@ impl<'a> Iterator for BucketIterator<'a> {
 
 struct DirtyIterator<'b> {
     bits: &'b Dirty,
-    page: usize
+    pos: usize
 }
 
 impl<'b> DirtyIterator<'b> {
     pub fn new(bits: &'b Dirty) -> DirtyIterator<'b> {
-        DirtyIterator {bits, page: 0}
+        DirtyIterator {bits, pos: 0}
     }
 }
 
@@ -406,26 +407,10 @@ impl<'b> Iterator for DirtyIterator<'b> {
     type Item = bool;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if self.page == 0 {
-            self.page += 1;
-            for i in 0 .. BUCKETS_FIRST_PAGE {
-                if self.bits.get(i) {
-                    return Some(true);
-                }
-            }
-            return Some(false);
-        }
-        else {
-            let start = BUCKETS_FIRST_PAGE + (self.page - 1) * BUCKETS_PER_PAGE;
-            self.page += 1;
-            if start < self.bits.used {
-                for i in start .. start + BUCKETS_PER_PAGE {
-                    if self.bits.get(i) {
-                        return Some(true);
-                    }
-                }
-                return Some(false);
-            }
+        if self.pos < self.bits.used {
+            let pos = self.pos;
+            self.pos += 1;
+            return Some(self.bits.get(pos));
         }
         return None;
     }
