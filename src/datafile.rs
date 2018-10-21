@@ -69,6 +69,9 @@ impl DataFile {
 
     /// append link
     pub fn append_link (&mut self, link: Link) -> Result<PRef, BCDBError> {
+        if link.links.len () > 255 {
+            return Err(BCDBError::Corrupted("more than 255 slots in a bucket".to_string()));
+        }
         let envelope = Envelope{payload: Payload::Link(link), previous: self.appender.lep()};
         let me = self.appender.position();
         let mut e = vec!();
