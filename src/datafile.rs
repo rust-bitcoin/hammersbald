@@ -51,6 +51,11 @@ impl DataFile {
         }
     }
 
+    /// return an iterator of all payloads
+    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=Payload> +'a {
+        PayloadIterator::new(&self.appender, self.appender.lep())
+    }
+
     /// shutdown
     pub fn shutdown (&mut self) {
         self.appender.shutdown()
@@ -102,5 +107,30 @@ impl DataFile {
     /// get file length
     pub fn len (&self) -> Result<u64, BCDBError> {
         self.appender.len()
+    }
+}
+
+/// Iterate data file content
+pub struct PayloadIterator<'f> {
+    file: &'f PagedFileAppender,
+    pos: PRef
+}
+
+impl<'f> PayloadIterator<'f> {
+    /// create a new iterator
+    pub fn new (file: &'f PagedFileAppender, pos: PRef) -> PayloadIterator<'f> {
+        PayloadIterator {file, pos}
+    }
+}
+
+impl<'f> Iterator for PayloadIterator<'f> {
+    type Item = Payload;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if let Ok(envelope) = self.file.read_envelope(self.pos) {
+            self.pos = envelope.previous;
+            return Some(envelope.payload)
+        }
+        None
     }
 }

@@ -70,6 +70,10 @@ impl MemTable {
     }
 
     pub fn load (&mut self) -> Result<(), BCDBError>{
+        let mut link_to_bucket = HashMap::new();
+        for (n, link) in self.table_file.iter().enumerate() {
+            link_to_bucket.insert(link, n);
+        }
         Ok(())
     }
 
@@ -152,8 +156,7 @@ impl MemTable {
                     (PRef::from(0), n)
                 }
                 else {
-                    (
-                        PRef::from(((n - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE * PAGE_SIZE) as u64),
+                    (PRef::from(((n - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE * PAGE_SIZE) as u64),
                         (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
                 };
                 let bucket = self.buckets.get(n).unwrap();

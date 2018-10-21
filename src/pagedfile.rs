@@ -74,6 +74,10 @@ impl PagedFileAppender {
         self.pos
     }
 
+    pub fn lep (&self) -> PRef {
+        self.lep
+    }
+
     pub fn advance (&mut self) -> PRef {
         let lep = self.lep;
         self.lep = self.pos;
