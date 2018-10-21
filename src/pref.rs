@@ -110,7 +110,7 @@ impl ops::SubAssign<u64> for PRef {
 impl PRef {
     /// construct an invalid pref
     pub fn invalid () -> PRef {
-        PRef::from(INVALID)
+        PRef(INVALID)
     }
 
     /// is this a valid pref?
