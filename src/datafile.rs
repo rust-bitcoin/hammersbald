@@ -20,7 +20,7 @@
 
 use page::{PAGE_PAYLOAD_SIZE, PAGE_SIZE};
 use pagedfile::{PagedFile, PagedFileAppender, PagedFileWrite, PagedFileRead};
-use format::{Envelope, Payload, Data, IndexedData};
+use format::{SizedEnvelope, Payload, Data, IndexedData};
 use error::BCDBError;
 use pref::PRef;
 
@@ -76,7 +76,7 @@ impl DataFile {
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
         let mut envelope= vec!();
-        Envelope{previous: self.appender.advance(), payload}.serialize(&mut envelope);
+        SizedEnvelope {previous: self.appender.advance(), payload}.serialize(&mut envelope);
         let me = self.appender.position();
         self.appender.append(&envelope)?;
         Ok(me)
@@ -88,7 +88,7 @@ impl DataFile {
         let mut payload = vec!();
         Payload::Referred(referred).serialize(&mut payload);
         let mut envelope= vec!();
-        Envelope{previous: self.appender.advance(), payload}.serialize(&mut envelope);
+        SizedEnvelope {previous: self.appender.advance(), payload}.serialize(&mut envelope);
         let me = self.appender.position();
         self.appender.append(&envelope)?;
         Ok(me)

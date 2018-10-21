@@ -23,15 +23,15 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::{Write, Read};
 
-/// Content envelope wrapping payload in data and link files
-pub struct Envelope {
+/// Content envelope wrapping in data file
+pub struct SizedEnvelope {
     /// pointer to previous entry. Useful for backward iteration
     pub previous: PRef,
     /// payload
     pub payload: Vec<u8>
 }
 
-impl Envelope {
+impl SizedEnvelope {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         let length = (self.payload.len() + 9) as u32;
@@ -39,27 +39,31 @@ impl Envelope {
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
         result.write(self.payload.as_slice()).unwrap();
     }
+}
 
-    /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<Envelope, BCDBError> {
-        let length = reader.read_u24::<BigEndian>()?;
-        let previous = PRef::from(reader.read_u48::<BigEndian>()?);
-        let mut payload = vec!(0u8; length as usize - 9);
-        reader.read(&mut payload)?;
-        Ok(Envelope{previous, payload})
+/// Content envelope wrapping in link file
+pub struct LinkEnvelope {
+    /// pointer to previous entry. Useful for backward iteration
+    pub lep: PRef,
+    /// payload
+    pub link: Link
+}
+
+impl LinkEnvelope {
+    /// serialize for storage
+    pub fn serialize (&self, result: &mut Write) {
+        result.write_u48::<BigEndian>(self.lep.as_u64()).unwrap();
+        self.link.serialize(result);
     }
 }
+
 
 /// all available payloads
 pub enum Payload {
     /// payload that carries IndexedData
     Indexed(IndexedData),
     /// payload that carries OwnedData
-    Referred(Data),
-    /// payload that carries a Link
-    Link(Link),
-    /// payload thay carries a Table entry
-    Table(PRef)
+    Referred(Data)
 }
 
 impl Payload {
@@ -73,9 +77,7 @@ impl Payload {
             Payload::Referred(referred) => {
                 result.write_u8(1).unwrap();
                 referred.serialize(result);
-            },
-            // Link and Table are not serialized with a type
-            _ => {}
+            }
         }
     }
 

@@ -148,8 +148,7 @@ impl BCDBAPI for BCDB {
     fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
         match self.data.get_payload(pref)? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data, referred.referred)),
-            Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred)),
-            _ => return Err(BCDBError::Corrupted("pref should point to data".to_string()))
+            Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred))
         }
     }
 }

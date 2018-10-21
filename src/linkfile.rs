@@ -22,7 +22,7 @@ use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use pagedfile::{PagedFile, PagedFileAppender, PagedFileWrite};
 use error::BCDBError;
 use pref::PRef;
-use format::Link;
+use format::{Link, LinkEnvelope};
 
 /// file storing data link chains from hash table to data
 pub struct LinkFile {
@@ -52,11 +52,13 @@ impl LinkFile {
     }
 
     /// append data
-    pub fn append_link (&mut self, link: Link) -> Result<(), BCDBError> {
+    pub fn append_link (&mut self, link: Link) -> Result<PRef, BCDBError> {
+        let envelope = LinkEnvelope{link, lep: self.appender.advance()};
         let mut ls = Vec::new();
-        link.serialize(&mut ls);
+        envelope.serialize(&mut ls);
+        let me = self.appender.position();
         self.appender.append(ls.as_slice())?;
-        Ok(())
+        Ok(me)
     }
 }
 

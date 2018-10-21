@@ -26,7 +26,7 @@ use linkfile::LinkFile;
 use logfile::LogFile;
 use page::PAGE_SIZE;
 use pagedfile::{PagedFile, PagedFileWrite};
-use format::Payload;
+use format::{Link, Payload};
 use page::Page;
 
 use siphasher::sip::SipHasher;
@@ -146,12 +146,52 @@ impl MemTable {
             page.write_u64(12, self.sip0);
             page.write_u64(20, self.sip1);
 
-            // TODO
+            let dirty_iterator = DirtyIterator::new(&self.dirty);
+            for (n, _) in dirty_iterator.enumerate().filter(|a| a.1) {
+                let (p, b) = if n < BUCKETS_FIRST_PAGE {
+                    (PRef::from(0), n)
+                }
+                else {
+                    (
+                        PRef::from(((n - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE * PAGE_SIZE) as u64),
+                        (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
+                };
+                let bucket = self.buckets.get(n).unwrap();
+                let mut previous = PRef::invalid();
+                for (hash, data) in bucket.hashes.iter().zip(bucket.offsets.iter()) {
+                    previous = self.link_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
+                }
+                if let Some(ref mut page) = self.table_file.read_page(p)
+                    .unwrap_or(Some(Self::invalid_offsets_page(p))) {
+                    if p.as_u64() == 0 {
+                        page.write_offset(FIRST_PAGE_HEAD + b * 6, previous);
+                    }
+                    else {
+                        page.write_offset(b * 6, previous);
+                    }
+                    self.table_file.update_page(page.clone())?;
+                }
+            }
 
             self.link_file.flush()?;
             self.table_file.flush()?;
         }
         Ok(())
+    }
+
+    fn invalid_offsets_page(pos: PRef) -> Page {
+        let mut page = Page::new(pos);
+        if pos.as_u64() == 0 {
+            for o in 0 .. BUCKETS_FIRST_PAGE {
+                page.write_offset(FIRST_PAGE_HEAD + o*6, PRef::invalid());
+            }
+        }
+        else {
+            for o in 0 .. BUCKETS_PER_PAGE {
+                page.write_offset(o*6, PRef::invalid());
+            }
+        }
+        page
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=PRef> +'a {
@@ -184,7 +224,7 @@ impl MemTable {
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), BCDBError> {
         if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
             bucket.hashes.push(hash);
-            bucket.offsets.push(pref.as_u64());
+            bucket.offsets.push(pref);
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
@@ -200,7 +240,7 @@ impl MemTable {
             for (hash, pref) in b.hashes.iter().zip(b.offsets.iter()) {
                 let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
-                    moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, PRef::from(*pref)));
+                    moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, *pref));
                     rewrite = true;
                 } else {
                     new_bucket_store.hashes.push(*hash);
@@ -235,17 +275,17 @@ impl MemTable {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
-            for (n, h) in bucket.hashes.iter().enumerate().rev() {
-                if *h == hash {
-                    let data_offset = PRef::from(*bucket.offsets.get(n).unwrap());
-                    if let Payload::Indexed(indexed) = data_file.get_payload(data_offset)? {
-                        if indexed.key.as_slice() == key {
-                            return Ok(Some((data_offset, indexed.data.data, indexed.data.referred)));
-                        }
+            for (_, data) in bucket.hashes.iter()
+                .zip(bucket.offsets.iter())
+                .filter(|p| *p.0 == hash )
+                .rev() {
+                if let Payload::Indexed(indexed) = data_file.get_payload(*data)? {
+                    if indexed.key.as_slice() == key {
+                        return Ok(Some((*data, indexed.data.data, indexed.data.referred)));
                     }
-                    else {
-                        return Err(BCDBError::Corrupted("pref should point to indexed data".to_string()));
-                    }
+                }
+                else {
+                    return Err(BCDBError::Corrupted("pref should point to indexed data".to_string()));
                 }
             }
         }
@@ -376,7 +416,7 @@ impl<'b> Iterator for DirtyIterator<'b> {
 pub struct Bucket {
     link: PRef,
     hashes: Vec<u32>,
-    offsets: Vec<u64>
+    offsets: Vec<PRef>
 }
 
 #[cfg(test)]
