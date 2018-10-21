@@ -158,7 +158,7 @@ impl MemTable {
                 };
                 let bucket = self.buckets.get(n).unwrap();
                 let mut previous = PRef::invalid();
-                for (hash, data) in bucket.hashes.iter().zip(bucket.offsets.iter()) {
+                for (hash, data) in &bucket.slots {
                     previous = self.link_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
                 }
                 if let Some(ref mut page) = self.table_file.read_page(p)
@@ -194,7 +194,7 @@ impl MemTable {
         page
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=PRef> +'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
         BucketIterator{file: self, n:0}
     }
 
@@ -223,8 +223,7 @@ impl MemTable {
 
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), BCDBError> {
         if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
-            bucket.hashes.push(hash);
-            bucket.offsets.push(pref);
+            bucket.slots.push((hash, pref));
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
@@ -237,14 +236,13 @@ impl MemTable {
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
         if let Some(b) = self.buckets.get(bucket as usize) {
-            for (hash, pref) in b.hashes.iter().zip(b.offsets.iter()) {
+            for (hash, pref) in &b.slots {
                 let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
                     moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, *pref));
                     rewrite = true;
                 } else {
-                    new_bucket_store.hashes.push(*hash);
-                    new_bucket_store.offsets.push(*pref);
+                    new_bucket_store.slots.push((*hash, *pref));
                 }
             }
         }
@@ -275,9 +273,8 @@ impl MemTable {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
-            for (_, data) in bucket.hashes.iter()
-                .zip(bucket.offsets.iter())
-                .filter(|p| *p.0 == hash )
+            for (_, data) in bucket.slots.iter()
+                .filter(|p| p.0 == hash )
                 .rev() {
                 if let Payload::Indexed(indexed) = data_file.get_payload(*data)? {
                     if indexed.key.as_slice() == key {
@@ -362,13 +359,14 @@ struct BucketIterator<'a> {
 }
 
 impl<'a> Iterator for BucketIterator<'a> {
-    type Item = PRef;
+    type Item = &'a Vec<(u32, PRef)>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        match self.file.buckets.get(self.n as usize) {
-            Some(n) => { self.n += 1; Some(n.link) },
-            None => None
+        if let Some(bucket) = self.file.buckets.get(self.n as usize) {
+            self.n += 1;
+            return Some(&bucket.slots);
         }
+        None
     }
 }
 
@@ -414,9 +412,7 @@ impl<'b> Iterator for DirtyIterator<'b> {
 
 #[derive(Clone, Default)]
 pub struct Bucket {
-    link: PRef,
-    hashes: Vec<u32>,
-    offsets: Vec<PRef>
+    slots: Vec<(u32, PRef)>
 }
 
 #[cfg(test)]
