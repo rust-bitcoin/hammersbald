@@ -101,12 +101,12 @@ impl ops::SubAssign<u64> for PRef {
 impl PRef {
     /// construct an invalid pref
     pub fn invalid () -> PRef {
-        PRef::from(0)
+        PRef::from(1 << 47)
     }
 
     /// is this a valid pref?
     pub fn is_valid (&self) -> bool {
-        self.0 > 0 && self.0 < (1 << 47)
+        self.0 < (1 << 47)
     }
 
     /// convert to a number

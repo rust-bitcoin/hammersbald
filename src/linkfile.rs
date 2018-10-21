@@ -46,9 +46,7 @@ impl LinkFile {
             }
         }
         else {
-            let mut appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
-            appender.append(&[0xBC, 0xDB])?;
-            appender.advance();
+            let appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
             return Ok(LinkFile{appender})
         }
     }

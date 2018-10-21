@@ -136,6 +136,17 @@ impl PagedFile for PagedFileAppender {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+        if new_len >= PAGE_SIZE as u64 {
+            if let Some(last_page) = self.file.read_page(PRef::from(new_len - PAGE_SIZE as u64))? {
+                self.lep = last_page.read_offset(PAGE_PAYLOAD_SIZE);
+            }
+            else {
+                return Err(BCDBError::Corrupted("where is the last page?".to_string()));
+            }
+        }
+        else {
+            self.lep = PRef::from(0);
+        }
         self.file.truncate(new_len)
     }
 

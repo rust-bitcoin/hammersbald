@@ -50,9 +50,7 @@ impl DataFile {
             }
         }
         else {
-            let mut appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
-            appender.append(&[0xBC, 0xDA])?;
-            appender.advance();
+            let appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
             return Ok(DataFile{appender})
         }
     }

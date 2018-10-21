@@ -112,9 +112,9 @@ impl MemTable {
         let mut table_len = 0;
         let mut link_len = 0;
         if let Some(page) = self.log_file.read_page(PRef::from(0))? {
-            data_len = page.read_offset(2).as_u64();
-            table_len = page.read_offset(8).as_u64();
-            link_len = page.read_offset(14).as_u64();
+            data_len = page.read_offset(0).as_u64();
+            table_len = page.read_offset(6).as_u64();
+            link_len = page.read_offset(12).as_u64();
 
             self.table_file.truncate(table_len)?;
             self.link_file.truncate(link_len)?;
