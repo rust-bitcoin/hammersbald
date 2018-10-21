@@ -22,7 +22,6 @@ use error::BCDBError;
 use pref::PRef;
 use datafile::DataFile;
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
-use linkfile::LinkFile;
 use logfile::LogFile;
 use page::PAGE_SIZE;
 use pagedfile::PagedFile;
@@ -35,7 +34,6 @@ use rand::{thread_rng, RngCore};
 use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
-use std::cmp::min;
 
 const BUCKET_FILL_TARGET: u32 = 128;
 const INIT_BUCKETS: usize = 512;
@@ -49,23 +47,23 @@ pub struct MemTable {
     buckets: Vec<Bucket>,
     dirty: Dirty,
     log_file: LogFile,
-    link_file: LinkFile,
+    data_file: DataFile,
     table_file: TableFile,
 }
 
 impl MemTable {
-    pub fn new (log_file: LogFile, link_file: LinkFile, table_file: TableFile) -> MemTable {
+    pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile) -> MemTable {
         let mut rng = thread_rng();
 
         MemTable {log_mod: INIT_LOGMOD as u32, step: 0,
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
-            dirty: Dirty::new(INIT_BUCKETS), log_file, link_file, table_file}
+            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file}
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
-        self.log_file.init(0, 0, 0)?;
+        self.log_file.init(0, 0)?;
         Ok(())
     }
 
@@ -78,7 +76,8 @@ impl MemTable {
     }
 
     /// end current batch and start a new batch
-    pub fn batch (&mut self, data_len: u64)  -> Result<(), BCDBError> {
+    pub fn batch (&mut self)  -> Result<(), BCDBError> {
+        debug!("batch end");
 
         self.log_file.flush()?;
         self.log_file.sync()?;
@@ -86,18 +85,20 @@ impl MemTable {
         self.flush()?;
         self.dirty.clear();
 
-        self.link_file.sync()?;
-        let link_len = self.link_file.len()?;
-        debug!("link length {}", link_len);
-
         self.table_file.sync()?;
         let table_len = self.table_file.len()?;
         debug!("table length {}", table_len);
 
+        self.data_file.sync()?;
+        let data_len = self.data_file.len()?;
+        debug!("data length {}", data_len);
+
+
         self.log_file.reset(table_len);
-        self.log_file.init(data_len, table_len, link_len)?;
+        self.log_file.init(data_len, table_len)?;
         self.log_file.flush()?;
         self.log_file.sync()?;
+
         debug!("batch start");
 
         Ok(())
@@ -105,23 +106,21 @@ impl MemTable {
 
     /// stop background writer
     pub fn shutdown (&mut self) {
+        self.data_file.shutdown();
         self.table_file.shutdown();
-        self.link_file.shutdown();
         self.log_file.shutdown();
     }
 
-    pub fn recover(&mut self) -> Result<u64, BCDBError> {
+    pub fn recover(&mut self) -> Result<(), BCDBError> {
         debug!("recover");
         let mut data_len = 0;
         let mut table_len = 0;
-        let mut link_len = 0;
         if let Some(page) = self.log_file.read_page(PRef::from(0))? {
             data_len = page.read_offset(0).as_u64();
             table_len = page.read_offset(6).as_u64();
-            link_len = page.read_offset(12).as_u64();
 
             self.table_file.truncate(table_len)?;
-            self.link_file.truncate(link_len)?;
+            self.data_file.truncate(data_len)?;
         }
 
         if self.log_file.len()? > PAGE_SIZE as u64 {
@@ -131,14 +130,13 @@ impl MemTable {
             self.table_file.flush()?;
 
             self.table_file.sync()?;
-            self.link_file.sync()?;
             self.log_file.reset(table_len);
-            self.log_file.init(data_len, table_len, link_len)?;
+            self.log_file.init(data_len, table_len)?;
             self.log_file.flush()?;
             self.log_file.sync()?;
         }
 
-        Ok(data_len)
+        Ok(())
     }
 
     pub fn flush (&mut self) -> Result<(), BCDBError> {
@@ -162,21 +160,21 @@ impl MemTable {
                 let bucket = self.buckets.get(n).unwrap();
                 let mut previous = PRef::invalid();
                 for (hash, data) in &bucket.slots {
-                    previous = self.link_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
+                    previous = self.data_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
                 }
                 if let Some(ref mut page) = self.table_file.read_page(p)
                     .unwrap_or(Some(Self::invalid_offsets_page(p))) {
                     if p.as_u64() == 0 {
-                        page.write_offset(FIRST_PAGE_HEAD + b * 6, previous);
+                        page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, previous);
                     }
                     else {
-                        page.write_offset(b * 6, previous);
+                        page.write_offset(b * BUCKET_SIZE, previous);
                     }
                     self.table_file.update_page(page.clone())?;
                 }
             }
 
-            self.link_file.flush()?;
+            self.data_file.flush()?;
             self.table_file.flush()?;
         }
         Ok(())
@@ -199,6 +197,18 @@ impl MemTable {
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
         BucketIterator{file: self, n:0}
+    }
+
+    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
+        self.data_file.append_data(key, data, referred)
+    }
+
+    pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
+        self.data_file.append_referred(data, referred)
+    }
+
+    pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
+        self.data_file.get_payload(pref)
     }
 
     pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), BCDBError>{
@@ -272,14 +282,14 @@ impl MemTable {
     }
 
     // get the data last associated with the key
-    pub fn get(&self, key: &[u8], data_file: &DataFile) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
             for (_, data) in bucket.slots.iter()
                 .filter(|p| p.0 == hash )
                 .rev() {
-                if let Payload::Indexed(indexed) = data_file.get_payload(*data)? {
+                if let Payload::Indexed(indexed) = self.data_file.get_payload(*data)? {
                     if indexed.key.as_slice() == key {
                         return Ok(Some((*data, indexed.data.data, indexed.data.referred)));
                     }

@@ -20,7 +20,6 @@ use pref::PRef;
 use logfile::LogFile;
 use tablefile::TableFile;
 use datafile::DataFile;
-use linkfile::LinkFile;
 use memtable::MemTable;
 use format::Payload;
 use error::BCDBError;
@@ -33,8 +32,7 @@ pub trait BCDBFactory {
 
 /// The blockchain db
 pub struct BCDB {
-    mem: MemTable,
-    data: DataFile
+    mem: MemTable
 }
 
 /// public API to the blockchain db
@@ -67,18 +65,17 @@ pub trait BCDBAPI {
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: LinkFile) -> Result<BCDB, BCDBError> {
-        let mut mem = MemTable::new(log, link, table);
+    pub fn new(log: LogFile, table: TableFile, data: DataFile) -> Result<BCDB, BCDBError> {
+        let mut mem = MemTable::new(log, table, data);
         mem.load()?;
-        let mut db = BCDB { mem, data };
+        let mut db = BCDB { mem };
         db.recover()?;
         db.batch()?;
         Ok(db)
     }
 
     fn recover(&mut self) -> Result<(), BCDBError> {
-        let data_len = self.mem.recover()?;
-        self.data.truncate(data_len)
+        self.mem.recover()
     }
 
     /// get hash table bucket iterator
@@ -96,17 +93,11 @@ impl BCDBAPI for BCDB {
 
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError> {
-        debug!("batch end");
-        self.data.flush()?;
-        self.data.sync()?;
-        let data_len = self.data.len()?;
-        debug!("data length {}", data_len);
-        self.mem.batch(data_len)
+        self.mem.batch()
     }
 
     /// stop background writer
     fn shutdown (&mut self) {
-        self.data.shutdown();
         self.mem.shutdown()
     }
 
@@ -119,7 +110,7 @@ impl BCDBAPI for BCDB {
                 return Err(BCDBError::ForwardReference);
             }
         }
-        let data_offset = self.data.append_data(key, data, referred)?;
+        let data_offset = self.mem.append_data(key, data, referred)?;
         #[cfg(debug_assertions)]
         {
             if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
@@ -131,11 +122,11 @@ impl BCDBAPI for BCDB {
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
-        self.mem.get(key,  &self.data)
+        self.mem.get(key)
     }
 
     fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        let data_offset = self.data.append_referred(data, referred)?;
+        let data_offset = self.mem.append_referred(data, referred)?;
         #[cfg(debug_assertions)]
         {
             if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
@@ -146,7 +137,7 @@ impl BCDBAPI for BCDB {
     }
 
     fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
-        match self.data.get_payload(pref)? {
+        match self.mem.get_payload(pref)? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data, referred.referred)),
             Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred)),
             _ => Err(BCDBError::Corrupted("referred should point to data".to_string()))

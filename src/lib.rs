@@ -42,7 +42,6 @@ mod cachedfile;
 mod singlefile;
 mod rolledfile;
 mod asyncfile;
-mod linkfile;
 mod memtable;
 pub mod format;
 pub mod api;

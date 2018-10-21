@@ -20,7 +20,7 @@
 
 use page::{PAGE_PAYLOAD_SIZE, PAGE_SIZE};
 use pagedfile::{PagedFile, PagedFileAppender};
-use format::{Envelope, Payload, Data, IndexedData};
+use format::{Envelope, Payload, Data, IndexedData, Link};
 use error::BCDBError;
 use pref::PRef;
 
@@ -65,6 +65,16 @@ impl DataFile {
     pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
         let envelope = self.appender.read_envelope(pref)?;
         Ok(envelope.payload)
+    }
+
+    /// append link
+    pub fn append_link (&mut self, link: Link) -> Result<PRef, BCDBError> {
+        let envelope = Envelope{payload: Payload::Link(link), previous: self.appender.advance()};
+        let me = self.appender.position();
+        let mut e = vec!();
+        envelope.serialize(&mut e);
+        self.appender.append(e.as_slice())?;
+        Ok(me)
     }
 
     /// append indexed data

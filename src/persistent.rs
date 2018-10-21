@@ -23,7 +23,6 @@ use asyncfile::AsyncFile;
 use cachedfile::CachedFile;
 use datafile::DataFile;
 use error::BCDBError;
-use linkfile::LinkFile;
 use logfile::LogFile;
 use pref::PRef;
 use page::Page;
@@ -59,13 +58,10 @@ impl BCDBFactory for Persistent {
             Box::new(AsyncFile::new(
                 Box::new(RolledFile::new(name, "lg", true, LOG_CHUNK_SIZE)?))?));
 
-        let link = LinkFile::new(
-            Box::new(RolledFile::new(name, "bl", true, DATA_CHUNK_SIZE)?))?;
-
         let table = TableFile::new(
             Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?))?;
 
-        BCDB::new(log, table, data, link)
+        BCDB::new(log, table, data)
     }
 }
 

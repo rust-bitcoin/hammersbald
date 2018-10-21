@@ -23,7 +23,6 @@ use logfile::LogFile;
 use api::{BCDBFactory, BCDB};
 use tablefile::TableFile;
 use datafile::DataFile;
-use linkfile::LinkFile;
 use pref::PRef;
 use page::{Page,PAGE_SIZE};
 use pagedfile::PagedFile;
@@ -66,9 +65,7 @@ impl BCDBFactory for Transient {
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
                 cached_data_pages)?))?;
-        let link = LinkFile::new(Box::new(Transient::new(true)))?;
-
-        BCDB::new(log, table, data, link)
+        BCDB::new(log, table, data)
     }
 }
 
