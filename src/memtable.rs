@@ -76,7 +76,7 @@ impl MemTable {
         for (pos, payload) in self.data_file.payloads() {
             if let Payload::Link(ref link) = payload {
                 if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    self.buckets[bucket].slots = link.links.clone();
+                    self.buckets[bucket].slots = link.links.iter().map(|a| Slot::new(a.0, a.1)).collect();
                 }
             }
         }
@@ -167,7 +167,8 @@ impl MemTable {
                         (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
                 };
                 let bucket = self.buckets.get(n).unwrap();
-                let link = self.data_file.append_link(Link{links:bucket.slots.clone()})?;
+                let link = self.data_file.append_link(Link{
+                    links:bucket.slots.iter().map(|s| (s.hash(), s.pref())).collect()})?;
 
                 if let Some(ref page) = page {
                     if page.pref() != p {
@@ -209,7 +210,7 @@ impl MemTable {
         page
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Vec<(u32, PRef)>> +'a {
         BucketIterator{file: self, n:0}
     }
 
@@ -250,7 +251,7 @@ impl MemTable {
 
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), BCDBError> {
         if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
-            bucket.slots.push((hash, pref));
+            bucket.slots.push(Slot::new(hash, pref));
         } else {
             return Err(BCDBError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
@@ -263,13 +264,15 @@ impl MemTable {
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
         if let Some(b) = self.buckets.get(bucket as usize) {
-            for (hash, pref) in &b.slots {
+            for s in &b.slots {
+                let hash = s.hash();
+                let pref = s.pref();
                 let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
                 if new_bucket != bucket {
-                    moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, *pref));
+                    moves.entry(new_bucket).or_insert(Vec::new()).push((hash, pref));
                     rewrite = true;
                 } else {
-                    new_bucket_store.slots.push((*hash, *pref));
+                    new_bucket_store.slots.push(Slot::new(hash, pref));
                 }
             }
         }
@@ -300,12 +303,12 @@ impl MemTable {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(bucket) = self.buckets.get(bucket_number) {
-            for (_, data) in bucket.slots.iter()
-                .filter(|p| p.0 == hash )
+            for slot in bucket.slots.iter()
+                .filter(|p| (*p).hash() == hash )
                 .rev() {
-                if let Payload::Indexed(indexed) = self.data_file.get_payload(*data)? {
+                if let Payload::Indexed(indexed) = self.data_file.get_payload(slot.pref())? {
                     if indexed.key.as_slice() == key {
-                        return Ok(Some((*data, indexed.data.data, indexed.data.referred)));
+                        return Ok(Some((slot.pref(), indexed.data.data, indexed.data.referred)));
                     }
                 }
                 else {
@@ -386,12 +389,12 @@ struct BucketIterator<'a> {
 }
 
 impl<'a> Iterator for BucketIterator<'a> {
-    type Item = &'a Vec<(u32, PRef)>;
+    type Item = Vec<(u32, PRef)>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if let Some(bucket) = self.file.buckets.get(self.n as usize) {
             self.n += 1;
-            return Some(&bucket.slots);
+            return Some(bucket.slots.iter().map(|a| (a.hash(), a.pref())).collect());
         }
         None
     }
@@ -423,7 +426,37 @@ impl<'b> Iterator for DirtyIterator<'b> {
 
 #[derive(Clone, Default)]
 pub struct Bucket {
-    slots: Vec<(u32, PRef)>
+    slots: Vec<Slot>
+}
+
+#[derive(Clone)]
+struct Slot([u16;5]);
+
+impl Default for Slot {
+    fn default() -> Self {
+        Slot([0xffffu16;5])
+    }
+}
+
+impl Slot {
+    pub fn new (hash: u32, pref: PRef) -> Slot {
+        let mut buf = [0u16;5];
+        buf [0] = hash as u16;
+        buf [1] = (hash >> 16) as u16;
+        let n = pref.as_u64();
+        buf [2] = n as u16;
+        buf [3] = (n >> 16) as u16;
+        buf [4] = (n >> 32) as u16;
+        Slot(buf)
+    }
+
+    pub fn hash(&self) -> u32 {
+        self.0[0] as u32 | ((self.0[1] as u32) << 16)
+    }
+
+    pub fn pref(&self) -> PRef {
+        PRef::from((self.0[2] as u64) | ((self.0[3] as u64) << 16) | ((self.0[4] as u64) << 32))
+    }
 }
 
 #[cfg(test)]

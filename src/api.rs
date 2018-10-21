@@ -79,7 +79,7 @@ impl BCDB {
     }
 
     /// get hash table bucket iterator
-    pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=Vec<(u32, PRef)>> +'a {
         self.mem.iter()
     }
 }
