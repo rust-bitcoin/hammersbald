@@ -72,6 +72,17 @@ impl MemTable {
         for (n, link) in self.table_file.iter().enumerate() {
             link_to_bucket.insert(link, n);
         }
+
+        for (pos, payload) in self.data_file.payloads() {
+            if let Payload::Link(ref link) = payload {
+                if let Some(bucket) = link_to_bucket.remove(&pos) {
+                    self.buckets [bucket].slots.insert(0, (link.hash, link.envelope));
+                    if link.previous.is_valid() {
+                        link_to_bucket.insert(link.previous, bucket);
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

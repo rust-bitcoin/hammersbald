@@ -78,10 +78,8 @@ impl PagedFileAppender {
         self.lep
     }
 
-    pub fn advance (&mut self) -> PRef {
-        let lep = self.lep;
+    pub fn advance (&mut self) {
         self.lep = self.pos;
-        lep
     }
 
     pub fn read_envelope(&self, pref: PRef) -> Result<Envelope, BCDBError> {

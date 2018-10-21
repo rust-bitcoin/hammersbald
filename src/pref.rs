@@ -23,8 +23,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
-const INVALID: u64 = 0xffff << 47;
-const VALID: u64 = !INVALID;
+const INVALID: u64 = 1 << 47 - 1;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 /// Pointer to persistent data. Limited to 2^48
@@ -50,14 +49,7 @@ impl PartialOrd for PRef {
 
 impl From<u64> for PRef {
     fn from(n: u64) -> Self {
-        #[cfg(debug_assertions)]
-        {
-            if n > VALID {
-                panic!("pref {} greater than 2^48-1", n);
-            }
-        }
-
-        PRef(n & VALID)
+        PRef(n)
     }
 }
 
@@ -79,8 +71,8 @@ impl ops::AddAssign<u64> for PRef {
     fn add_assign(&mut self, rhs: u64) {
         #[cfg(debug_assertions)]
         {
-            if self.0 + rhs > VALID {
-                panic!("pref would become greater than 2^48-1");
+            if self.0 + rhs >= INVALID {
+                panic!("Pref::from(INVALID)");
             }
         }
         self.0 += rhs;
@@ -115,7 +107,7 @@ impl PRef {
 
     /// is this a valid pref?
     pub fn is_valid (&self) -> bool {
-        self.0 <= VALID
+        self.0 < INVALID
     }
 
     /// convert to a number

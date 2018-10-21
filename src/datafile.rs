@@ -46,13 +46,13 @@ impl DataFile {
             }
         }
         else {
-            let appender = PagedFileAppender::new(file, PRef::from(0), PRef::from(0));
+            let appender = PagedFileAppender::new(file, PRef::from(0), PRef::invalid());
             return Ok(DataFile{appender})
         }
     }
 
     /// return an iterator of all payloads
-    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=Payload> +'a {
+    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
         PayloadIterator::new(&self.appender, self.appender.lep())
     }
 
@@ -69,33 +69,36 @@ impl DataFile {
 
     /// append link
     pub fn append_link (&mut self, link: Link) -> Result<PRef, BCDBError> {
-        let envelope = Envelope{payload: Payload::Link(link), previous: self.appender.advance()};
+        let envelope = Envelope{payload: Payload::Link(link), previous: self.appender.lep()};
         let me = self.appender.position();
         let mut e = vec!();
         envelope.serialize(&mut e);
         self.appender.append(e.as_slice())?;
+        self.appender.advance();
         Ok(me)
     }
 
     /// append indexed data
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
         let indexed = IndexedData { key: key.to_vec(), data: Data{data: data.to_vec(), referred: referred.clone()} };
-        let envelope = Envelope {previous: self.appender.advance(), payload: Payload::Indexed(indexed)};
+        let envelope = Envelope {previous: self.appender.lep(), payload: Payload::Indexed(indexed)};
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
         self.appender.append(store.as_slice())?;
+        self.appender.advance();
         Ok(me)
     }
 
     /// append referred data
     pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
         let data = Data{data: data.to_vec(), referred: referred.clone()};
-        let envelope = Envelope {previous: self.appender.advance(), payload: Payload::Referred(data)};
+        let envelope = Envelope {previous: self.appender.lep(), payload: Payload::Referred(data)};
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
         self.appender.append(store.as_slice())?;
+        self.appender.advance();
         Ok(me)
     }
 
@@ -134,12 +137,15 @@ impl<'f> PayloadIterator<'f> {
 }
 
 impl<'f> Iterator for PayloadIterator<'f> {
-    type Item = Payload;
+    type Item = (PRef, Payload);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if let Ok(envelope) = self.file.read_envelope(self.pos) {
-            self.pos = envelope.previous;
-            return Some(envelope.payload)
+        if self.pos.is_valid() {
+            if let Ok(envelope) = self.file.read_envelope(self.pos) {
+                let pos = self.pos;
+                self.pos = envelope.previous;
+                return Some((pos, envelope.payload))
+            }
         }
         None
     }
