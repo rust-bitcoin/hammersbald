@@ -65,10 +65,10 @@ impl DataFile {
     /// get a stored content at pref
     pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
         let mut header = [0u8; 9];
-        self.appender.read(pref, &mut header)?;
+        let pref = self.appender.read(pref, &mut header)?;
         let length = BigEndian::read_u24(&header[0..3]) as usize;
         let mut payload = vec!(0u8; length - 9);
-        self.appender.read(pref + 9, &mut payload)?;
+        self.appender.read(pref, &mut payload)?;
         Payload::deserialize(&mut Cursor::new(payload))
     }
 

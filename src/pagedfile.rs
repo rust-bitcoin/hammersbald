@@ -45,12 +45,12 @@ pub trait PagedFile {
 
 pub trait PagedFileRead {
     /// read a slice from a paged file
-    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<usize, BCDBError>;
+    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<PRef, BCDBError>;
 }
 
 pub trait PagedFileWrite {
     /// write a slice to a paged file
-    fn append(&mut self, buf: &[u8]) -> Result<usize, BCDBError>;
+    fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError>;
 }
 
 /// a reader for a paged file
@@ -79,7 +79,7 @@ impl PagedFileAppender {
 }
 
 impl PagedFileWrite for PagedFileAppender {
-    fn append(&mut self, buf: &[u8]) -> Result<usize, BCDBError> {
+    fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError> {
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -96,12 +96,12 @@ impl PagedFileWrite for PagedFileAppender {
                 }
             }
         }
-        Ok(wrote)
+        Ok(self.pos)
     }
 }
 
 impl PagedFileRead for PagedFileAppender {
-    fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<usize, BCDBError> {
+    fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, BCDBError> {
         let mut read = 0;
         while read < buf.len() {
             if let Some(ref page) = self.read_page(pos.this_page())? {
@@ -117,7 +117,7 @@ impl PagedFileRead for PagedFileAppender {
                 break;
             }
         }
-        Ok(read)
+        Ok(pos)
     }
 }
 
