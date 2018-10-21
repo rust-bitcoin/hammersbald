@@ -160,6 +160,7 @@ impl MemTable {
             page.write_u64(20, self.sip1);
 
             let dirty_iterator = DirtyIterator::new(&self.dirty);
+            let mut page : Option<Page> = None;
             for (n, _) in dirty_iterator.enumerate().filter(|a| a.1) {
                 let (p, b) = if n < BUCKETS_FIRST_PAGE {
                     (PRef::from(0), n)
@@ -173,13 +174,23 @@ impl MemTable {
                 for (hash, data) in &bucket.slots {
                     previous = self.data_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
                 }
-                let mut page = self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p));
-                if p.as_u64() == 0 {
-                    page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, previous);
+
+                if let Some(ref page) = page {
+                    if page.pref() != p {
+                        self.table_file.update_page(page.clone())?;
+                    }
                 }
-                else {
-                    page.write_offset(b * BUCKET_SIZE, previous);
+
+                page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
+                if let Some(ref mut page) = page {
+                    if p.as_u64() == 0 {
+                        page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, previous);
+                    } else {
+                        page.write_offset(b * BUCKET_SIZE, previous);
+                    }
                 }
+            }
+            if let Some(ref page) = page {
                 self.table_file.update_page(page.clone())?;
             }
 
