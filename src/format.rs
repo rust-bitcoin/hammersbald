@@ -24,46 +24,38 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use std::io::{Write, Read};
 
 /// Content envelope wrapping in data file
-pub struct SizedEnvelope {
+pub struct Envelope {
     /// pointer to previous entry. Useful for backward iteration
     pub previous: PRef,
     /// payload
-    pub payload: Vec<u8>
+    pub payload: Payload
 }
 
-impl SizedEnvelope {
+impl Envelope {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
-        let length = (self.payload.len() + 9) as u32;
-        result.write_u24::<BigEndian>(length).unwrap();
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-        result.write(self.payload.as_slice()).unwrap();
+        let mut payload = vec!();
+        self.payload.serialize(&mut payload);
+        result.write(payload.as_slice()).unwrap();
+
+    }
+
+    /// deserialize for storage
+    pub fn deseralize(reader: &mut Read) -> Result<Envelope, BCDBError> {
+        let previous = PRef::from(reader.read_u48::<BigEndian>()?);
+        Ok(Envelope{payload: Payload::deserialize(reader)?, previous})
     }
 }
 
-/// Content envelope wrapping in link file
-pub struct LinkEnvelope {
-    /// pointer to previous entry. Useful for backward iteration
-    pub lep: PRef,
-    /// payload
-    pub link: Link
-}
-
-impl LinkEnvelope {
-    /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
-        result.write_u48::<BigEndian>(self.lep.as_u64()).unwrap();
-        self.link.serialize(result);
-    }
-}
-
-
-/// all available payloads
+/// payloads in the data file
 pub enum Payload {
-    /// payload that carries IndexedData
+    /// indexed data
     Indexed(IndexedData),
-    /// payload that carries OwnedData
-    Referred(Data)
+    /// data
+    Referred(Data),
+    /// hash table extension,
+    Link(Link)
 }
 
 impl Payload {
@@ -77,6 +69,10 @@ impl Payload {
             Payload::Referred(referred) => {
                 result.write_u8(1).unwrap();
                 referred.serialize(result);
+            },
+            Payload::Link(link) => {
+                result.write_u8(2).unwrap();
+                link.serialize(result);
             }
         }
     }
@@ -86,6 +82,7 @@ impl Payload {
         match reader.read_u8()? {
             0 => Ok(Payload::Indexed(IndexedData::deserialize(reader)?)),
             1 => Ok(Payload::Referred(Data::deserialize(reader)?)),
+            2 => Ok(Payload::Link(Link::deserialize(reader)?)),
             // Link and Table are not serialized with a type
             _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
         }

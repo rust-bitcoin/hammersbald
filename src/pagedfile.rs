@@ -20,8 +20,11 @@
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use error::BCDBError;
 use pref::PRef;
+use format::Envelope;
 
 use std::cmp::min;
+use std::io::Read;
+use std::io::Error;
 
 /// a paged file
 pub trait PagedFile {
@@ -76,10 +79,12 @@ impl PagedFileAppender {
         self.lep = self.pos;
         lep
     }
-}
 
-impl PagedFileWrite for PagedFileAppender {
-    fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError> {
+    pub fn read_envelope(&self, pref: PRef) -> Result<Envelope, BCDBError> {
+        Envelope::deseralize(&mut AppenderReader{appender: self, pos: pref})
+    }
+
+    pub fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError> {
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -95,29 +100,42 @@ impl PagedFileWrite for PagedFileAppender {
                     self.pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
                 }
             }
+            if self.pos.in_page_pos() == 0 {
+                self.page = None;
+            }
         }
         Ok(self.pos)
     }
-}
 
-impl PagedFileRead for PagedFileAppender {
-    fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, BCDBError> {
+    pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, BCDBError> {
         let mut read = 0;
         while read < buf.len() {
             if let Some(ref page) = self.read_page(pos.this_page())? {
                 let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
+                read += have;
                 pos += have as u64;
                 if pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
                     pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
                 }
-                read += have;
             }
             else {
                 break;
             }
         }
         Ok(pos)
+    }
+}
+
+struct AppenderReader<'a> {
+    pub appender: &'a PagedFileAppender,
+    pub pos: PRef
+}
+
+impl<'a> Read for AppenderReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        self.pos = self.appender.read(self.pos, buf)?;
+        Ok(buf.len())
     }
 }
 

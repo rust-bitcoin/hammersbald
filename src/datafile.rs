@@ -19,14 +19,10 @@
 //!
 
 use page::{PAGE_PAYLOAD_SIZE, PAGE_SIZE};
-use pagedfile::{PagedFile, PagedFileAppender, PagedFileWrite, PagedFileRead};
-use format::{SizedEnvelope, Payload, Data, IndexedData};
+use pagedfile::{PagedFile, PagedFileAppender};
+use format::{Envelope, Payload, Data, IndexedData};
 use error::BCDBError;
 use pref::PRef;
-
-use byteorder::{ByteOrder, BigEndian};
-
-use std::io::Cursor;
 
 /// file storing indexed and referred data
 pub struct DataFile {
@@ -62,35 +58,29 @@ impl DataFile {
 
     /// get a stored content at pref
     pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
-        let mut header = [0u8; 9];
-        let pref = self.appender.read(pref, &mut header)?;
-        let length = BigEndian::read_u24(&header[0..3]) as usize;
-        let mut payload = vec!(0u8; length - 9);
-        self.appender.read(pref, &mut payload)?;
-        Payload::deserialize(&mut Cursor::new(payload))
+        let envelope = self.appender.read_envelope(pref)?;
+        Ok(envelope.payload)
     }
 
     /// append indexed data
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
         let indexed = IndexedData { key: key.to_vec(), data: Data{data: data.to_vec(), referred: referred.clone()} };
-        let mut payload = vec!();
-        Payload::Indexed(indexed).serialize(&mut payload);
-        let mut envelope= vec!();
-        SizedEnvelope {previous: self.appender.advance(), payload}.serialize(&mut envelope);
+        let envelope = Envelope {previous: self.appender.advance(), payload: Payload::Indexed(indexed)};
+        let mut store = vec!();
+        envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.append(&envelope)?;
+        self.appender.append(store.as_slice())?;
         Ok(me)
     }
 
     /// append referred data
     pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        let referred = Data { data: data.to_vec(), referred: referred.clone() };
-        let mut payload = vec!();
-        Payload::Referred(referred).serialize(&mut payload);
-        let mut envelope= vec!();
-        SizedEnvelope {previous: self.appender.advance(), payload}.serialize(&mut envelope);
+        let data = Data{data: data.to_vec(), referred: referred.clone()};
+        let envelope = Envelope {previous: self.appender.advance(), payload: Payload::Referred(data)};
+        let mut store = vec!();
+        envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.append(&envelope)?;
+        self.appender.append(store.as_slice())?;
         Ok(me)
     }
 
