@@ -23,9 +23,18 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
-#[derive(Eq, PartialEq, Hash, Copy, Clone, Default, Debug)]
+const INVALID: u64 = 0xffff << 47;
+const VALID: u64 = !INVALID;
+
+#[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 /// Pointer to persistent data. Limited to 2^48
 pub struct PRef(u64);
+
+impl Default for PRef {
+    fn default() -> Self {
+        PRef(INVALID)
+    }
+}
 
 impl Ord for PRef {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -43,12 +52,12 @@ impl From<u64> for PRef {
     fn from(n: u64) -> Self {
         #[cfg(debug_assertions)]
         {
-            if n > 0xffffffffffffu64 {
+            if n > VALID {
                 panic!("pref {} greater than 2^48-1", n);
             }
         }
 
-        PRef(n & 0xffffffffffffu64)
+        PRef(n & VALID)
     }
 }
 
@@ -70,7 +79,7 @@ impl ops::AddAssign<u64> for PRef {
     fn add_assign(&mut self, rhs: u64) {
         #[cfg(debug_assertions)]
         {
-            if self.0 + rhs > 0xffffffffffffu64 {
+            if self.0 + rhs > VALID {
                 panic!("pref would become greater than 2^48-1");
             }
         }
@@ -90,7 +99,7 @@ impl ops::SubAssign<u64> for PRef {
     fn sub_assign(&mut self, rhs: u64) {
         #[cfg(debug_assertions)]
         {
-            if rhs >= self.0 {
+            if rhs > self.0 {
                 panic!("pref would become invalid through subtraction");
             }
         }
@@ -101,12 +110,12 @@ impl ops::SubAssign<u64> for PRef {
 impl PRef {
     /// construct an invalid pref
     pub fn invalid () -> PRef {
-        PRef::from(1 << 47)
+        PRef::from(INVALID)
     }
 
     /// is this a valid pref?
     pub fn is_valid (&self) -> bool {
-        self.0 < (1 << 47)
+        self.0 <= VALID
     }
 
     /// convert to a number
