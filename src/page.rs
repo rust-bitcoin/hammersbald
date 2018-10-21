@@ -70,7 +70,7 @@ impl Page {
 
     /// read an pref at a page position
     pub fn read_offset(&self, pos: usize) -> PRef {
-        PRef::from(BigEndian::read_u64(&self.content[pos..pos+6]))
+        PRef::from(BigEndian::read_u48(&self.content[pos..pos+6]))
     }
 
     /// write an pref into the page
