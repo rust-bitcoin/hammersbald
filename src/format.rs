@@ -153,28 +153,31 @@ impl IndexedData {
 
 /// A link to data
 pub struct Link {
-    /// hash of the key
-    pub hash: u32,
-    /// pointer to the Envelope
-    pub envelope: PRef,
-    /// pointer to previous link
-    pub previous: PRef
+    /// slots
+    pub links: Vec<(u32, PRef)>,
 }
 
 impl Link {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
-        result.write_u32::<BigEndian>(self.hash).unwrap();
-        result.write_u48::<BigEndian>(self.envelope.as_u64()).unwrap();
-        result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
+        result.write_u8(self.links.len() as u8).unwrap();
+        for (hash, envelope) in &self.links {
+            result.write_u32::<BigEndian>(*hash).unwrap();
+            result.write_u48::<BigEndian>(envelope.as_u64()).unwrap();
+        }
     }
 
     /// deserialize from storage
     pub fn deserialize(reader: &mut Read) -> Result<Link, BCDBError> {
-        let hash = reader.read_u32::<BigEndian>()?;
-        let envelope = PRef::from(reader.read_u48::<BigEndian>()?);
-        let previous = PRef::from(reader.read_u48::<BigEndian>()?);
-        Ok(Link{hash, envelope, previous})
+        let len = reader.read_u8()?;
+        let mut links = vec!();
+        for _ in 0 .. len {
+            let hash = reader.read_u32::<BigEndian>()?;
+            let envelope = PRef::from(reader.read_u48::<BigEndian>()?);
+            links.push((hash, envelope));
+        }
+
+        Ok(Link{links})
     }
 }
 

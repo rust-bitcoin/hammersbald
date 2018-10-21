@@ -76,10 +76,7 @@ impl MemTable {
         for (pos, payload) in self.data_file.payloads() {
             if let Payload::Link(ref link) = payload {
                 if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    self.buckets [bucket].slots.insert(0, (link.hash, link.envelope));
-                    if link.previous.is_valid() {
-                        link_to_bucket.insert(link.previous, bucket);
-                    }
+                    self.buckets[bucket].slots = link.links.clone();
                 }
             }
         }
@@ -170,10 +167,7 @@ impl MemTable {
                         (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
                 };
                 let bucket = self.buckets.get(n).unwrap();
-                let mut previous = PRef::invalid();
-                for (hash, data) in &bucket.slots {
-                    previous = self.data_file.append_link(Link { hash: *hash, envelope: *data, previous })?;
-                }
+                let link = self.data_file.append_link(Link{links:bucket.slots.clone()})?;
 
                 if let Some(ref page) = page {
                     if page.pref() != p {
@@ -184,9 +178,9 @@ impl MemTable {
                 page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
                 if let Some(ref mut page) = page {
                     if p.as_u64() == 0 {
-                        page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, previous);
+                        page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, link);
                     } else {
-                        page.write_offset(b * BUCKET_SIZE, previous);
+                        page.write_offset(b * BUCKET_SIZE, link);
                     }
                 }
             }
