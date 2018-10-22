@@ -36,7 +36,7 @@ impl DataFile {
         if len % PAGE_SIZE as u64 != 0 {
             return Err(BCDBError::Corrupted("data file does not end at page boundary".to_string()));
         }
-        if len > 0 {
+        if len >= PAGE_SIZE as u64 {
             if let Some(last) = file.read_page(PRef::from(len - PAGE_SIZE as u64))? {
                 let lep = last.read_pref(PAGE_PAYLOAD_SIZE);
                 return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len), lep)});

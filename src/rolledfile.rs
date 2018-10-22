@@ -27,6 +27,7 @@ use singlefile::SingleFile;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::Path;
+use std::cmp::max;
 
 pub struct RolledFile {
     name: String,
@@ -49,6 +50,7 @@ impl RolledFile {
         // interesting file names are:
         // name.index.extension
         // where index is a number
+        let mut highest_chunk = 0;
         if let Some(mut dir) = Path::new(&self.name).parent() {
             if dir.to_string_lossy().to_string().is_empty() {
                 dir = Path::new(".");
@@ -72,6 +74,7 @@ impl RolledFile {
                                                 let file = Self::open_file(self.append_only, filename)?;
                                                 self.files.insert(number,
                                                                   SingleFile::new_chunk(file, number as u64 * self.chunk_size, self.chunk_size)?);
+                                                highest_chunk = max(highest_chunk, number);
                                             }
                                         }
                                     }
@@ -84,6 +87,9 @@ impl RolledFile {
         }
         else {
             return Err(BCDBError::Corrupted("invalid db name".to_string()));
+        }
+        if let Some (file) = self.files.get(&highest_chunk) {
+            self.len = highest_chunk as u64 * self.chunk_size + file.len()?;
         }
         Ok(())
     }
