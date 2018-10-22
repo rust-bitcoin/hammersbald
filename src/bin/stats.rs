@@ -10,6 +10,7 @@ use bcdb::api::BCDBAPI;
 use log::Level;
 
 use std::env::args;
+use std::collections::HashMap;
 
 pub fn main () {
     if find_opt("help") {
@@ -55,7 +56,18 @@ pub fn main () {
 
     db.init().unwrap();
 
-    // TODO
+    let (step, log_mod, blen, tlen, dlen) = db.params();
+    println!("table {} data {} buckets {} log_mod {} step {}", tlen, dlen, blen, log_mod, step);
+    let mut roots = HashMap::new();
+    for bucket in db.buckets() {
+        for slot in bucket.iter() {
+            if slot.1.is_valid() {
+                roots.entry(slot.0).or_insert(Vec::new()).push(slot.1);
+            }
+        }
+    }
+    println!("roots {}", roots.len());
+
 
     db.shutdown();
 }

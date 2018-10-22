@@ -47,7 +47,7 @@ impl Page {
 
     /// interpret the last 6 bytes as an pref
     pub fn pref (&self) -> PRef {
-        self.read_offset(PAGE_PAYLOAD_SIZE)
+        self.read_pref(PAGE_PAYLOAD_SIZE)
     }
 
     /// write slice at a position
@@ -68,8 +68,8 @@ impl Page {
         self.content[pos..pos+6].copy_from_slice(&buf[..]);
     }
 
-    /// read an pref at a page position
-    pub fn read_offset(&self, pos: usize) -> PRef {
+    /// read a pref at a page position
+    pub fn read_pref(&self, pos: usize) -> PRef {
         PRef::from(BigEndian::read_u48(&self.content[pos..pos+6]))
     }
 

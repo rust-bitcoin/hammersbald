@@ -23,7 +23,5 @@ rand="0.5"
 siphasher = "0.2"
 byteorder="1"
 simple_logger = "0.5.0"
-bitcoin={version="0.13", optional=true}
-
-[dev-dependencies]
 hex = "0.3"
+bitcoin={version="0.13", optional=true}

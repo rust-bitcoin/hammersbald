@@ -103,7 +103,7 @@ impl<'a> Iterator for BucketIterator<'a> {
         let table_offset = TableFile::table_offset(self.n);
         if let Ok(Some(page)) = self.file.read_page(table_offset.this_page()) {
             self.n += 1;
-            return Some(page.read_offset(table_offset.in_page_pos()))
+            return Some(page.read_pref(table_offset.in_page_pos()))
         }
         None
     }

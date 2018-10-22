@@ -42,6 +42,9 @@ pub trait BCDBAPI {
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError>;
 
+    /// get parameters
+    fn params(&self) -> (usize, u32, usize, u64, u64);
+
     /// stop background writer
     fn shutdown (&mut self);
 
@@ -66,12 +69,17 @@ pub trait BCDBAPI {
 impl BCDB {
     /// create a new db with key and data file
     pub fn new(log: LogFile, table: TableFile, data: DataFile) -> Result<BCDB, BCDBError> {
-        let mut mem = MemTable::new(log, table, data);
-        mem.load()?;
+        let mem = MemTable::new(log, table, data);
         let mut db = BCDB { mem };
         db.recover()?;
+        db.load()?;
         db.batch()?;
         Ok(db)
+    }
+
+    /// load memtable
+    fn load(&mut self) -> Result<(), BCDBError> {
+        self.mem.load()
     }
 
     fn recover(&mut self) -> Result<(), BCDBError> {
@@ -79,8 +87,13 @@ impl BCDB {
     }
 
     /// get hash table bucket iterator
-    pub fn bucket_iterator<'a> (&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
-        self.mem.iter()
+    pub fn buckets<'a> (&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+        self.mem.buckets()
+    }
+
+    /// return an iterator of all payloads
+    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
+        self.mem.payloads()
     }
 }
 
@@ -94,6 +107,10 @@ impl BCDBAPI for BCDB {
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError> {
         self.mem.batch()
+    }
+
+    fn params(&self) -> (usize, u32, usize, u64, u64) {
+        self.mem.params()
     }
 
     /// stop background writer

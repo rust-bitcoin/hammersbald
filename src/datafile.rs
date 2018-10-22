@@ -38,7 +38,7 @@ impl DataFile {
         }
         if len > 0 {
             if let Some(last) = file.read_page(PRef::from(len - PAGE_SIZE as u64))? {
-                let lep = last.read_offset(PAGE_PAYLOAD_SIZE);
+                let lep = last.read_pref(PAGE_PAYLOAD_SIZE);
                 return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len), lep)});
             }
             else {
@@ -76,8 +76,8 @@ impl DataFile {
         let me = self.appender.position();
         let mut e = vec!();
         envelope.serialize(&mut e);
-        self.appender.append(e.as_slice())?;
         self.appender.advance();
+        self.appender.append(e.as_slice())?;
         Ok(me)
     }
 
@@ -88,8 +88,8 @@ impl DataFile {
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.append(store.as_slice())?;
         self.appender.advance();
+        self.appender.append(store.as_slice())?;
         Ok(me)
     }
 
@@ -100,8 +100,8 @@ impl DataFile {
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.append(store.as_slice())?;
         self.appender.advance();
+        self.appender.append(store.as_slice())?;
         Ok(me)
     }
 
@@ -146,6 +146,9 @@ impl<'f> Iterator for PayloadIterator<'f> {
         if self.pos.is_valid() {
             if let Ok(envelope) = self.file.read_envelope(self.pos) {
                 let pos = self.pos;
+                if pos == envelope.previous {
+                    panic!("pos == envelope.previous == {}", pos);
+                }
                 self.pos = envelope.previous;
                 return Some((pos, envelope.payload))
             }

@@ -33,6 +33,7 @@ extern crate bitcoin;
 extern crate siphasher;
 extern crate rand;
 extern crate byteorder;
+extern crate hex;
 
 mod page;
 mod pagedfile;

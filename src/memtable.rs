@@ -63,16 +63,29 @@ impl MemTable {
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
-        self.log_file.init(0, 0)?;
+        self.log_file.init(self.data_file.len()?, self.table_file.len()?)?;
         Ok(())
     }
 
+    pub fn params(&self) -> (usize, u32, usize, u64, u64) {
+        (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap())
+    }
+
     pub fn load (&mut self) -> Result<(), BCDBError>{
+        if let Some(first) = self.table_file.read_page(PRef::from(0))? {
+            let n_buckets = first.read_pref(0).as_u64() as u32;
+            self.buckets = vec!(Bucket::default(); n_buckets as usize);
+            self.dirty = Dirty::new(n_buckets as usize);
+            self.step = first.read_pref(6).as_u64() as usize;
+            self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
+            self.sip0 = first.read_u64(12);
+            self.sip1 = first.read_u64(20);
+        }
+
         let mut link_to_bucket = HashMap::new();
         for (n, link) in self.table_file.iter().enumerate() {
             link_to_bucket.insert(link, n);
         }
-
         for (pos, payload) in self.data_file.payloads() {
             if let Payload::Link(ref link) = payload {
                 if let Some(bucket) = link_to_bucket.remove(&pos) {
@@ -124,8 +137,8 @@ impl MemTable {
         let mut data_len = 0;
         let mut table_len = 0;
         if let Some(page) = self.log_file.read_page(PRef::from(0))? {
-            data_len = page.read_offset(0).as_u64();
-            table_len = page.read_offset(6).as_u64();
+            data_len = page.read_pref(0).as_u64();
+            table_len = page.read_pref(6).as_u64();
 
             self.table_file.truncate(table_len)?;
             self.data_file.truncate(data_len)?;
@@ -148,13 +161,16 @@ impl MemTable {
     }
 
     pub fn flush (&mut self) -> Result<(), BCDBError> {
-        if self.dirty.is_dirty() {
+        {
             // first page
             let mut page = Page::new(PRef::from(0));
             page.write_offset(0, PRef::from(self.buckets.len() as u64));
             page.write_offset(6, PRef::from(self.step as u64));
             page.write_u64(12, self.sip0);
             page.write_u64(20, self.sip1);
+            self.table_file.update_page(page)?;
+        }
+        if self.dirty.is_dirty() {
 
             let dirty_iterator = DirtyIterator::new(&self.dirty);
             let mut page : Option<Page> = None;
@@ -167,15 +183,21 @@ impl MemTable {
                         (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
                 };
                 let bucket = self.buckets.get(n).unwrap();
-                let link = self.data_file.append_link(Link{links:bucket.slots.clone()})?;
-
-                if let Some(ref page) = page {
-                    if page.pref() != p {
-                        self.table_file.update_page(page.clone())?;
+                let link = if bucket.slots.len () > 0 {
+                        self.data_file.append_link(Link { links: bucket.slots.clone() })?
+                    }
+                    else {
+                        PRef::invalid()
+                    };
+                if page.is_some() {
+                    if page.clone().unwrap().pref() != p {
+                        self.table_file.update_page(page.unwrap().clone())?;
+                        page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
                     }
                 }
-
-                page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
+                else {
+                    page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
+                }
                 if let Some(ref mut page) = page {
                     if p.as_u64() == 0 {
                         page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, link);
@@ -209,8 +231,12 @@ impl MemTable {
         page
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn buckets<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
         BucketIterator{file: self, n:0}
+    }
+
+    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
+        self.data_file.payloads()
     }
 
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {

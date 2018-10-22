@@ -22,6 +22,8 @@ use pref::PRef;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use std::io::{Write, Read};
+use std::fmt::{Formatter, Debug, Error};
+use hex;
 
 /// Content envelope wrapping in data file
 pub struct Envelope {
@@ -49,6 +51,7 @@ impl Envelope {
 }
 
 /// payloads in the data file
+#[derive(Debug)]
 pub enum Payload {
     /// indexed data
     Indexed(IndexedData),
@@ -124,6 +127,12 @@ impl Data {
     }
 }
 
+impl Debug for Data {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "data: {}, referred: {:?}", hex::encode(&self.data), self.referred)
+    }
+}
+
 /// data accessible with a key
 pub struct IndexedData {
     /// key
@@ -150,6 +159,13 @@ impl IndexedData {
         Ok(IndexedData{key, data })
     }
 }
+
+impl Debug for IndexedData {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "key: {} data: {:?}", hex::encode(&self.key), self.data)
+    }
+}
+
 
 /// A link to data
 pub struct Link {
@@ -181,3 +197,8 @@ impl Link {
     }
 }
 
+impl Debug for Link {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "{:?}", self.links)
+    }
+}
