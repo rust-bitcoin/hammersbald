@@ -35,7 +35,7 @@ use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
 
-const BUCKET_FILL_TARGET: u32 = 4;
+const BUCKET_FILL_TARGET: u32 = 64;
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
 

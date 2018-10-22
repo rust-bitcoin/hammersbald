@@ -146,9 +146,6 @@ impl<'f> Iterator for PayloadIterator<'f> {
         if self.pos.is_valid() {
             let pos = self.pos;
             if let Ok(envelope) = self.file.read_envelope(self.pos) {
-                if pos == envelope.previous {
-                    panic!("pos == envelope.previous == {}", pos);
-                }
                 self.pos = envelope.previous;
                 return Some((pos, envelope.payload))
             }

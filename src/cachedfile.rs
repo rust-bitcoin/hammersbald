@@ -57,7 +57,7 @@ impl PagedFile for CachedFile {
             return Ok(Some(page));
         }
         if let Some(page) = self.file.read_page (pref)? {
-            cache.cache_read(pref, Arc::new(page.clone()));
+            cache.cache(pref, Arc::new(page.clone()));
             return Ok(Some(page));
         }
         Ok(None)
@@ -112,7 +112,7 @@ impl Cache {
         Cache { reads: HashMap::new(), age_desc: VecDeque::new(), len, size }
     }
 
-    pub fn cache_read(&mut self, pref: PRef, page: Arc<Page>) {
+    pub fn cache(&mut self, pref: PRef, page: Arc<Page>) {
         if self.reads.insert(pref, page).is_none() {
             self.age_desc.push_back(pref);
             if self.reads.len() > self.size {
@@ -131,14 +131,6 @@ impl Cache {
         }
     }
 
-    pub fn cache_write(&mut self, pref: PRef, page: Arc<Page>) {
-        if self.reads.insert(pref, page).is_some() {
-            if let Some(pos) = self.age_desc.iter().rposition(|o| *o == pref) {
-                self.age_desc.remove(pos);
-            }
-        }
-    }
-
     pub fn clear(&mut self) {
         self.reads.clear();
         self.age_desc.clear();
@@ -147,7 +139,7 @@ impl Cache {
     pub fn append (&mut self, page: Page) ->u64 {
         let pref = PRef::from(self.len);
         let page = Arc::new(page);
-        self.cache_write(pref, page);
+        self.cache(pref, page);
         self.len = max(self.len, pref.as_u64() + PAGE_SIZE as u64);
         self.len
     }
@@ -155,7 +147,7 @@ impl Cache {
     pub fn update (&mut self, page: Page) ->u64 {
         let pref = page.pref();
         let page = Arc::new(page);
-        self.cache_write(pref, page);
+        self.cache(pref, page);
         self.len = max(self.len, pref.as_u64() + PAGE_SIZE as u64);
         self.len
     }
