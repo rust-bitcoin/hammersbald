@@ -73,36 +73,6 @@ impl MemTable {
         self.sip0, self.sip1)
     }
 
-    pub fn load (&mut self) -> Result<(), BCDBError>{
-        if let Some(first) = self.table_file.read_page(PRef::from(0))? {
-            let n_buckets = first.read_pref(0).as_u64() as u32;
-            self.buckets = vec!(Bucket::default(); n_buckets as usize);
-            self.dirty = Dirty::new(n_buckets as usize);
-            self.step = first.read_pref(6).as_u64() as usize;
-            self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
-            self.sip0 = first.read_u64(12);
-            self.sip1 = first.read_u64(20);
-        }
-
-        let mut link_to_bucket = HashMap::new();
-        for (n, link) in self.table_file.iter().enumerate() {
-            if link.is_valid() {
-                link_to_bucket.insert(link, n);
-            }
-        }
-        for (pos, payload) in self.link_file.payloads() {
-            if let Payload::Link(ref link) = payload {
-                if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    self.buckets[bucket].slots = link.links.clone();
-                }
-            }
-        }
-        if !link_to_bucket.is_empty() {
-            return Err(BCDBError::Corrupted(format!("could not find links for {} bucket(s)", link_to_bucket.len())));
-        }
-        Ok(())
-    }
-
     /// end current batch and start a new batch
     pub fn batch (&mut self)  -> Result<(), BCDBError> {
         debug!("batch end");
@@ -174,6 +144,36 @@ impl MemTable {
         Ok(())
     }
 
+    pub fn load (&mut self) -> Result<(), BCDBError>{
+        if let Some(first) = self.table_file.read_page(PRef::from(0))? {
+            let n_buckets = first.read_pref(0).as_u64() as u32;
+            self.buckets = vec!(Bucket::default(); n_buckets as usize);
+            self.dirty = Dirty::new(n_buckets as usize);
+            self.step = first.read_pref(6).as_u64() as usize;
+            self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
+            self.sip0 = first.read_u64(12);
+            self.sip1 = first.read_u64(20);
+        }
+
+        let mut link_to_bucket = HashMap::new();
+        for (n, link) in self.table_file.iter().enumerate() {
+            if link.is_valid() {
+                link_to_bucket.insert(link, n);
+            }
+        }
+        for (pos, payload) in self.link_file.payloads() {
+            if let Payload::Link(ref link) = payload {
+                if let Some(bucket) = link_to_bucket.remove(&pos) {
+                    self.buckets[bucket].slots = link.links.clone();
+                }
+            }
+        }
+        if !link_to_bucket.is_empty() {
+            return Err(BCDBError::Corrupted(format!("could not find links for {} bucket(s)", link_to_bucket.len())));
+        }
+        Ok(())
+    }
+
     pub fn flush (&mut self) -> Result<(), BCDBError> {
         {
             // first page
@@ -186,7 +186,6 @@ impl MemTable {
             self.table_file.update_page(page)?;
         }
         if self.dirty.is_dirty() {
-
             let dirty_iterator = DirtyIterator::new(&self.dirty);
             for (bucket_number, _) in dirty_iterator.enumerate().filter(|a| a.1) {
                 let bucket_pref= TableFile::table_offset(bucket_number);
@@ -222,8 +221,12 @@ impl MemTable {
         page
     }
 
-    pub fn buckets<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn slots<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
         BucketIterator{file: self, n:0}
+    }
+
+    pub fn buckets<'a>(&'a self) -> impl Iterator<Item=PRef> +'a {
+        self.table_file.iter()
     }
 
     pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
@@ -344,19 +347,21 @@ impl MemTable {
     pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
-        if let Some(bucket) = self.buckets.get(bucket_number) {
-            for (_, data) in bucket.slots.iter()
-                .filter(|p| p.0 == hash )
-                .rev() {
-                if let Payload::Indexed(indexed) = self.data_file.get_payload(*data)? {
-                    if indexed.key.as_slice() == key {
-                        return Ok(Some((*data, indexed.data.data, indexed.data.referred)));
+        if let Some(ref bucket) = self.buckets.get(bucket_number) {
+            for (h, data) in &bucket.slots {
+                if *h == hash {
+                    if let Payload::Indexed(indexed) = self.data_file.get_payload(*data)? {
+                        if indexed.key.as_slice() == key {
+                            return Ok(Some((*data, indexed.data.data, indexed.data.referred)));
+                        }
+                    } else {
+                        return Err(BCDBError::Corrupted("pref should point to indexed data".to_string()));
                     }
                 }
-                else {
-                    return Err(BCDBError::Corrupted("pref should point to indexed data".to_string()));
-                }
             }
+        }
+        else {
+            return Err(BCDBError::Corrupted(format!("bucket {} should exist", bucket_number)));
         }
         Ok(None)
     }

@@ -84,7 +84,12 @@ impl BCDB {
     }
 
     /// get hash table bucket iterator
-    pub fn buckets<'a> (&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn slots<'a> (&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+        self.mem.slots()
+    }
+
+    /// get hash table pointers
+    pub fn buckets<'a> (&'a self) -> impl Iterator<Item=PRef> +'a {
         self.mem.buckets()
     }
 

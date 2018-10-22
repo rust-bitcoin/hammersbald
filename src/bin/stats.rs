@@ -8,7 +8,7 @@ use bcdb::persistent::Persistent;
 use bcdb::api::BCDBFactory;
 use bcdb::api::BCDBAPI;
 
-use bcdb::format::{Payload, IndexedData, Link, Data};
+use bcdb::format::Payload;
 
 use log::Level;
 use siphasher::sip::SipHasher;
@@ -63,15 +63,38 @@ pub fn main () {
 
     let (step, log_mod, blen, tlen, dlen, llen, sip0, sip1) = db.params();
     println!("File sizes: table: {}, data: {}, links: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, llen, blen, log_mod, step);
+
+    let mut pointer = HashSet::new();
+    for bucket in db.buckets() {
+        if bucket.is_valid() {
+            pointer.insert(bucket);
+        }
+    }
+
+    let mut n_links = 0;
+    for (pos, payload) in db.links () {
+        match payload {
+            Payload::Link(_) => {
+                n_links += 1;
+                pointer.remove (&pos);
+            },
+            _ => panic!("Unexpected payload type link at {}", pos)
+        }
+    }
+    if !pointer.is_empty() {
+        panic!("{} roots point to non-existent links", pointer.len());
+    }
+
+
     let mut roots = HashMap::new();
     let mut ndata = 0;
     let mut used_buckets = 0;
-    for bucket in db.buckets() {
-        ndata += bucket.len();
-        if bucket.len() > 0 {
+    for slots in db.slots() {
+        ndata += slots.len();
+        if slots.len() > 0 {
             used_buckets += 1;
         }
-        for slot in bucket.iter() {
+        for slot in slots.iter() {
             roots.entry(slot.1).or_insert(Vec::new()).push(slot.0);
         }
     }
@@ -107,23 +130,12 @@ pub fn main () {
         }
     }
     if !roots.is_empty() {
-        panic!("ERROR {} roots point to non-existent links", roots.len());
+        panic!("ERROR {} roots point to non-existent data", roots.len());
     }
     if !referred_set.is_empty() {
         panic!("ERROR {} references point to nowhere", referred_set.len());
     }
     println!("Referred: {}", referred);
-
-    let mut n_links = 0;
-    for (pos, payload) in db.links () {
-        match payload {
-            Payload::Link(link) => {
-                n_links += 1;
-            },
-            _ => panic!("Unexpected payload type link at {}", pos)
-        }
-    }
-
     println!("Garbage: indexed: {}, referred: {}, links: {}", indexed_garbage, referred_garbage, n_links - used_buckets);
 
     db.shutdown();
