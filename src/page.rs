@@ -36,7 +36,7 @@ impl Page {
     /// create an empty page
     pub fn new (pref: PRef) -> Page {
         let mut page = Page{ content: [0u8; PAGE_SIZE] };
-        page.write_offset(PAGE_PAYLOAD_SIZE, pref);
+        page.write_pref(PAGE_PAYLOAD_SIZE, pref);
         page
     }
 
@@ -61,8 +61,8 @@ impl Page {
         buf.copy_from_slice(&self.content[pos .. pos+len])
     }
 
-    /// write an pref into the page
-    pub fn write_offset (&mut self, pos: usize, pref: PRef) {
+    /// write a pref into the page
+    pub fn write_pref(&mut self, pos: usize, pref: PRef) {
         let mut buf = [0u8; 6];
         BigEndian::write_u48(&mut buf, pref.as_u64());
         self.content[pos..pos+6].copy_from_slice(&buf[..]);

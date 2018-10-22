@@ -57,16 +57,18 @@ pub fn main () {
     db.init().unwrap();
 
     let (step, log_mod, blen, tlen, dlen) = db.params();
-    println!("table {} data {} buckets {} log_mod {} step {}", tlen, dlen, blen, log_mod, step);
+    println!("File sizes: table: {}, data: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, blen, log_mod, step);
     let mut roots = HashMap::new();
+    let mut ndata = 0;
     for bucket in db.buckets() {
         for slot in bucket.iter() {
             if slot.1.is_valid() {
                 roots.entry(slot.0).or_insert(Vec::new()).push(slot.1);
+                ndata += 1;
             }
         }
     }
-    println!("roots {}", roots.len());
+    println!("Data: indexed: {}, hash collisions {:.2} %", ndata, (1.0-(roots.len() as f32)/(ndata as f32))*100.0);
 
 
     db.shutdown();

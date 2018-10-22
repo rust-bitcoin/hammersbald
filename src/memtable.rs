@@ -88,8 +88,8 @@ impl MemTable {
         }
         for (pos, payload) in self.data_file.payloads() {
             if let Payload::Link(ref link) = payload {
-                if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    self.buckets[bucket].slots = link.links.clone();
+                if let Some(bucket) = link_to_bucket.get(&pos) {
+                    self.buckets[*bucket].slots = link.links.clone();
                 }
             }
         }
@@ -164,8 +164,8 @@ impl MemTable {
         {
             // first page
             let mut page = Page::new(PRef::from(0));
-            page.write_offset(0, PRef::from(self.buckets.len() as u64));
-            page.write_offset(6, PRef::from(self.step as u64));
+            page.write_pref(0, PRef::from(self.buckets.len() as u64));
+            page.write_pref(6, PRef::from(self.step as u64));
             page.write_u64(12, self.sip0);
             page.write_u64(20, self.sip1);
             self.table_file.update_page(page)?;
@@ -200,9 +200,9 @@ impl MemTable {
                 }
                 if let Some(ref mut page) = page {
                     if p.as_u64() == 0 {
-                        page.write_offset(FIRST_PAGE_HEAD + b * BUCKET_SIZE, link);
+                        page.write_pref(FIRST_PAGE_HEAD + b * BUCKET_SIZE, link);
                     } else {
-                        page.write_offset(b * BUCKET_SIZE, link);
+                        page.write_pref(b * BUCKET_SIZE, link);
                     }
                 }
             }
@@ -220,12 +220,12 @@ impl MemTable {
         let mut page = Page::new(pos);
         if pos.as_u64() == 0 {
             for o in 0 .. BUCKETS_FIRST_PAGE {
-                page.write_offset(FIRST_PAGE_HEAD + o*6, PRef::invalid());
+                page.write_pref(FIRST_PAGE_HEAD + o*6, PRef::invalid());
             }
         }
         else {
             for o in 0 .. BUCKETS_PER_PAGE {
-                page.write_offset(o*6, PRef::invalid());
+                page.write_pref(o*6, PRef::invalid());
             }
         }
         page
@@ -319,6 +319,9 @@ impl MemTable {
                     new_bucket_store.slots.push((*hash, *pref));
                 }
             }
+        }
+        else {
+            return Err(BCDBError::Corrupted(format!("does not have bucket {} for rehash", bucket)));
         }
         if rewrite {
             for (bucket, added) in moves {
