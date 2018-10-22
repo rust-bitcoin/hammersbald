@@ -98,6 +98,7 @@ impl PagedFileAppender {
                 wrote += space;
                 self.pos += space as u64;
                 if self.pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
+                    page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
                     self.file.append_page(page.clone())?;
                     self.pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
                 }
@@ -179,13 +180,6 @@ impl PagedFile for PagedFileAppender {
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
-        if let Some (ref page) = self.page {
-            if self.pos.in_page_pos() > 0 {
-                self.file.append_page(page.clone())?;
-                self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
-            }
-        }
-        self.pos += PAGE_SIZE as u64;
         self.file.append_page(page)
     }
 
@@ -194,8 +188,9 @@ impl PagedFile for PagedFileAppender {
     }
 
     fn flush(&mut self) -> Result<(), BCDBError> {
-        if let Some(ref page) = self.page {
+        if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
+                page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
                 self.file.append_page(page.clone())?;
                 self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
             }
