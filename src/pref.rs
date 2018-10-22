@@ -23,7 +23,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
-const INVALID: u64 = 1 << 47 - 1;
+const INVALID: u64 = 0xffffffffffff;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 /// Pointer to persistent data. Limited to 2^48
