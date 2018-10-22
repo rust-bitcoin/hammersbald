@@ -200,9 +200,9 @@ impl MemTable {
                     self.table_file.update_page(page)?;
                 }
             }
-            self.link_file.flush()?;
-            self.table_file.flush()?;
         }
+        self.link_file.flush()?;
+        self.table_file.flush()?;
         Ok(())
     }
 
