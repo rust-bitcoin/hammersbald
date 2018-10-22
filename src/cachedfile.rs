@@ -156,7 +156,7 @@ impl Cache {
         let pref = page.pref();
         let page = Arc::new(page);
         self.cache_write(pref, page);
-        self.len = max(self.len, pref.as_u64());
+        self.len = max(self.len, pref.as_u64() + PAGE_SIZE as u64);
         self.len
     }
 
