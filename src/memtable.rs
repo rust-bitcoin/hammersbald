@@ -68,8 +68,9 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn params(&self) -> (usize, u32, usize, u64, u64, u64) {
-        (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap(), self.link_file.len().unwrap())
+    pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
+        (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap(), self.link_file.len().unwrap(),
+        self.sip0, self.sip1)
     }
 
     pub fn load (&mut self) -> Result<(), BCDBError>{
@@ -85,14 +86,19 @@ impl MemTable {
 
         let mut link_to_bucket = HashMap::new();
         for (n, link) in self.table_file.iter().enumerate() {
-            link_to_bucket.insert(link, n);
+            if link.is_valid() {
+                link_to_bucket.insert(link, n);
+            }
         }
         for (pos, payload) in self.link_file.payloads() {
             if let Payload::Link(ref link) = payload {
-                if let Some(bucket) = link_to_bucket.get(&pos) {
-                    self.buckets[*bucket].slots = link.links.clone();
+                if let Some(bucket) = link_to_bucket.remove(&pos) {
+                    self.buckets[bucket].slots = link.links.clone();
                 }
             }
+        }
+        if !link_to_bucket.is_empty() {
+            return Err(BCDBError::Corrupted(format!("could not find links for {} bucket(s)", link_to_bucket.len())));
         }
         Ok(())
     }

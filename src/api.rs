@@ -42,9 +42,6 @@ pub trait BCDBAPI {
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError>;
 
-    /// get parameters
-    fn params(&self) -> (usize, u32, usize, u64, u64, u64);
-
     /// stop background writer
     fn shutdown (&mut self);
 
@@ -100,6 +97,16 @@ impl BCDB {
     pub fn links<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
         self.mem.links()
     }
+
+    /// get indexed or referred payload
+    pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
+        self.mem.get_payload(pref)
+    }
+
+    /// get db params
+    pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
+        self.mem.params()
+    }
 }
 
 impl BCDBAPI for BCDB {
@@ -112,10 +119,6 @@ impl BCDBAPI for BCDB {
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), BCDBError> {
         self.mem.batch()
-    }
-
-    fn params(&self) -> (usize, u32, usize, u64, u64, u64) {
-        self.mem.params()
     }
 
     /// stop background writer

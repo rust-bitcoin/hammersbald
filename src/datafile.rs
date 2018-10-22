@@ -144,8 +144,8 @@ impl<'f> Iterator for PayloadIterator<'f> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if self.pos.is_valid() {
+            let pos = self.pos;
             if let Ok(envelope) = self.file.read_envelope(self.pos) {
-                let pos = self.pos;
                 if pos == envelope.previous {
                     panic!("pos == envelope.previous == {}", pos);
                 }
