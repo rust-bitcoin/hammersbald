@@ -73,11 +73,11 @@ impl DataFile {
             return Err(BCDBError::Corrupted("more than 255 slots in a bucket".to_string()));
         }
         let envelope = Envelope{payload: Payload::Link(link), previous: self.appender.lep()};
+        let mut store = vec!();
+        envelope.serialize(&mut store);
         let me = self.appender.position();
-        let mut e = vec!();
-        envelope.serialize(&mut e);
         self.appender.advance();
-        self.appender.append(e.as_slice())?;
+        self.appender.append(store.as_slice())?;
         Ok(me)
     }
 
