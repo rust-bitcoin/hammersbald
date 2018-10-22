@@ -18,15 +18,15 @@
 //! Specific implementation details to hash table file
 //!
 
-use page::{Page, PAGE_SIZE};
+use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use pagedfile::PagedFile;
 use error::BCDBError;
 use pref::PRef;
 
 pub const FIRST_PAGE_HEAD:usize = 28;
-pub const BUCKETS_FIRST_PAGE:usize = 677;
-pub const BUCKETS_PER_PAGE:usize = 681;
 pub const BUCKET_SIZE: usize = 6;
+pub const BUCKETS_PER_PAGE:usize = PAGE_PAYLOAD_SIZE/BUCKET_SIZE;
+pub const BUCKETS_FIRST_PAGE:usize = (PAGE_PAYLOAD_SIZE - FIRST_PAGE_HEAD)/BUCKET_SIZE;
 
 /// The key file
 pub struct TableFile {
@@ -38,14 +38,14 @@ impl TableFile {
         Ok(TableFile {file})
     }
 
-    fn table_offset (bucket: u32) -> PRef {
+    pub fn table_offset (bucket: usize) -> PRef {
         if (bucket as u64) < BUCKETS_FIRST_PAGE as u64 {
-            PRef::from((bucket as u64 / BUCKETS_FIRST_PAGE as u64) * PAGE_SIZE as u64
-                + (bucket as u64 % BUCKETS_FIRST_PAGE as u64) * BUCKET_SIZE as u64 + FIRST_PAGE_HEAD as u64)
+            PRef::from((bucket * BUCKET_SIZE + FIRST_PAGE_HEAD) as u64)
         }
         else {
-            PRef::from((((bucket as u64 - BUCKETS_FIRST_PAGE as u64) / BUCKETS_PER_PAGE as u64) + 1) * PAGE_SIZE as u64
-                + (bucket as u64 % BUCKETS_PER_PAGE as u64) * BUCKET_SIZE as u64)
+            PRef::from(
+                ((bucket - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE + 1) as u64 * PAGE_SIZE as u64
+                + (bucket % BUCKETS_PER_PAGE) as u64 * BUCKET_SIZE as u64)
         }
     }
 
@@ -93,7 +93,7 @@ impl PagedFile for TableFile {
 
 struct BucketIterator<'a> {
     file: &'a TableFile,
-    n: u32
+    n: usize
 }
 
 impl<'a> Iterator for BucketIterator<'a> {

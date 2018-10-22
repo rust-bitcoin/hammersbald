@@ -163,7 +163,8 @@ impl MemTable {
     pub fn flush (&mut self) -> Result<(), BCDBError> {
         {
             // first page
-            let mut page = Page::new(PRef::from(0));
+            let fp = PRef::from(0);
+            let mut page = self.table_file.read_page(fp)?.unwrap_or(Self::invalid_offsets_page(fp));
             page.write_pref(0, PRef::from(self.buckets.len() as u64));
             page.write_pref(6, PRef::from(self.step as u64));
             page.write_u64(12, self.sip0);
@@ -173,43 +174,19 @@ impl MemTable {
         if self.dirty.is_dirty() {
 
             let dirty_iterator = DirtyIterator::new(&self.dirty);
-            let mut page : Option<Page> = None;
-            for (n, _) in dirty_iterator.enumerate().filter(|a| a.1) {
-                let (p, b) = if n < BUCKETS_FIRST_PAGE {
-                    (PRef::from(0), n)
-                }
-                else {
-                    (PRef::from((((n - BUCKETS_FIRST_PAGE)/BUCKETS_PER_PAGE + 1)* PAGE_SIZE) as u64),
-                        (n - BUCKETS_FIRST_PAGE)%BUCKETS_PER_PAGE)
-                };
-                let bucket = self.buckets.get(n).unwrap();
-                let link = if bucket.slots.len () > 0 {
+            for (bucket_number, _) in dirty_iterator.enumerate().filter(|a| a.1) {
+                let bucket_pref= TableFile::table_offset(bucket_number);
+                if let Some(bucket) = self.buckets.get(bucket_number) {
+                    let mut page = self.table_file.read_page(bucket_pref.this_page())?.unwrap_or(Self::invalid_offsets_page(bucket_pref.this_page()));
+                    let link = if bucket.slots.len() > 0 {
                         self.data_file.append_link(Link { links: bucket.slots.clone() })?
-                    }
-                    else {
+                    } else {
                         PRef::invalid()
                     };
-                if page.is_some() {
-                    if page.clone().unwrap().pref() != p {
-                        self.table_file.update_page(page.unwrap().clone())?;
-                        page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
-                    }
-                }
-                else {
-                    page = Some(self.table_file.read_page(p)?.unwrap_or(Self::invalid_offsets_page(p)));
-                }
-                if let Some(ref mut page) = page {
-                    if p.as_u64() == 0 {
-                        page.write_pref(FIRST_PAGE_HEAD + b * BUCKET_SIZE, link);
-                    } else {
-                        page.write_pref(b * BUCKET_SIZE, link);
-                    }
+                    page.write_pref(bucket_pref.in_page_pos(), link);
+                    self.table_file.update_page(page)?;
                 }
             }
-            if let Some(ref page) = page {
-                self.table_file.update_page(page.clone())?;
-            }
-
             self.data_file.flush()?;
             self.table_file.flush()?;
         }
@@ -220,12 +197,12 @@ impl MemTable {
         let mut page = Page::new(pos);
         if pos.as_u64() == 0 {
             for o in 0 .. BUCKETS_FIRST_PAGE {
-                page.write_pref(FIRST_PAGE_HEAD + o*6, PRef::invalid());
+                page.write_pref(FIRST_PAGE_HEAD + o*BUCKET_SIZE, PRef::invalid());
             }
         }
         else {
             for o in 0 .. BUCKETS_PER_PAGE {
-                page.write_pref(o*6, PRef::invalid());
+                page.write_pref(o*BUCKET_SIZE, PRef::invalid());
             }
         }
         page

@@ -60,16 +60,18 @@ pub fn main () {
     println!("File sizes: table: {}, data: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, blen, log_mod, step);
     let mut roots = HashMap::new();
     let mut ndata = 0;
+    let mut used_buckets = 0;
     for bucket in db.buckets() {
+        ndata += bucket.len();
+        if bucket.len() > 0 {
+            used_buckets += 1;
+        }
         for slot in bucket.iter() {
-            if slot.1.is_valid() {
-                roots.entry(slot.0).or_insert(Vec::new()).push(slot.1);
-                ndata += 1;
-            }
+            roots.entry(slot.0).or_insert(Vec::new()).push(slot.1);
         }
     }
+    println!("Used buckets: {} {} %", used_buckets, 100.0*(used_buckets as f32/blen as f32));
     println!("Data: indexed: {}, hash collisions {:.2} %", ndata, (1.0-(roots.len() as f32)/(ndata as f32))*100.0);
-
 
     db.shutdown();
 }
