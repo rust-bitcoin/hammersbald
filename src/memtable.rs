@@ -49,26 +49,27 @@ pub struct MemTable {
     log_file: LogFile,
     data_file: DataFile,
     table_file: TableFile,
+    link_file: DataFile,
 }
 
 impl MemTable {
-    pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile) -> MemTable {
+    pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile, link_file: DataFile) -> MemTable {
         let mut rng = thread_rng();
 
         MemTable {log_mod: INIT_LOGMOD as u32, step: 0,
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
-            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file}
+            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file}
     }
 
     pub fn init (&mut self) -> Result<(), BCDBError> {
-        self.log_file.init(self.data_file.len()?, self.table_file.len()?)?;
+        self.log_file.init(self.data_file.len()?, self.table_file.len()?, self.link_file.len()?)?;
         Ok(())
     }
 
-    pub fn params(&self) -> (usize, u32, usize, u64, u64) {
-        (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap())
+    pub fn params(&self) -> (usize, u32, usize, u64, u64, u64) {
+        (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap(), self.link_file.len().unwrap())
     }
 
     pub fn load (&mut self) -> Result<(), BCDBError>{
@@ -86,7 +87,7 @@ impl MemTable {
         for (n, link) in self.table_file.iter().enumerate() {
             link_to_bucket.insert(link, n);
         }
-        for (pos, payload) in self.data_file.payloads() {
+        for (pos, payload) in self.link_file.payloads() {
             if let Payload::Link(ref link) = payload {
                 if let Some(bucket) = link_to_bucket.get(&pos) {
                     self.buckets[*bucket].slots = link.links.clone();
@@ -110,13 +111,17 @@ impl MemTable {
         let table_len = self.table_file.len()?;
         debug!("table length {}", table_len);
 
+        self.link_file.sync()?;
+        let link_len = self.link_file.len()?;
+        debug!("link length {}", link_len);
+
+        self.data_file.flush()?;
         self.data_file.sync()?;
         let data_len = self.data_file.len()?;
         debug!("data length {}", data_len);
 
-
         self.log_file.reset(table_len);
-        self.log_file.init(data_len, table_len)?;
+        self.log_file.init(data_len, table_len, link_len)?;
         self.log_file.flush()?;
         self.log_file.sync()?;
 
@@ -128,6 +133,7 @@ impl MemTable {
     /// stop background writer
     pub fn shutdown (&mut self) {
         self.data_file.shutdown();
+        self.link_file.shutdown();
         self.table_file.shutdown();
         self.log_file.shutdown();
     }
@@ -136,12 +142,15 @@ impl MemTable {
         debug!("recover");
         let mut data_len = 0;
         let mut table_len = 0;
+        let mut link_len = 0;
         if let Some(page) = self.log_file.read_page(PRef::from(0))? {
             data_len = page.read_pref(0).as_u64();
             table_len = page.read_pref(6).as_u64();
+            link_len = page.read_pref(12).as_u64();
 
             self.table_file.truncate(table_len)?;
             self.data_file.truncate(data_len)?;
+            self.link_file.truncate(link_len)?;
         }
 
         if self.log_file.len()? > PAGE_SIZE as u64 {
@@ -149,10 +158,9 @@ impl MemTable {
                 self.table_file.update_page(page)?;
             }
             self.table_file.flush()?;
-
             self.table_file.sync()?;
-            self.log_file.reset(table_len);
-            self.log_file.init(data_len, table_len)?;
+
+            self.log_file.init(data_len, table_len, link_len)?;
             self.log_file.flush()?;
             self.log_file.sync()?;
         }
@@ -179,7 +187,7 @@ impl MemTable {
                 if let Some(bucket) = self.buckets.get(bucket_number) {
                     let mut page = self.table_file.read_page(bucket_pref.this_page())?.unwrap_or(Self::invalid_offsets_page(bucket_pref.this_page()));
                     let link = if bucket.slots.len() > 0 {
-                        self.data_file.append_link(Link { links: bucket.slots.clone() })?
+                        self.link_file.append_link(Link { links: bucket.slots.clone() })?
                     } else {
                         PRef::invalid()
                     };
@@ -187,7 +195,7 @@ impl MemTable {
                     self.table_file.update_page(page)?;
                 }
             }
-            self.data_file.flush()?;
+            self.link_file.flush()?;
             self.table_file.flush()?;
         }
         Ok(())
@@ -214,6 +222,10 @@ impl MemTable {
 
     pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
         self.data_file.payloads()
+    }
+
+    pub fn links<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
+        self.link_file.payloads()
     }
 
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {

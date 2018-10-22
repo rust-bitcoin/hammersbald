@@ -56,8 +56,8 @@ pub fn main () {
 
     db.init().unwrap();
 
-    let (step, log_mod, blen, tlen, dlen) = db.params();
-    println!("File sizes: table: {}, data: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, blen, log_mod, step);
+    let (step, log_mod, blen, tlen, dlen, llen) = db.params();
+    println!("File sizes: table: {}, data: {}, links: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, llen, blen, log_mod, step);
     let mut roots = HashMap::new();
     let mut ndata = 0;
     let mut used_buckets = 0;

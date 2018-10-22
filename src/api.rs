@@ -43,7 +43,7 @@ pub trait BCDBAPI {
     fn batch (&mut self)  -> Result<(), BCDBError>;
 
     /// get parameters
-    fn params(&self) -> (usize, u32, usize, u64, u64);
+    fn params(&self) -> (usize, u32, usize, u64, u64, u64);
 
     /// stop background writer
     fn shutdown (&mut self);
@@ -68,8 +68,8 @@ pub trait BCDBAPI {
 
 impl BCDB {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile) -> Result<BCDB, BCDBError> {
-        let mem = MemTable::new(log, table, data);
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile) -> Result<BCDB, BCDBError> {
+        let mem = MemTable::new(log, table, data, link);
         let mut db = BCDB { mem };
         db.recover()?;
         db.load()?;
@@ -95,6 +95,11 @@ impl BCDB {
     pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
         self.mem.payloads()
     }
+
+    /// return an iterator of all links
+    pub fn links<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
+        self.mem.links()
+    }
 }
 
 impl BCDBAPI for BCDB {
@@ -109,7 +114,7 @@ impl BCDBAPI for BCDB {
         self.mem.batch()
     }
 
-    fn params(&self) -> (usize, u32, usize, u64, u64) {
+    fn params(&self) -> (usize, u32, usize, u64, u64, u64) {
         self.mem.params()
     }
 

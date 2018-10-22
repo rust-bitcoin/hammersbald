@@ -54,6 +54,12 @@ impl BCDBFactory for Persistent {
                     Box::new(RolledFile::new(
                         name, "bc", true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
 
+        let link = DataFile::new(
+            Box::new(CachedFile::new(
+                Box::new(AsyncFile::new(
+                    Box::new(RolledFile::new(
+                        name, "bl", true, DATA_CHUNK_SIZE)?))?), cached_data_pages)?))?;
+
         let log = LogFile::new(
             Box::new(AsyncFile::new(
                 Box::new(RolledFile::new(name, "lg", true, LOG_CHUNK_SIZE)?))?));
@@ -62,7 +68,7 @@ impl BCDBFactory for Persistent {
             Box::new(CachedFile::new(
             Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?), cached_data_pages)?))?;
 
-        BCDB::new(log, table, data)
+        BCDB::new(log, table, data, link)
     }
 }
 

@@ -154,7 +154,7 @@ impl BCDBAPI for BitcoinAdapter {
         self.bcdb.batch()
     }
 
-    fn params(&self) -> (usize, u32, usize, u64, u64) {
+    fn params(&self) -> (usize, u32, usize, u64, u64, u64) {
         self.bcdb.params()
     }
 
