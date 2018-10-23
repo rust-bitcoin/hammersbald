@@ -21,7 +21,7 @@ use logfile::LogFile;
 use tablefile::TableFile;
 use datafile::DataFile;
 use memtable::MemTable;
-use format::Payload;
+use format::{Payload, Envelope};
 use error::BCDBError;
 
 /// a trait to create a new db
@@ -94,18 +94,18 @@ impl BCDB {
     }
 
     /// return an iterator of all payloads
-    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
-        self.mem.payloads()
+    pub fn data_envelopes<'a>(&'a self) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        self.mem.data_envelopes()
     }
 
     /// return an iterator of all links
-    pub fn links<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
-        self.mem.links()
+    pub fn link_envelopes<'a>(&'a self) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        self.mem.link_envelopes()
     }
 
     /// get indexed or referred payload
-    pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
-        self.mem.get_payload(pref)
+    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, BCDBError> {
+        self.mem.get_envelope(pref)
     }
 
     /// get db params
@@ -167,9 +167,10 @@ impl BCDBAPI for BCDB {
     }
 
     fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
-        match self.mem.get_payload(pref)? {
-            Payload::Referred(referred) => return Ok((vec!(), referred.data, referred.referred)),
-            Payload::Indexed(indexed) => return Ok((indexed.key, indexed.data.data, indexed.data.referred)),
+        let envelope = self.mem.get_envelope(pref)?;
+        match Payload::deserialize(envelope.payload())? {
+            Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec(), referred.referred())),
+            Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred())),
             _ => Err(BCDBError::Corrupted("referred should point to data".to_string()))
         }
     }

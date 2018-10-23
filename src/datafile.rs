@@ -54,8 +54,8 @@ impl DataFile {
     }
 
     /// return an iterator of all payloads
-    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
-        PayloadIterator::new(&self.appender, self.appender.lep())
+    pub fn envelopes<'a>(&'a self) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        EnvelopeIterator::new(&self.appender, self.appender.lep())
     }
 
     /// shutdown
@@ -64,20 +64,16 @@ impl DataFile {
     }
 
     /// get a stored content at pref
-    pub fn get_payload(&self, mut pref: PRef) -> Result<Payload, BCDBError> {
+    pub fn get_envelope(&self, mut pref: PRef) -> Result<Envelope, BCDBError> {
         let mut len = [0u8;3];
         pref = self.appender.read(pref, &mut len)?;
         let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
         self.appender.read(pref, &mut buf)?;
-        let envelope = Envelope::deseralize(buf.as_slice());
-        envelope.payload()
+        Ok(Envelope::deseralize(buf))
     }
 
     /// append link
     pub fn append_link (&mut self, link: Link) -> Result<PRef, BCDBError> {
-        if link.links.len () > 255 {
-            return Err(BCDBError::Corrupted("more than 255 slots in a bucket".to_string()));
-        }
         let mut payload = vec!();
         Payload::Link(link).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
@@ -91,7 +87,8 @@ impl DataFile {
 
     /// append indexed data
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        let indexed = IndexedData { key: key.to_vec(), data: Data{data: data.to_vec(), referred: referred.clone()} };
+        let rv = Data::from_referred(referred.as_slice());
+        let indexed = IndexedData::new(key, Data::new(data, rv.as_slice()));
 
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
@@ -106,7 +103,8 @@ impl DataFile {
 
     /// append referred data
     pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        let data = Data{data: data.to_vec(), referred: referred.clone()};
+        let rv = Data::from_referred(referred.as_slice());
+        let data = Data::new(data, rv.as_slice());
         let mut payload = vec!();
         Payload::Referred(data).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
@@ -140,33 +138,32 @@ impl DataFile {
 }
 
 /// Iterate data file content
-pub struct PayloadIterator<'f> {
+pub struct EnvelopeIterator<'f> {
     file: &'f PagedFileAppender,
     pos: PRef
 }
 
-impl<'f> PayloadIterator<'f> {
+impl<'f> EnvelopeIterator<'f> {
     /// create a new iterator
-    pub fn new (file: &'f PagedFileAppender, pos: PRef) -> PayloadIterator<'f> {
-        PayloadIterator {file, pos}
+    pub fn new (file: &'f PagedFileAppender, pos: PRef) -> EnvelopeIterator<'f> {
+        EnvelopeIterator {file, pos}
     }
 }
 
-impl<'f> Iterator for PayloadIterator<'f> {
-    type Item = (PRef, Payload);
+impl<'f> Iterator for EnvelopeIterator<'f> {
+    type Item = (PRef, Envelope);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if self.pos.is_valid() {
             let mut pos = self.pos;
+            let start = pos;
             let mut len = [0u8;3];
             pos = self.file.read(pos, &mut len).unwrap();
             let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
             self.file.read(pos, &mut buf).unwrap();
-            let envelope = Envelope::new(
-                &buf[6 .. ],
-                PRef::from(BigEndian::read_u48(&buf[0 .. 6])));
-            self.pos = envelope.previous;
-            return Some((pos, envelope.payload().unwrap()))
+            let envelope = Envelope::deseralize(buf);
+            self.pos = envelope.previous();
+            return Some((start, envelope))
         }
         None
     }

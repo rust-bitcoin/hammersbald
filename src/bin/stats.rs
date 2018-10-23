@@ -64,7 +64,6 @@ pub fn main () {
     let (step, log_mod, blen, tlen, dlen, llen, sip0, sip1) = db.params();
     println!("File sizes: table: {}, data: {}, links: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, llen, blen, log_mod, step);
 
-    println!("read buckets...");
     let mut pointer = HashSet::new();
     for bucket in db.buckets() {
         if bucket.is_valid() {
@@ -72,10 +71,9 @@ pub fn main () {
         }
     }
 
-    println!("read links...");
     let mut n_links = 0;
-    for (pos, payload) in db.links () {
-        match payload {
+    for (pos, envelope) in db.link_envelopes() {
+        match Payload::deserialize(envelope.payload()).unwrap() {
             Payload::Link(_) => {
                 n_links += 1;
                 pointer.remove (&pos);
@@ -88,7 +86,6 @@ pub fn main () {
     }
 
 
-    println!("read roots...");
     let mut roots = HashMap::new();
     let mut ndata = 0;
     let mut used_buckets = 0;
@@ -104,20 +101,19 @@ pub fn main () {
     println!("Used buckets: {} {} %", used_buckets, 100.0*(used_buckets as f32/blen as f32));
     println!("Data: indexed: {}, hash collisions {:.2} %", ndata, (1.0-(roots.len() as f32)/(ndata as f32))*100.0);
 
-    println!("read data...");
     let mut indexed_garbage = 0;
     let mut referred_garbage = 0;
     let mut referred = 0;
     let mut referred_set = HashSet::new();
-    for (pos, payload) in db.payloads() {
-        match payload {
+    for (pos, envelope) in db.data_envelopes() {
+        match Payload::deserialize(envelope.payload()).unwrap() {
             Payload::Indexed(indexed) => {
                 if let Some(root) = roots.remove(&pos) {
-                    let h = hash(indexed.key.as_slice(), sip0, sip1);
+                    let h = hash(indexed.key, sip0, sip1);
                     if root.iter().any(|hash| *hash == h) == false {
                         panic!("ERROR root {} points data with different key hash", pos);
                     }
-                    indexed.data.referred.iter().for_each(|o| {referred_set.insert(*o);});
+                    indexed.data.referred().iter().for_each(|o| {referred_set.insert(*o);});
                 } else {
                     indexed_garbage += 1;
                 }
@@ -128,7 +124,7 @@ pub fn main () {
                     referred_garbage += 1;
                 }
                 referred += 1;
-                data.referred.iter().for_each(|o| {referred_set.insert(*o);});
+                data.referred().iter().for_each(|o| {referred_set.insert(*o);});
             },
             _ => panic!("Unexpected payload type in data at {}", pos)
         }

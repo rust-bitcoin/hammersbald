@@ -19,56 +19,57 @@
 use error::BCDBError;
 use pref::PRef;
 
-use byteorder::{ReadBytesExt, WriteBytesExt, ByteOrder, BigEndian};
+use byteorder::{WriteBytesExt, ByteOrder, BigEndian};
 
-use std::io::{Write, Read, Cursor};
-use std::fmt::{Formatter, Debug, Error};
-use hex;
+use std::io::Write;
 
 /// Content envelope wrapping in data file
-pub struct Envelope<'e> {
-    /// pointer to previous entry. Useful for backward iteration
-    pub previous: PRef,
-    /// payload
-    payload: &'e [u8]
+pub struct Envelope {
+    buffer: Vec<u8>
 }
 
-impl<'e> Envelope<'e> {
+impl Envelope {
     /// create a new envelope
-    pub fn new (payload: &'e [u8], previous: PRef) -> Envelope<'e> {
-        Envelope{payload, previous}
+    pub fn new (payload: &[u8], previous: PRef) -> Envelope {
+        let mut buffer = vec!();
+        buffer.write_u48::<BigEndian>(previous.as_u64()).unwrap();
+        buffer.write(payload).unwrap();
+        Envelope{buffer}
+    }
+
+    /// previous envelope
+    pub fn previous(&self) -> PRef {
+        PRef::from(BigEndian::read_u48(&self.buffer.as_slice()[0 .. 6]))
+    }
+
+    /// envelope payload
+    pub fn payload (&self) -> &[u8] {
+        &self.buffer.as_slice()[6..]
     }
 
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
-        result.write_u24::<BigEndian>(self.payload.len() as u32 + 6).unwrap();
-        result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-        result.write(self.payload).unwrap();
+        result.write_u24::<BigEndian>(self.buffer.len() as u32).unwrap();
+        result.write(self.buffer.as_slice()).unwrap();
     }
 
     /// deserialize for storage
-    pub fn deseralize(slice: &'e [u8]) -> Envelope<'e> {
-        Envelope{payload: &slice[6 .. ], previous: PRef::from(BigEndian::read_u48(&slice[0 .. 6]))}
-    }
-
-    /// parse payload
-    pub fn payload(&self) -> Result<Payload, BCDBError> {
-        Payload::deserialize(&mut Cursor::new(self.payload))
+    pub fn deseralize(buffer: Vec<u8>) -> Envelope {
+        Envelope{buffer}
     }
 }
 
 /// payloads in the data file
-#[derive(Debug)]
-pub enum Payload {
+pub enum Payload<'e> {
     /// indexed data
-    Indexed(IndexedData),
+    Indexed(IndexedData<'e>),
     /// data
-    Referred(Data),
+    Referred(Data<'e>),
     /// hash table extension,
-    Link(Link)
+    Link(Link<'e>)
 }
 
-impl Payload {
+impl<'e> Payload<'e> {
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         match self {
@@ -88,11 +89,11 @@ impl Payload {
     }
 
     /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<Payload, BCDBError> {
-        match reader.read_u8()? {
-            0 => Ok(Payload::Indexed(IndexedData::deserialize(reader)?)),
-            1 => Ok(Payload::Referred(Data::deserialize(reader)?)),
-            2 => Ok(Payload::Link(Link::deserialize(reader)?)),
+    pub fn deserialize(slice: &'e [u8]) -> Result<Payload, BCDBError> {
+        match slice [0] {
+            0 => Ok(Payload::Indexed(IndexedData::deserialize(&slice[1..]))),
+            1 => Ok(Payload::Referred(Data::deserialize(&slice[1..]))),
+            2 => Ok(Payload::Link(Link::deserialize(&slice[1..]))),
             // Link and Table are not serialized with a type
             _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
         }
@@ -101,111 +102,119 @@ impl Payload {
 
 
 /// data that is accessible only if its position is known
-pub struct Data {
+pub struct Data<'e> {
     /// data
-    pub data: Vec<u8>,
-    /// further accessible data
-    pub referred: Vec<PRef>
+    pub data: &'e [u8],
+    /// further accessible data [PRef]
+    referred: &'e [u8]
 }
 
-impl Data {
+impl<'e> Data<'e> {
+    /// new serialize a vector of pref
+    pub fn from_referred(referred: &[PRef]) -> Vec<u8> {
+        let mut rv = vec!(0u8;referred.len()*6);
+        for (i, r) in referred.iter().enumerate() {
+            BigEndian::write_u48(&mut rv[i*6 .. i*6+6], r.as_u64());
+        }
+        rv
+    }
+
+    /// create new data
+    pub fn new(data: &'e [u8], referred: &'e [u8]) -> Data<'e> {
+        Data{data, referred}
+    }
+
+    /// get referred
+    pub fn referred(&self) -> Vec<PRef> {
+        let mut referred = vec!();
+        for i in 0 .. self.referred.len()/6 {
+            let r = PRef::from(BigEndian::read_u48(&self.referred[i*6 .. i*6+6]));
+            referred.push(r);
+        }
+        referred
+    }
+
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         result.write_u24::<BigEndian>(self.data.len() as u32).unwrap();
-        result.write(self.data.as_slice()).unwrap();
-        result.write_u16::<BigEndian>(self.referred.len() as u16).unwrap();
-        for pref in &self.referred {
-            result.write_u48::<BigEndian>(pref.as_u64()).unwrap();
-        }
+        result.write(self.data).unwrap();
+        result.write(self.referred).unwrap();
     }
 
     /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<Data, BCDBError> {
-        let data_len = reader.read_u24::<BigEndian>()? as usize;
-        let mut data = vec!(0u8; data_len);
-        reader.read(data.as_mut_slice())?;
-
-        let owned_len = reader.read_u16::<BigEndian>()? as usize;
-        let mut referred = Vec::new();
-        for _ in 0 .. owned_len {
-            referred.push(PRef::from(reader.read_u48::<BigEndian>()?));
-        }
-        Ok(Data {data, referred })
-    }
-}
-
-impl Debug for Data {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        write!(f, "data: {}, referred: {:?}", hex::encode(&self.data), self.referred)
+    pub fn deserialize(slice: &'e [u8]) -> Data {
+        let data_len = BigEndian::read_u24(&slice[0 .. 3]) as usize;
+        let data = &slice[3 .. 3+data_len];
+        let referred = &slice[3+data_len .. ];
+        Data {data, referred }
     }
 }
 
 /// data accessible with a key
-pub struct IndexedData {
+pub struct IndexedData<'e> {
     /// key
-    pub key: Vec<u8>,
+    pub key: &'e [u8],
     /// data
-    pub data: Data
+    pub data: Data<'e>
 }
 
-impl IndexedData {
+impl<'e> IndexedData<'e> {
+    /// new indexed data
+    pub fn new (key: &'e [u8], data: Data<'e>) -> IndexedData<'e> {
+        IndexedData {key, data}
+    }
+
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         result.write_u8(self.key.len() as u8).unwrap();
-        result.write(self.key.as_slice()).unwrap();
+        result.write(self.key).unwrap();
         self.data.serialize(result);
     }
 
     /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<IndexedData, BCDBError> {
-        let key_len = reader.read_u8()? as usize;
-        let mut key = vec!(0u8; key_len);
-        reader.read(key.as_mut_slice())?;
-
-        let data = Data::deserialize(reader)?;
-        Ok(IndexedData{key, data })
+    pub fn deserialize(slice: &'e [u8]) -> IndexedData<'e> {
+        let key_len = slice[0] as usize;
+        let key = &slice[1 .. key_len+1];
+        let data = Data::deserialize(&slice[key_len+1 ..]);
+        IndexedData{key, data }
     }
 }
-
-impl Debug for IndexedData {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        write!(f, "key: {} data: {:?}", hex::encode(&self.key), self.data)
-    }
-}
-
 
 /// A link to data
-pub struct Link {
+pub struct Link<'e> {
     /// slots
-    pub links: Vec<(u32, PRef)>,
+    links: &'e [u8]
 }
 
-impl Link {
-    /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
-        result.write_u8(self.links.len() as u8).unwrap();
-        for (hash, envelope) in &self.links {
-            result.write_u32::<BigEndian>(*hash).unwrap();
-            result.write_u48::<BigEndian>(envelope.as_u64()).unwrap();
+impl<'e> Link<'e> {
+    /// serialize slots
+    pub fn from_slots(slots: &[(u32, PRef)]) -> Vec<u8> {
+        let mut links = vec!(0u8;10*slots.len());
+        for (i, slot) in slots.iter().enumerate() {
+            BigEndian::write_u32(&mut links[i*10 .. i*10+4], slot.0);
+            BigEndian::write_u48(&mut links[i*10+4 .. i*10+10], slot.1.as_u64());
         }
+        links
+    }
+
+    /// get slots
+    pub fn slots(&self) -> Vec<(u32, PRef)> {
+        let mut slots = vec!();
+        for i in 0 .. self.links.len()/10 {
+            let hash = BigEndian::read_u32(&self.links[i*10..i*10+4]);
+            let pref = PRef::from(BigEndian::read_u48(&self.links[i*10+4..i*10+10]));
+            slots.push((hash, pref));
+        }
+        slots
+    }
+
+    /// serialize for storage
+    pub fn serialize (&self, write: &mut Write) {
+        write.write(&self.links).unwrap();
     }
 
     /// deserialize from storage
-    pub fn deserialize(reader: &mut Read) -> Result<Link, BCDBError> {
-        let len = reader.read_u8()?;
-        let mut links = vec!();
-        for _ in 0 .. len {
-            let hash = reader.read_u32::<BigEndian>()?;
-            let envelope = PRef::from(reader.read_u48::<BigEndian>()?);
-            links.push((hash, envelope));
-        }
-
-        Ok(Link{links})
-    }
-}
-
-impl Debug for Link {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        write!(f, "{:?}", self.links)
+    pub fn deserialize(slice: &'e [u8]) -> Link<'e> {
+        Link{links: slice}
     }
 }

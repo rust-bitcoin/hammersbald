@@ -25,7 +25,7 @@ use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE
 use logfile::LogFile;
 use page::PAGE_SIZE;
 use pagedfile::PagedFile;
-use format::{Link, Payload};
+use format::{Link, Payload, Envelope};
 use page::Page;
 
 use siphasher::sip::SipHasher;
@@ -161,10 +161,10 @@ impl MemTable {
                 link_to_bucket.insert(link, n);
             }
         }
-        for (pos, payload) in self.link_file.payloads() {
-            if let Payload::Link(ref link) = payload {
+        for (pos, envelope) in self.link_file.envelopes() {
+            if let Payload::Link(ref link) = Payload::deserialize(envelope.payload())? {
                 if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    self.buckets[bucket].slots = link.links.clone();
+                    self.buckets[bucket].slots = link.slots();
                 }
             }
         }
@@ -192,7 +192,8 @@ impl MemTable {
                 if let Some(bucket) = self.buckets.get(bucket_number) {
                     let mut page = self.table_file.read_page(bucket_pref.this_page())?.unwrap_or(Self::invalid_offsets_page(bucket_pref.this_page()));
                     let link = if bucket.slots.len() > 0 {
-                        self.link_file.append_link(Link { links: bucket.slots.clone() })?
+                        let slots = Link::from_slots(bucket.slots.as_slice());
+                        self.link_file.append_link(Link::deserialize(slots.as_slice()))?
                     } else {
                         PRef::invalid()
                     };
@@ -229,12 +230,12 @@ impl MemTable {
         self.table_file.iter()
     }
 
-    pub fn payloads<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
-        self.data_file.payloads()
+    pub fn data_envelopes<'a>(&'a self) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        self.data_file.envelopes()
     }
 
-    pub fn links<'a>(&'a self) -> impl Iterator<Item=(PRef, Payload)> +'a {
-        self.link_file.payloads()
+    pub fn link_envelopes<'a>(&'a self) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        self.link_file.envelopes()
     }
 
     pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
@@ -245,8 +246,8 @@ impl MemTable {
         self.data_file.append_referred(data, referred)
     }
 
-    pub fn get_payload(&self, pref: PRef) -> Result<Payload, BCDBError> {
-        self.data_file.get_payload(pref)
+    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, BCDBError> {
+        self.data_file.get_envelope(pref)
     }
 
     pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), BCDBError>{
@@ -280,8 +281,9 @@ impl MemTable {
             let mut remove = None;
             for (n, (_, pref)) in bucket.slots.iter().enumerate()
                 .filter(|s| (s.1).0 == hash) {
-                if let Payload::Indexed(indexed) = self.data_file.get_payload(*pref)? {
-                    if indexed.key.as_slice() == key {
+                let envelope = self.data_file.get_envelope(*pref)?;
+                if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
+                    if indexed.key == key {
                         remove = Some(n);
                     }
                 }
@@ -350,9 +352,10 @@ impl MemTable {
         if let Some(ref bucket) = self.buckets.get(bucket_number) {
             for (h, data) in &bucket.slots {
                 if *h == hash {
-                    if let Payload::Indexed(indexed) = self.data_file.get_payload(*data)? {
-                        if indexed.key.as_slice() == key {
-                            return Ok(Some((*data, indexed.data.data, indexed.data.referred)));
+                    let envelope = self.data_file.get_envelope(*data)?;
+                    if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
+                        if indexed.key == key {
+                            return Ok(Some((*data, indexed.data.data.to_vec(), indexed.data.referred())));
                         }
                     } else {
                         return Err(BCDBError::Corrupted("pref should point to indexed data".to_string()));
