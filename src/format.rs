@@ -19,34 +19,41 @@
 use error::BCDBError;
 use pref::PRef;
 
-use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+use byteorder::{ReadBytesExt, WriteBytesExt, ByteOrder, BigEndian};
 
-use std::io::{Write, Read};
+use std::io::{Write, Read, Cursor};
 use std::fmt::{Formatter, Debug, Error};
 use hex;
 
 /// Content envelope wrapping in data file
-pub struct Envelope {
+pub struct Envelope<'e> {
     /// pointer to previous entry. Useful for backward iteration
     pub previous: PRef,
     /// payload
-    pub payload: Payload
+    payload: &'e [u8]
 }
 
-impl Envelope {
+impl<'e> Envelope<'e> {
+    /// create a new envelope
+    pub fn new (payload: &'e [u8], previous: PRef) -> Envelope<'e> {
+        Envelope{payload, previous}
+    }
+
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
+        result.write_u24::<BigEndian>(self.payload.len() as u32 + 6).unwrap();
         result.write_u48::<BigEndian>(self.previous.as_u64()).unwrap();
-        let mut payload = vec!();
-        self.payload.serialize(&mut payload);
-        result.write(payload.as_slice()).unwrap();
-
+        result.write(self.payload).unwrap();
     }
 
     /// deserialize for storage
-    pub fn deseralize(reader: &mut Read) -> Result<Envelope, BCDBError> {
-        let previous = PRef::from(reader.read_u48::<BigEndian>()?);
-        Ok(Envelope{payload: Payload::deserialize(reader)?, previous})
+    pub fn deseralize(slice: &'e [u8]) -> Envelope<'e> {
+        Envelope{payload: &slice[6 .. ], previous: PRef::from(BigEndian::read_u48(&slice[0 .. 6]))}
+    }
+
+    /// parse payload
+    pub fn payload(&self) -> Result<Payload, BCDBError> {
+        Payload::deserialize(&mut Cursor::new(self.payload))
     }
 }
 

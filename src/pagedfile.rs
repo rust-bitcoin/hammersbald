@@ -20,11 +20,8 @@
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use error::BCDBError;
 use pref::PRef;
-use format::Envelope;
 
 use std::cmp::min;
-use std::io::Read;
-use std::io::Error;
 
 /// a paged file
 pub trait PagedFile {
@@ -82,10 +79,6 @@ impl PagedFileAppender {
         self.lep = self.pos;
     }
 
-    pub fn read_envelope(&self, pref: PRef) -> Result<Envelope, BCDBError> {
-        Envelope::deseralize(&mut AppenderReader{appender: self, pos: pref})
-    }
-
     pub fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError> {
         let mut wrote = 0;
         while wrote < buf.len() {
@@ -127,18 +120,6 @@ impl PagedFileAppender {
             }
         }
         Ok(pos)
-    }
-}
-
-struct AppenderReader<'a> {
-    pub appender: &'a PagedFileAppender,
-    pub pos: PRef
-}
-
-impl<'a> Read for AppenderReader<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
-        self.pos = self.appender.read(self.pos, buf)?;
-        Ok(buf.len())
     }
 }
 
