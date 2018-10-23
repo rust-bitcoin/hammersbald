@@ -20,7 +20,7 @@
 
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use pagedfile::PagedFile;
-use error::BCDBError;
+use error::HammersbaldError;
 use pref::PRef;
 
 pub const FIRST_PAGE_HEAD:usize = 28;
@@ -34,7 +34,7 @@ pub struct TableFile {
 }
 
 impl TableFile {
-    pub fn new (file: Box<PagedFile>) -> Result<TableFile, BCDBError> {
+    pub fn new (file: Box<PagedFile>) -> Result<TableFile, HammersbaldError> {
         Ok(TableFile {file})
     }
 
@@ -55,38 +55,38 @@ impl TableFile {
 }
 
 impl PagedFile for TableFile {
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         self.file.flush()
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         self.file.sync()
     }
 
     fn shutdown (&mut self) {}
 
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         if let Some(page) = self.file.read_page(pref)? {
             if page.pref() != pref {
-                return Err(BCDBError::Corrupted(format!("table page {} does not have the pref of its position", pref)));
+                return Err(HammersbaldError::Corrupted(format!("table page {} does not have the pref of its position", pref)));
             }
             return Ok(Some(page));
         }
         Ok(None)
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, _: Page) -> Result<(), HammersbaldError> {
         unimplemented!()
     }
-    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         self.file.update_page(page)
     }
 }

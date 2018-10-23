@@ -21,7 +21,7 @@
 use page::Page;
 use pagedfile::PagedFile;
 
-use error::BCDBError;
+use error::HammersbaldError;
 use pref::PRef;
 
 use std::sync::{Mutex, Arc, Condvar};
@@ -42,7 +42,7 @@ struct AsyncFileInner {
 }
 
 impl AsyncFileInner {
-    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, BCDBError> {
+    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, HammersbaldError> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
             queue: Mutex::new(VecDeque::new())})
@@ -50,7 +50,7 @@ impl AsyncFileInner {
 }
 
 impl AsyncFile {
-    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFile, BCDBError> {
+    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFile, HammersbaldError> {
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::spawn(move || { AsyncFile::background(inner2) });
@@ -73,19 +73,19 @@ impl AsyncFile {
 }
 
 impl PagedFile for AsyncFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         self.inner.file.lock().unwrap().read_page(pref)
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         self.inner.file.lock().unwrap().len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         self.inner.file.lock().unwrap().truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         self.inner.file.lock().unwrap().sync()
     }
 
@@ -100,18 +100,18 @@ impl PagedFile for AsyncFile {
         self.inner.run.store(false, Ordering::Release)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
         queue.push_back(page);
         self.inner.work.notify_one();
         Ok(())
     }
 
-    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
         unimplemented!()
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
         self.inner.work.notify_one();
         while !queue.is_empty() {

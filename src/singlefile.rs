@@ -18,7 +18,7 @@
 //!
 //!
 
-use error::BCDBError;
+use error::HammersbaldError;
 use pagedfile::PagedFile;
 use page::{PAGE_SIZE, Page};
 use pref::PRef;
@@ -37,22 +37,22 @@ pub struct SingleFile {
 
 impl SingleFile {
     #[allow(unused)]
-    pub fn new (mut file: File) -> Result<SingleFile, BCDBError> {
+    pub fn new (mut file: File) -> Result<SingleFile, HammersbaldError> {
         let len = file.seek(SeekFrom::End(0))?;
         Ok(SingleFile{file: Mutex::new(file), base: 0, len, chunk_size: 1 << 47})
     }
 
-    pub fn new_chunk (mut file: File, base: u64, chunk_size: u64) -> Result<SingleFile, BCDBError> {
+    pub fn new_chunk (mut file: File, base: u64, chunk_size: u64) -> Result<SingleFile, HammersbaldError> {
         let len = file.seek(SeekFrom::End(0))?;
         Ok(SingleFile{file: Mutex::new(file), base, len, chunk_size})
     }
 }
 
 impl PagedFile for SingleFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         let o = pref.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
-            return Err(BCDBError::Corrupted("read from wrong file".to_string()));
+            return Err(HammersbaldError::Corrupted("read from wrong file".to_string()));
         }
         let pos = o - self.base;
         if pos >= self.len {
@@ -66,32 +66,32 @@ impl PagedFile for SingleFile {
         Ok(Some(Page::from_buf(buffer)))
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         Ok(self.len)
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         self.len = new_len;
         Ok(self.file.lock().unwrap().set_len(new_len)?)
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         Ok(self.file.lock().unwrap().sync_data()?)
     }
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut file = self.file.lock().unwrap();
         file.write(&page.into_buf())?;
         self.len += PAGE_SIZE as u64;
         Ok(())
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         let o = page.pref().as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
-            return Err(BCDBError::Corrupted("write to wrong file".to_string()));
+            return Err(HammersbaldError::Corrupted("write to wrong file".to_string()));
         }
         let pos = o - self.base;
 
@@ -102,7 +102,7 @@ impl PagedFile for SingleFile {
         Ok(self.len)
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         Ok(self.file.lock().unwrap().flush()?)
     }
 }

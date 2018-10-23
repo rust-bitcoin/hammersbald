@@ -14,9 +14,9 @@
 // limitations under the License.
 //
 //!
-//! # Blockchain store
+//! # Hammersbald Blockchain store
 //!
-//! A very fast persistent blockchain store and a convenience library for blockchain in-memory cache.
+//! A very fast persistent blockchain store
 //!
 
 #![deny(non_upper_case_globals)]

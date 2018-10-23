@@ -18,7 +18,7 @@
 //!
 //! A file that is split into chunks
 //!
-use error::BCDBError;
+use error::HammersbaldError;
 use pref::PRef;
 use page::{Page, PAGE_SIZE};
 use pagedfile::PagedFile;
@@ -39,13 +39,13 @@ pub struct RolledFile {
 }
 
 impl RolledFile {
-    pub fn new (name: &str, extension: &str, append_only: bool, chunk_size: u64) -> Result<RolledFile, BCDBError> {
+    pub fn new (name: &str, extension: &str, append_only: bool, chunk_size: u64) -> Result<RolledFile, HammersbaldError> {
         let mut rolled = RolledFile { name: name.to_string(), extension: extension.to_string(), files: HashMap::new(), len: 0, append_only, chunk_size};
         rolled.open()?;
         Ok(rolled)
     }
 
-    fn open (&mut self) -> Result<(), BCDBError> {
+    fn open (&mut self) -> Result<(), HammersbaldError> {
 
         // interesting file names are:
         // name.index.extension
@@ -86,7 +86,7 @@ impl RolledFile {
             }
         }
         else {
-            return Err(BCDBError::Corrupted("invalid db name".to_string()));
+            return Err(HammersbaldError::Corrupted("invalid db name".to_string()));
         }
         if let Some (file) = self.files.get(&highest_chunk) {
             self.len = highest_chunk as u64 * self.chunk_size + file.len()?;
@@ -94,7 +94,7 @@ impl RolledFile {
         Ok(())
     }
 
-    fn open_file (append: bool, path: String) -> Result<File, BCDBError> {
+    fn open_file (append: bool, path: String) -> Result<File, HammersbaldError> {
         let mut open_mode = OpenOptions::new();
 
         if append {
@@ -108,7 +108,7 @@ impl RolledFile {
 }
 
 impl PagedFile for RolledFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         let chunk = (pref.as_u64() / self.chunk_size) as u16;
         if let Some(file) = self.files.get(&chunk) {
             return file.read_page(pref);
@@ -116,13 +116,13 @@ impl PagedFile for RolledFile {
         Ok(None)
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         Ok(self.len)
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         if new_len % PAGE_SIZE as u64 != 0 {
-            return Err(BCDBError::Corrupted(format!("truncate not to page boundary {}", new_len)));
+            return Err(HammersbaldError::Corrupted(format!("truncate not to page boundary {}", new_len)));
         }
         let chunk = (new_len / self.chunk_size) as u16;
         for (c, file) in &mut self.files {
@@ -137,7 +137,7 @@ impl PagedFile for RolledFile {
         Ok(())
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         for file in self.files.values() {
             file.sync()?;
         }
@@ -146,7 +146,7 @@ impl PagedFile for RolledFile {
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let chunk = (self.len / self.chunk_size) as u16;
 
         if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
@@ -161,11 +161,11 @@ impl PagedFile for RolledFile {
             return Ok(())
         }
         else {
-            return Err(BCDBError::Corrupted(format!("missing chunk in append {}", chunk)));
+            return Err(HammersbaldError::Corrupted(format!("missing chunk in append {}", chunk)));
         }
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         let n_offset = page.pref().as_u64();
         let chunk = (n_offset / self.chunk_size) as u16;
 
@@ -179,11 +179,11 @@ impl PagedFile for RolledFile {
             self.len = file.update_page(page)?  + chunk as u64 * self.chunk_size;
             Ok(self.len)
         } else {
-            return Err(BCDBError::Corrupted(format!("missing chunk in write {}", chunk)));
+            return Err(HammersbaldError::Corrupted(format!("missing chunk in write {}", chunk)));
         }
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         for file in &mut self.files.values_mut() {
             file.flush()?;
         }

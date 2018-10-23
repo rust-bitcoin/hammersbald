@@ -18,9 +18,9 @@
 //!
 //! Implements in-memory Read and Write for tests
 
-use error::BCDBError;
+use error::HammersbaldError;
 use logfile::LogFile;
-use api::{BCDBFactory, BCDB};
+use api::{HammersbaldFactory, Hammersbald};
 use tablefile::TableFile;
 use datafile::DataFile;
 use pref::PRef;
@@ -55,8 +55,8 @@ impl Transient {
     }
 }
 
-impl BCDBFactory for Transient {
-    fn new_db (_name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError> {
+impl HammersbaldFactory for Transient {
+    fn new_db (_name: &str, cached_data_pages: usize) -> Result<Hammersbald, HammersbaldError> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));
@@ -71,12 +71,12 @@ impl BCDBFactory for Transient {
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
                 cached_data_pages)?))?;
-        BCDB::new(log, table, data, link)
+        Hammersbald::new(log, table, data, link)
     }
 }
 
 impl PagedFile for Transient {
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         let mut inner = self.inner.lock().unwrap();
         let mut buffer = [0u8; PAGE_SIZE];
         let len = inner.seek(SeekFrom::End(0))?;
@@ -88,39 +88,39 @@ impl PagedFile for Transient {
         Ok(Some(Page::from_buf(buffer)))
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.data.len() as u64)
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, len: u64) -> Result<(), HammersbaldError> {
         if len % PAGE_SIZE as u64 != 0 {
-            return Err(BCDBError::Corrupted(format!("truncate not to page boundary {}", len)));
+            return Err(HammersbaldError::Corrupted(format!("truncate not to page boundary {}", len)));
         }
         let mut inner = self.inner.lock().unwrap();
         inner.data.truncate(len as usize);
         Ok(())
     }
 
-    fn sync(&self) -> Result<(), BCDBError> { Ok(()) }
+    fn sync(&self) -> Result<(), HammersbaldError> { Ok(()) }
 
     fn shutdown (&mut self) {
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.into_buf())?;
         Ok(())
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(page.pref().as_u64()))?;
         inner.write(&page.into_buf())?;
         Ok(inner.data.len() as u64)
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {Ok(())}
+    fn flush(&mut self) -> Result<(), HammersbaldError> {Ok(())}
 }
 
 impl Read for Inner {

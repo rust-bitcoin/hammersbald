@@ -21,7 +21,7 @@
 use page::{PAGE_PAYLOAD_SIZE, PAGE_SIZE};
 use pagedfile::{PagedFile, PagedFileAppender};
 use format::{Envelope, Payload, Data, IndexedData, Link};
-use error::BCDBError;
+use error::HammersbaldError;
 use pref::PRef;
 
 use byteorder::{ByteOrder, BigEndian};
@@ -33,10 +33,10 @@ pub struct DataFile {
 
 impl DataFile {
     /// create new file
-    pub fn new(file: Box<PagedFile>) -> Result<DataFile, BCDBError> {
+    pub fn new(file: Box<PagedFile>) -> Result<DataFile, HammersbaldError> {
         let len = file.len()?;
         if len % PAGE_SIZE as u64 != 0 {
-            return Err(BCDBError::Corrupted("data file does not end at page boundary".to_string()));
+            return Err(HammersbaldError::Corrupted("data file does not end at page boundary".to_string()));
         }
         if len >= PAGE_SIZE as u64 {
             if let Some(last) = file.read_page(PRef::from(len - PAGE_SIZE as u64))? {
@@ -44,7 +44,7 @@ impl DataFile {
                 return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len), lep)});
             }
             else {
-                Err(BCDBError::Corrupted("missing first data page".to_string()))
+                Err(HammersbaldError::Corrupted("missing first data page".to_string()))
             }
         }
         else {
@@ -58,13 +58,18 @@ impl DataFile {
         EnvelopeIterator::new(&self.appender, self.appender.lep())
     }
 
+    /// iterate backward through references
+    pub fn dag<'a>(&'a self, root: PRef) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        DagIterator::new(&self.appender, root)
+    }
+
     /// shutdown
     pub fn shutdown (&mut self) {
         self.appender.shutdown()
     }
 
     /// get a stored content at pref
-    pub fn get_envelope(&self, mut pref: PRef) -> Result<Envelope, BCDBError> {
+    pub fn get_envelope(&self, mut pref: PRef) -> Result<Envelope, HammersbaldError> {
         let mut len = [0u8;3];
         pref = self.appender.read(pref, &mut len)?;
         let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
@@ -73,7 +78,7 @@ impl DataFile {
     }
 
     /// append link
-    pub fn append_link (&mut self, link: Link) -> Result<PRef, BCDBError> {
+    pub fn append_link (&mut self, link: Link) -> Result<PRef, HammersbaldError> {
         let mut payload = vec!();
         Payload::Link(link).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
@@ -86,7 +91,7 @@ impl DataFile {
     }
 
     /// append indexed data
-    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
+    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
         let rv = Data::from_referred(referred.as_slice());
         let indexed = IndexedData::new(key, Data::new(data, rv.as_slice()));
 
@@ -102,7 +107,7 @@ impl DataFile {
     }
 
     /// append referred data
-    pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
+    pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
         let rv = Data::from_referred(referred.as_slice());
         let data = Data::new(data, rv.as_slice());
         let mut payload = vec!();
@@ -117,22 +122,22 @@ impl DataFile {
     }
 
     /// truncate file
-    pub fn truncate(&mut self, pref: u64) -> Result<(), BCDBError> {
+    pub fn truncate(&mut self, pref: u64) -> Result<(), HammersbaldError> {
         self.appender.truncate (pref)
     }
 
     /// flush buffers
-    pub fn flush (&mut self) -> Result<(), BCDBError> {
+    pub fn flush (&mut self) -> Result<(), HammersbaldError> {
         self.appender.flush()
     }
 
     /// sync file on file system
-    pub fn sync (&self) -> Result<(), BCDBError> {
+    pub fn sync (&self) -> Result<(), HammersbaldError> {
         self.appender.sync()
     }
 
     /// get file length
-    pub fn len (&self) -> Result<u64, BCDBError> {
+    pub fn len (&self) -> Result<u64, HammersbaldError> {
         self.appender.len()
     }
 }
@@ -155,6 +160,39 @@ impl<'f> Iterator for EnvelopeIterator<'f> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if self.pos.is_valid() {
+            let mut pos = self.pos;
+            let start = pos;
+            let mut len = [0u8;3];
+            pos = self.file.read(pos, &mut len).unwrap();
+            let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
+            self.file.read(pos, &mut buf).unwrap();
+            let envelope = Envelope::deseralize(buf);
+            self.pos = envelope.previous();
+            return Some((start, envelope))
+        }
+        None
+    }
+}
+
+/// Iterate data file content
+pub struct DagIterator<'f> {
+    file: &'f PagedFileAppender,
+    pos: PRef
+}
+
+impl<'f> DagIterator<'f> {
+    /// create a new iterator
+    pub fn new (file: &'f PagedFileAppender, pos: PRef) -> DagIterator<'f> {
+        DagIterator {file, pos}
+    }
+}
+
+impl<'f> Iterator for DagIterator<'f> {
+    type Item = (PRef, Envelope);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if self.pos.is_valid() {
+            // TODO follow references
             let mut pos = self.pos;
             let start = pos;
             let mut len = [0u8;3];

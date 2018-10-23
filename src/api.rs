@@ -22,25 +22,25 @@ use tablefile::TableFile;
 use datafile::DataFile;
 use memtable::MemTable;
 use format::{Payload, Envelope};
-use error::BCDBError;
+use error::HammersbaldError;
 
 /// a trait to create a new db
-pub trait BCDBFactory {
+pub trait HammersbaldFactory {
     /// create a new db
-    fn new_db (name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError>;
+    fn new_db (name: &str, cached_data_pages: usize) -> Result<Hammersbald, HammersbaldError>;
 }
 
 /// The blockchain db
-pub struct BCDB {
+pub struct Hammersbald {
     mem: MemTable
 }
 
 /// public API to the blockchain db
-pub trait BCDBAPI {
+pub trait HammersbaldAPI {
     /// initialize a db
-    fn init (&mut self) -> Result<(), BCDBError>;
+    fn init (&mut self) -> Result<(), HammersbaldError>;
     /// end current batch and start a new batch
-    fn batch (&mut self)  -> Result<(), BCDBError>;
+    fn batch (&mut self)  -> Result<(), HammersbaldError>;
 
     /// stop background writer
     fn shutdown (&mut self);
@@ -48,26 +48,26 @@ pub trait BCDBAPI {
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
     /// returns the pref the data was stored
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError>;
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError>;
 
     /// retrieve single data by key
     /// returns (pref, data, referred)
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError>;
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, HammersbaldError>;
 
     /// store referred data
     /// returns the pref the data was stored
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError>;
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError>;
 
     /// get data
     /// returns (key, data, referred)
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError>;
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError>;
 }
 
-impl BCDB {
+impl Hammersbald {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile) -> Result<BCDB, BCDBError> {
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile) -> Result<Hammersbald, HammersbaldError> {
         let mem = MemTable::new(log, table, data, link);
-        let mut db = BCDB { mem };
+        let mut db = Hammersbald { mem };
         db.recover()?;
         db.load()?;
         db.batch()?;
@@ -75,11 +75,11 @@ impl BCDB {
     }
 
     /// load memtable
-    fn load(&mut self) -> Result<(), BCDBError> {
+    fn load(&mut self) -> Result<(), HammersbaldError> {
         self.mem.load()
     }
 
-    fn recover(&mut self) -> Result<(), BCDBError> {
+    fn recover(&mut self) -> Result<(), HammersbaldError> {
         self.mem.recover()
     }
 
@@ -104,7 +104,7 @@ impl BCDB {
     }
 
     /// get indexed or referred payload
-    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, BCDBError> {
+    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, HammersbaldError> {
         self.mem.get_envelope(pref)
     }
 
@@ -112,17 +112,22 @@ impl BCDB {
     pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
         self.mem.params()
     }
+
+    /// iterator for a DAG
+    fn dag<'a>(&'a self, root: PRef) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+        self.mem.dag(root)
+    }
 }
 
-impl BCDBAPI for BCDB {
+impl HammersbaldAPI for Hammersbald {
     /// initialize a db
-    fn init (&mut self) -> Result<(), BCDBError> {
+    fn init (&mut self) -> Result<(), HammersbaldError> {
         self.mem.init()
     }
 
 
     /// end current batch and start a new batch
-    fn batch (&mut self)  -> Result<(), BCDBError> {
+    fn batch (&mut self)  -> Result<(), HammersbaldError> {
         self.mem.batch()
     }
 
@@ -133,45 +138,45 @@ impl BCDBAPI for BCDB {
 
     /// store data with a key
     /// storing with the same key makes previous data unaddressable
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
-                return Err(BCDBError::ForwardReference);
+                return Err(HammersbaldError::ForwardReference);
             }
         }
         let data_offset = self.mem.append_data(key, data, referred)?;
         #[cfg(debug_assertions)]
         {
             if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
-                return Err(BCDBError::ForwardReference);
+                return Err(HammersbaldError::ForwardReference);
             }
         }
         self.mem.put(key, data_offset)?;
         Ok(data_offset)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, HammersbaldError> {
         self.mem.get(key)
     }
 
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
         let data_offset = self.mem.append_referred(data, referred)?;
         #[cfg(debug_assertions)]
         {
             if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
-                return Err(BCDBError::ForwardReference);
+                return Err(HammersbaldError::ForwardReference);
             }
         }
         Ok(data_offset)
     }
 
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError> {
         let envelope = self.mem.get_envelope(pref)?;
         match Payload::deserialize(envelope.payload())? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec(), referred.referred())),
             Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred())),
-            _ => Err(BCDBError::Corrupted("referred should point to data".to_string()))
+            _ => Err(HammersbaldError::Corrupted("referred should point to data".to_string()))
         }
     }
 }

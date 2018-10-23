@@ -20,7 +20,7 @@
 use page::{Page, PAGE_SIZE};
 use pagedfile::PagedFile;
 use pref::PRef;
-use error::BCDBError;
+use error::HammersbaldError;
 
 use std::collections::{HashMap,VecDeque};
 use std::sync::{Arc, RwLock};
@@ -38,14 +38,14 @@ pub struct CachedFile {
 
 impl CachedFile {
     /// create a read cached file with a page cache of given size
-    pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, BCDBError> {
+    pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, HammersbaldError> {
         let len = file.len()?;
         Ok(CachedFile{file, cache: RwLock::new(Cache::new(len, min(MAX_CACHE,pages)))})
     }
 }
 
 impl PagedFile for CachedFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         {
             let cache = self.cache.read().unwrap();
             if let Some(page) = cache.get(pref) {
@@ -63,16 +63,16 @@ impl PagedFile for CachedFile {
         Ok(None)
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         self.cache.write().unwrap().reset_len(new_len);
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         self.file.sync()
     }
 
@@ -80,20 +80,20 @@ impl PagedFile for CachedFile {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut cache = self.cache.write().unwrap();
         cache.append(page.clone());
         self.file.append_page(page)
 
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         let mut cache = self.cache.write().unwrap();
         cache.update(page.clone());
         self.file.update_page(page)
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         self.cache.write().unwrap().clear();
         self.file.flush()
     }

@@ -17,9 +17,9 @@
 //! # Bitcoin specific use of this blockchain db
 //!
 
-use api::{BCDB, BCDBAPI};
+use api::{Hammersbald, HammersbaldAPI};
 use pref::PRef;
-use error::BCDBError;
+use error::HammersbaldError;
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
 use bitcoin::blockdata::transaction::Transaction;
@@ -34,23 +34,23 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use std::io::Cursor;
 
 struct BitcoinAdapter {
-    bcdb: BCDB
+    hammersbald: Hammersbald
 }
 
 #[allow(dead_code)]
 impl BitcoinAdapter {
-    pub fn new(bcdb: BCDB) -> BitcoinAdapter {
-        BitcoinAdapter { bcdb }
+    pub fn new(hammersbald: Hammersbald) -> BitcoinAdapter {
+        BitcoinAdapter { hammersbald }
     }
 
-    pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<PRef, BCDBError> {
+    pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<PRef, HammersbaldError> {
         let mut referred = vec!();
         if header.prev_blockhash != Sha256dHash::default() {
-            if let Some((ph, _, _)) = self.bcdb.get(&header.prev_blockhash.data()[..])? {
+            if let Some((ph, _, _)) = self.hammersbald.get(&header.prev_blockhash.data()[..])? {
                 referred.push(ph);
             }
             else {
-                return Err(BCDBError::Corrupted("unconnected header".to_string()));
+                return Err(HammersbaldError::Corrupted("unconnected header".to_string()));
             }
         }
         let key = header.bitcoin_hash().data();
@@ -58,17 +58,17 @@ impl BitcoinAdapter {
         serialized_header.write_u48::<BigEndian>(PRef::invalid().as_u64())?; // no transactions
         serialized_header.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
-            let pref = self.bcdb.put_referred(d.as_slice(), &vec!())?;
+            let pref = self.hammersbald.put_referred(d.as_slice(), &vec!())?;
             serialized_header.write_u48::<BigEndian>(pref.as_u64())?;
             referred.push(pref);
         }
-        self.bcdb.put(&key[..], serialized_header.as_slice(), &referred)
+        self.hammersbald.put(&key[..], serialized_header.as_slice(), &referred)
     }
 
     /// Fetch a header by its id
-    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, BCDBError> {
+    pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, HammersbaldError> {
         let key = id.data();
-        if let Some((_,stored,_)) = self.bcdb.get(&key)? {
+        if let Some((_,stored,_)) = self.hammersbald.get(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             PRef::from(data.read_u48::<BigEndian>()?); // do not care of transaction
@@ -76,7 +76,7 @@ impl BitcoinAdapter {
             let mut extension = Vec::new();
             for _ in 0 .. next {
                 let pref = PRef::from(data.read_u48::<BigEndian>()?);
-                let (_, e, _) = self.bcdb.get_referred(pref)?;
+                let (_, e, _) = self.hammersbald.get_referred(pref)?;
                 extension.push(e);
             }
 
@@ -86,48 +86,48 @@ impl BitcoinAdapter {
     }
 
     /// insert a block
-    pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<PRef, BCDBError> {
+    pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<PRef, HammersbaldError> {
         let mut referred = vec!();
         if block.header.prev_blockhash != Sha256dHash::default() {
-            if let Some((ph, _, _)) = self.bcdb.get(&block.header.prev_blockhash.data()[..])? {
+            if let Some((ph, _, _)) = self.hammersbald.get(&block.header.prev_blockhash.data()[..])? {
                 referred.push(ph);
             }
             else {
-                return Err(BCDBError::Corrupted("unconnected header".to_string()));
+                return Err(HammersbaldError::Corrupted("unconnected header".to_string()));
             }
         }
         let key = block.bitcoin_hash().data();
         let mut serialized_block = encode(&block.header)?;
         let mut tx_offsets = Vec::new();
         for t in &block.txdata {
-            let pref = self.bcdb.put_referred(encode(t)?.as_slice(), &vec!())?;
+            let pref = self.hammersbald.put_referred(encode(t)?.as_slice(), &vec!())?;
             tx_offsets.write_u48::<BigEndian>(pref.as_u64())?;
             referred.push(pref);
         }
-        serialized_block.write_u48::<BigEndian>(self.bcdb.put_referred(tx_offsets.as_slice(), &vec!())?.as_u64())?;
+        serialized_block.write_u48::<BigEndian>(self.hammersbald.put_referred(tx_offsets.as_slice(), &vec!())?.as_u64())?;
         serialized_block.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
-            let pref = self.bcdb.put_referred(d.as_slice(), &vec!())?;
+            let pref = self.hammersbald.put_referred(d.as_slice(), &vec!())?;
             serialized_block.write_u48::<BigEndian>(pref.as_u64())?;
             referred.push(pref);
         }
-        self.bcdb.put(&key[..], serialized_block.as_slice(), &referred)
+        self.hammersbald.put(&key[..], serialized_block.as_slice(), &referred)
     }
 
     /// Fetch a block by its id
-    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, BCDBError> {
+    pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, HammersbaldError> {
         let key = id.data();
-        if let Some((_, stored, _)) = self.bcdb.get(&key)? {
+        if let Some((_, stored, _)) = self.hammersbald.get(&key)? {
             let header = decode(stored.as_slice()[0..80].to_vec())?;
             let mut data = Cursor::new(stored.as_slice()[80..].to_vec());
             let txdata_offset = PRef::from(data.read_u48::<BigEndian>()?);
             let mut txdata: Vec<Transaction> = Vec::new();
             if txdata_offset.is_valid() {
-                let (_, offsets,_) = self.bcdb.get_referred(txdata_offset)?;
+                let (_, offsets,_) = self.hammersbald.get_referred(txdata_offset)?;
                 let mut oc = Cursor::new(offsets);
                 while let Ok(o) = oc.read_u48::<BigEndian>() {
                     let pref = PRef::from(o);
-                    let (_, tx,_) = self.bcdb.get_referred(pref)?;
+                    let (_, tx,_) = self.hammersbald.get_referred(pref)?;
                     txdata.push(decode(tx)?);
                 }
             }
@@ -135,7 +135,7 @@ impl BitcoinAdapter {
             let mut extension = Vec::new();
             for _ in 0 .. next {
                 let pref = PRef::from(data.read_u48::<BigEndian>()?);
-                let (_, e,_) = self.bcdb.get_referred(pref)?;
+                let (_, e,_) = self.hammersbald.get_referred(pref)?;
                 extension.push(e);
             }
 
@@ -145,45 +145,45 @@ impl BitcoinAdapter {
     }
 }
 
-impl BCDBAPI for BitcoinAdapter {
-    fn init(&mut self) -> Result<(), BCDBError> {
-        self.bcdb.init()
+impl HammersbaldAPI for BitcoinAdapter {
+    fn init(&mut self) -> Result<(), HammersbaldError> {
+        self.hammersbald.init()
     }
 
-    fn batch(&mut self) -> Result<(), BCDBError> {
-        self.bcdb.batch()
+    fn batch(&mut self) -> Result<(), HammersbaldError> {
+        self.hammersbald.batch()
     }
 
     fn shutdown(&mut self) {
-        self.bcdb.shutdown()
+        self.hammersbald.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        self.bcdb.put(key, data, &referred)
+    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
+        self.hammersbald.put(key, data, &referred)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, BCDBError> {
-        self.bcdb.get(key)
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, HammersbaldError> {
+        self.hammersbald.get(key)
     }
 
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, BCDBError> {
-        self.bcdb.put_referred(data, referred)
+    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
+        self.hammersbald.put_referred(data, referred)
     }
 
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), BCDBError> {
-        self.bcdb.get_referred(pref)
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError> {
+        self.hammersbald.get_referred(pref)
     }
 }
 
-fn decode<T: ? Sized>(data: Vec<u8>) -> Result<T, BCDBError>
+fn decode<T: ? Sized>(data: Vec<u8>) -> Result<T, HammersbaldError>
     where T: ConsensusDecodable<RawDecoder<Cursor<Vec<u8>>>> {
     let mut decoder: RawDecoder<Cursor<Vec<u8>>> = RawDecoder::new(Cursor::new(data));
-    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { BCDBError::Util(e) })
+    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { HammersbaldError::Util(e) })
 }
 
-fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, BCDBError>
+fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, HammersbaldError>
     where T: ConsensusEncodable<RawEncoder<Cursor<Vec<u8>>>> {
-    serialize(data).map_err(|e| { BCDBError::Util(e) })
+    serialize(data).map_err(|e| { HammersbaldError::Util(e) })
 }
 
 #[cfg(test)]
@@ -194,7 +194,7 @@ mod test {
 
     use transient::Transient;
 
-    use api::BCDBFactory;
+    use api::HammersbaldFactory;
 
     use super::*;
 

@@ -1,10 +1,15 @@
-# Fast Blockchain store in Rust
+# Hammersbald
 A very fast persistent blockchain store.
 
 ## Motivation
 Generic databases and key-value stores offer much more functionality 
 than needed to store and process a blockchain. Superfluous functionality (for a blockchain)
 comes at a high cost in speed. 
+
+## Name
+Hammersbald is a German slang for "Haben wir es bald?" close to in english "Will we have it soon?". 
+A term often used to express impatience. Hammersbald is the blockchain database for the impatient.
+Hammersbald sounds also like the name of some ancient northern god.
 
 ## Status
 Work in progress. Not yet released, do not send PRs yet.

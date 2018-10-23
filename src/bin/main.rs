@@ -1,11 +1,11 @@
-extern crate bcdb;
+extern crate hammersbald;
 extern crate rand;
 extern crate simple_logger;
 extern crate log;
 
-use bcdb::persistent::Persistent;
-use bcdb::api::BCDBFactory;
-use bcdb::api::BCDBAPI;
+use hammersbald::persistent::Persistent;
+use hammersbald::api::HammersbaldFactory;
+use hammersbald::api::HammersbaldAPI;
 
 use rand::{thread_rng, Rng};
 

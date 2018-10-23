@@ -18,11 +18,11 @@
 //!
 //! Implements persistent store
 
-use api::{BCDB, BCDBFactory};
+use api::{Hammersbald, HammersbaldFactory};
 use asyncfile::AsyncFile;
 use cachedfile::CachedFile;
 use datafile::DataFile;
-use error::BCDBError;
+use error::HammersbaldError;
 use logfile::LogFile;
 use pref::PRef;
 use page::Page;
@@ -46,8 +46,8 @@ impl Persistent {
     }
 }
 
-impl BCDBFactory for Persistent {
-    fn new_db(name: &str, cached_data_pages: usize) -> Result<BCDB, BCDBError> {
+impl HammersbaldFactory for Persistent {
+    fn new_db(name: &str, cached_data_pages: usize) -> Result<Hammersbald, HammersbaldError> {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(
@@ -68,38 +68,38 @@ impl BCDBFactory for Persistent {
             Box::new(CachedFile::new(
             Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?), cached_data_pages)?))?;
 
-        BCDB::new(log, table, data, link)
+        Hammersbald::new(log, table, data, link)
     }
 }
 
 impl PagedFile for Persistent {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         self.file.read_page(pref)
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         self.file.sync()
     }
 
     fn shutdown(&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         self.file.append_page(page)
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         self.file.update_page(page)
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         self.file.flush()
     }
 }

@@ -16,7 +16,7 @@
 //!
 //! # Content types
 //!
-use error::BCDBError;
+use error::HammersbaldError;
 use pref::PRef;
 
 use byteorder::{WriteBytesExt, ByteOrder, BigEndian};
@@ -89,13 +89,13 @@ impl<'e> Payload<'e> {
     }
 
     /// deserialize from storage
-    pub fn deserialize(slice: &'e [u8]) -> Result<Payload, BCDBError> {
+    pub fn deserialize(slice: &'e [u8]) -> Result<Payload, HammersbaldError> {
         match slice [0] {
             0 => Ok(Payload::Indexed(IndexedData::deserialize(&slice[1..]))),
             1 => Ok(Payload::Referred(Data::deserialize(&slice[1..]))),
             2 => Ok(Payload::Link(Link::deserialize(&slice[1..]))),
             // Link and Table are not serialized with a type
-            _ => Err(BCDBError::Corrupted("unknown payload type".to_string()))
+            _ => Err(HammersbaldError::Corrupted("unknown payload type".to_string()))
         }
     }
 }

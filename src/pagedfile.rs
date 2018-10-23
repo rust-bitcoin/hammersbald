@@ -18,7 +18,7 @@
 //!
 
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
-use error::BCDBError;
+use error::HammersbaldError;
 use pref::PRef;
 
 use std::cmp::min;
@@ -26,31 +26,31 @@ use std::cmp::min;
 /// a paged file
 pub trait PagedFile {
     /// read a page at pref
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, BCDBError>;
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
     /// length of the storage
-    fn len (&self) -> Result<u64, BCDBError>;
+    fn len (&self) -> Result<u64, HammersbaldError>;
     /// truncate storage
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError>;
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError>;
     /// tell OS to flush buffers to disk
-    fn sync (&self) -> Result<(), BCDBError>;
+    fn sync (&self) -> Result<(), HammersbaldError>;
     /// shutdown async write
     fn shutdown (&mut self);
     /// append a page
-    fn append_page (&mut self, page: Page) -> Result<(), BCDBError>;
+    fn append_page (&mut self, page: Page) -> Result<(), HammersbaldError>;
     /// write a page at its position
-    fn update_page (&mut self, page: Page) -> Result<u64, BCDBError>;
+    fn update_page (&mut self, page: Page) -> Result<u64, HammersbaldError>;
     /// flush buffered writes
-    fn flush(&mut self) -> Result<(), BCDBError>;
+    fn flush(&mut self) -> Result<(), HammersbaldError>;
 }
 
 pub trait PagedFileRead {
     /// read a slice from a paged file
-    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<PRef, BCDBError>;
+    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError>;
 }
 
 pub trait PagedFileWrite {
     /// write a slice to a paged file
-    fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError>;
+    fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError>;
 }
 
 /// a reader for a paged file
@@ -79,7 +79,7 @@ impl PagedFileAppender {
         self.lep = self.pos;
     }
 
-    pub fn append(&mut self, buf: &[u8]) -> Result<PRef, BCDBError> {
+    pub fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError> {
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -103,7 +103,7 @@ impl PagedFileAppender {
         Ok(self.pos)
     }
 
-    pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, BCDBError> {
+    pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
         let mut read = 0;
         while read < buf.len() {
             if let Some(ref page) = self.read_page(pos.this_page())? {
@@ -124,7 +124,7 @@ impl PagedFileAppender {
 }
 
 impl PagedFile for PagedFileAppender {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, BCDBError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         if let Some(ref page) = self.page {
             if self.pos.this_page() == pref {
                 return Ok(Some(page.clone()))
@@ -133,17 +133,17 @@ impl PagedFile for PagedFileAppender {
         return self.file.read_page(pref)
     }
 
-    fn len(&self) -> Result<u64, BCDBError> {
+    fn len(&self) -> Result<u64, HammersbaldError> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), BCDBError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         if new_len >= PAGE_SIZE as u64 {
             if let Some(last_page) = self.file.read_page(PRef::from(new_len - PAGE_SIZE as u64))? {
                 self.lep = last_page.read_pref(PAGE_PAYLOAD_SIZE);
             }
             else {
-                return Err(BCDBError::Corrupted("where is the last page?".to_string()));
+                return Err(HammersbaldError::Corrupted("where is the last page?".to_string()));
             }
         }
         else {
@@ -152,7 +152,7 @@ impl PagedFile for PagedFileAppender {
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), BCDBError> {
+    fn sync(&self) -> Result<(), HammersbaldError> {
         self.file.sync()
     }
 
@@ -160,15 +160,15 @@ impl PagedFile for PagedFileAppender {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), BCDBError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         self.file.append_page(page)
     }
 
-    fn update_page(&mut self, _: Page) -> Result<u64, BCDBError> {
+    fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
         unimplemented!()
     }
 
-    fn flush(&mut self) -> Result<(), BCDBError> {
+    fn flush(&mut self) -> Result<(), HammersbaldError> {
         if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
                 page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);

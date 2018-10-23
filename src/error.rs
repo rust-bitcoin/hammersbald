@@ -27,7 +27,7 @@ use std::io;
 use std::sync;
 
 /// Errors returned by this library
-pub enum BCDBError {
+pub enum HammersbaldError {
     /// pref is invalid (> 2^48)
     InvalidOffset,
     /// corrupted data
@@ -45,66 +45,66 @@ pub enum BCDBError {
     Queue(String)
 }
 
-impl Error for BCDBError {
+impl Error for HammersbaldError {
     fn description(&self) -> &str {
         match *self {
-            BCDBError::InvalidOffset => "invalid pref",
-            BCDBError::ForwardReference => "forward reference",
-            BCDBError::Corrupted (ref s) => s.as_str(),
-            BCDBError::IO(_) => "IO Error",
+            HammersbaldError::InvalidOffset => "invalid pref",
+            HammersbaldError::ForwardReference => "forward reference",
+            HammersbaldError::Corrupted (ref s) => s.as_str(),
+            HammersbaldError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
-            BCDBError::Util(_) => "Bitcoin Util Error",
-            BCDBError::Poisoned(ref s) => s.as_str(),
-            BCDBError::Queue(ref s) => s.as_str()
+            HammersbaldError::Util(_) => "Bitcoin Util Error",
+            HammersbaldError::Poisoned(ref s) => s.as_str(),
+            HammersbaldError::Queue(ref s) => s.as_str()
         }
     }
 
     fn cause(&self) -> Option<&Error> {
         match *self {
-            BCDBError::InvalidOffset => None,
-            BCDBError::ForwardReference => None,
-            BCDBError::Corrupted (_) => None,
-            BCDBError::IO(ref e) => Some(e),
+            HammersbaldError::InvalidOffset => None,
+            HammersbaldError::ForwardReference => None,
+            HammersbaldError::Corrupted (_) => None,
+            HammersbaldError::IO(ref e) => Some(e),
             #[cfg(feature="bitcoin_support")]
-            BCDBError::Util(ref e) => Some(e),
-            BCDBError::Poisoned(_) => None,
-            BCDBError::Queue(_) => None
+            HammersbaldError::Util(ref e) => Some(e),
+            HammersbaldError::Poisoned(_) => None,
+            HammersbaldError::Queue(_) => None
         }
     }
 }
 
-impl fmt::Display for BCDBError {
+impl fmt::Display for HammersbaldError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BCSError: {} cause: {:?}", self.description(), self.cause())
     }
 }
 
-impl fmt::Debug for BCDBError {
+impl fmt::Debug for HammersbaldError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         (self as &fmt::Display).fmt(f)
     }
 }
 
-impl convert::From<io::Error> for BCDBError {
-    fn from(err: io::Error) -> BCDBError {
-        BCDBError::IO(err)
+impl convert::From<io::Error> for HammersbaldError {
+    fn from(err: io::Error) -> HammersbaldError {
+        HammersbaldError::IO(err)
     }
 }
 
-impl convert::From<BCDBError> for io::Error {
-    fn from(_: BCDBError) -> io::Error {
+impl convert::From<HammersbaldError> for io::Error {
+    fn from(_: HammersbaldError) -> io::Error {
         io::Error::from(io::ErrorKind::UnexpectedEof)
     }
 }
 
-impl<T> convert::From<sync::PoisonError<T>> for BCDBError {
-    fn from(err: sync::PoisonError<T>) -> BCDBError {
-        BCDBError::Poisoned(err.to_string())
+impl<T> convert::From<sync::PoisonError<T>> for HammersbaldError {
+    fn from(err: sync::PoisonError<T>) -> HammersbaldError {
+        HammersbaldError::Poisoned(err.to_string())
     }
 }
 
-impl<T> convert::From<sync::mpsc::SendError<T>> for BCDBError {
-    fn from(err: sync::mpsc::SendError<T>) -> BCDBError {
-        BCDBError::Queue(err.to_string())
+impl<T> convert::From<sync::mpsc::SendError<T>> for HammersbaldError {
+    fn from(err: sync::mpsc::SendError<T>) -> HammersbaldError {
+        HammersbaldError::Queue(err.to_string())
     }
 }

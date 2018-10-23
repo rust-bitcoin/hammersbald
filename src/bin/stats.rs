@@ -1,14 +1,14 @@
-extern crate bcdb;
+extern crate hammersbald;
 extern crate rand;
 extern crate simple_logger;
 extern crate log;
 extern crate siphasher;
 
-use bcdb::persistent::Persistent;
-use bcdb::api::BCDBFactory;
-use bcdb::api::BCDBAPI;
+use hammersbald::persistent::Persistent;
+use hammersbald::api::HammersbaldFactory;
+use hammersbald::api::HammersbaldAPI;
 
-use bcdb::format::Payload;
+use hammersbald::format::Payload;
 
 use log::Level;
 use siphasher::sip::SipHasher;
