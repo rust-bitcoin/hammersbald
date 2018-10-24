@@ -114,6 +114,7 @@ impl Hammersbald {
     }
 
     /// iterator for a DAG
+    #[allow(unused)]
     fn dag<'a>(&'a self, root: PRef) -> impl Iterator<Item=(PRef, Envelope)> +'a {
         self.mem.dag(root)
     }
