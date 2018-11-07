@@ -98,7 +98,7 @@ pub fn main () {
             roots.entry(slot.1).or_insert(Vec::new()).push(slot.0);
         }
     }
-    println!("Used buckets: {} {} %", used_buckets, 100.0*(used_buckets as f32/blen as f32));
+    println!("Used buckets: {} {:.1} % avg. slots per bucket: {:.1}", used_buckets, 100.0*(used_buckets as f32/blen as f32), ndata as f32/used_buckets as f32);
     println!("Data: indexed: {}, hash collisions {:.2} %", ndata, (1.0-(roots.len() as f32)/(ndata as f32))*100.0);
 
     let mut indexed_garbage = 0;

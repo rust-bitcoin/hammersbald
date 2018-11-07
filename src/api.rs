@@ -19,7 +19,7 @@
 use pref::PRef;
 use logfile::LogFile;
 use tablefile::TableFile;
-use datafile::DataFile;
+use datafile::{DataFile, DagIterator};
 use memtable::MemTable;
 use format::{Payload, Envelope};
 use error::HammersbaldError;
@@ -61,6 +61,9 @@ pub trait HammersbaldAPI {
     /// get data
     /// returns (key, data, referred)
     fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError>;
+
+    /// iterator for a DAG
+    fn dag<'a>(&'a self, root: PRef) -> DagIterator<'a>;
 }
 
 impl Hammersbald {
@@ -111,12 +114,6 @@ impl Hammersbald {
     /// get db params
     pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
         self.mem.params()
-    }
-
-    /// iterator for a DAG
-    #[allow(unused)]
-    fn dag<'a>(&'a self, root: PRef) -> impl Iterator<Item=(PRef, Envelope)> +'a {
-        self.mem.dag(root)
     }
 }
 
@@ -179,6 +176,10 @@ impl HammersbaldAPI for Hammersbald {
             Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred())),
             _ => Err(HammersbaldError::Corrupted("referred should point to data".to_string()))
         }
+    }
+
+    fn dag(&self, root: PRef) -> DagIterator {
+        self.mem.dag(root)
     }
 }
 

@@ -26,6 +26,8 @@ use pref::PRef;
 
 use byteorder::{ByteOrder, BigEndian};
 
+use std::collections::VecDeque;
+
 /// file storing indexed and referred data
 pub struct DataFile {
     appender: PagedFileAppender
@@ -59,7 +61,7 @@ impl DataFile {
     }
 
     /// iterate backward through references
-    pub fn dag<'a>(&'a self, root: PRef) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+    pub fn dag<'a>(&'a self, root: PRef) -> DagIterator<'a> {
         DagIterator::new(&self.appender, root)
     }
 
@@ -177,13 +179,25 @@ impl<'f> Iterator for EnvelopeIterator<'f> {
 /// Iterate data file content
 pub struct DagIterator<'f> {
     file: &'f PagedFileAppender,
-    pos: PRef
+    pos: PRef,
+    next: VecDeque<PRef>
 }
 
 impl<'f> DagIterator<'f> {
     /// create a new iterator
     pub fn new (file: &'f PagedFileAppender, pos: PRef) -> DagIterator<'f> {
-        DagIterator {file, pos}
+        let mut next = VecDeque::new();
+        next.push_back(pos);
+        DagIterator {file, pos, next}
+    }
+
+    fn schedule_descending (&mut self, mut referred: Vec<PRef>) {
+        referred.sort_unstable_by(|a, b| {
+            b.cmp(a)
+        });
+        for pref in referred {
+            self.next.push_back(pref);
+        }
     }
 }
 
@@ -192,16 +206,20 @@ impl<'f> Iterator for DagIterator<'f> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if self.pos.is_valid() {
-            // TODO follow references
-            let mut pos = self.pos;
-            let start = pos;
-            let mut len = [0u8;3];
-            pos = self.file.read(pos, &mut len).unwrap();
-            let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
-            self.file.read(pos, &mut buf).unwrap();
-            let envelope = Envelope::deseralize(buf);
-            self.pos = envelope.previous();
-            return Some((start, envelope))
+            if let Some(mut pos) = self.next.pop_front() {
+                let start = pos;
+                let mut len = [0u8; 3];
+                pos = self.file.read(pos, &mut len).unwrap();
+                let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
+                self.file.read(pos, &mut buf).unwrap();
+                let envelope = Envelope::deseralize(buf);
+                match Payload::deserialize(envelope.payload()).unwrap() {
+                    Payload::Indexed(indexed) => self.schedule_descending(indexed.data.referred()),
+                    Payload::Referred(referred) => self.schedule_descending(referred.referred()),
+                    _ => {}
+                }
+                return Some((start, envelope))
+            }
         }
         None
     }
