@@ -18,7 +18,7 @@
 //!
 //!
 #[cfg(feature="bitcoin_support")]
-use bitcoin::util;
+use bitcoin::network::serialize;
 
 use std::convert;
 use std::error::Error;
@@ -38,7 +38,7 @@ pub enum HammersbaldError {
     IO(io::Error),
     /// Wrapped bitcoin util error
     #[cfg(feature="bitcoin_support")]
-    Util(util::Error),
+    BitcoinSerialize(serialize::Error),
     /// Lock poisoned
     Poisoned(String),
     /// Queue error
@@ -53,7 +53,7 @@ impl Error for HammersbaldError {
             HammersbaldError::Corrupted (ref s) => s.as_str(),
             HammersbaldError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
-            HammersbaldError::Util(_) => "Bitcoin Util Error",
+            HammersbaldError::BitcoinSerialize(_) => "Bitcoin Serialize Error",
             HammersbaldError::Poisoned(ref s) => s.as_str(),
             HammersbaldError::Queue(ref s) => s.as_str()
         }
@@ -66,7 +66,7 @@ impl Error for HammersbaldError {
             HammersbaldError::Corrupted (_) => None,
             HammersbaldError::IO(ref e) => Some(e),
             #[cfg(feature="bitcoin_support")]
-            HammersbaldError::Util(ref e) => Some(e),
+            HammersbaldError::BitcoinSerialize(ref e) => Some(e),
             HammersbaldError::Poisoned(_) => None,
             HammersbaldError::Queue(_) => None
         }

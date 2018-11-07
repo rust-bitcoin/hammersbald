@@ -1,6 +1,6 @@
 [package]
 name = "hammersbald"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
 license = "Apache-2.0"
 homepage = "https://github.com/rust-bitcoin/hammersbald/"
@@ -23,7 +23,7 @@ rand="0.5"
 siphasher = "0.2"
 byteorder="1"
 simple_logger = "0.5.0"
-bitcoin={version="0.13", optional=true}
+bitcoin={version="0.14", optional=true}
 
 [dev-dependencies]
 hex = "0.3"

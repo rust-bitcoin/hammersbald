@@ -72,14 +72,14 @@ impl BitcoinAdapter {
     pub fn insert_header (&mut self, header: &BlockHeader, extension: &Vec<Vec<u8>>) -> Result<PRef, HammersbaldError> {
         let mut referred = vec!();
         if header.prev_blockhash != Sha256dHash::default() {
-            if let Some((ph, _, _)) = self.hammersbald.get(&header.prev_blockhash.data()[..])? {
+            if let Some((ph, _, _)) = self.hammersbald.get(&header.prev_blockhash.as_bytes()[..])? {
                 referred.push(ph);
             }
             else {
                 return Err(HammersbaldError::Corrupted("unconnected header".to_string()));
             }
         }
-        let key = header.bitcoin_hash().data();
+        let key = &header.bitcoin_hash().to_bytes()[..];
         let mut serialized_header = Vec::new();
         serialized_header.push(0u8);
         serialized_header.extend(encode(header)?);
@@ -95,7 +95,7 @@ impl BitcoinAdapter {
 
     /// Fetch a header by its id
     pub fn fetch_header (&self, id: &Sha256dHash)  -> Result<Option<(BlockHeader, Vec<Vec<u8>>)>, HammersbaldError> {
-        let key = id.data();
+        let key = &id.to_bytes()[..];
         if let Some((_,stored,_)) = self.hammersbald.get(&key)? {
             if let BitcoinData::HeaderOrBlock(stored) = BitcoinData::deserialize(stored.as_slice()) {
                 let header = decode(&stored[0..80])?;
@@ -119,14 +119,14 @@ impl BitcoinAdapter {
     pub fn insert_block(&mut self, block: &Block, extension: &Vec<Vec<u8>>) -> Result<PRef, HammersbaldError> {
         let mut referred = vec!();
         if block.header.prev_blockhash != Sha256dHash::default() {
-            if let Some((ph, _, _)) = self.hammersbald.get(&block.header.prev_blockhash.data()[..])? {
+            if let Some((ph, _, _)) = self.hammersbald.get(&block.header.prev_blockhash.as_bytes()[..])? {
                 referred.push(ph);
             }
             else {
                 return Err(HammersbaldError::Corrupted("unconnected header".to_string()));
             }
         }
-        let key = block.bitcoin_hash().data();
+        let key = &block.bitcoin_hash().to_bytes()[..];
         let mut serialized_block = Vec::new();
         serialized_block.push(0u8);
         serialized_block.extend(encode(&block.header)?);
@@ -148,7 +148,7 @@ impl BitcoinAdapter {
 
     /// Fetch a block by its id
     pub fn fetch_block (&self, id: &Sha256dHash)  -> Result<Option<(Block, Vec<Vec<u8>>)>, HammersbaldError> {
-        let key = id.data();
+        let key = &id.as_bytes()[..];
         if let Some((_, stored, _)) = self.hammersbald.get(&key)? {
             if let BitcoinData::HeaderOrBlock(stored) = BitcoinData::deserialize(stored.as_slice()) {
                 let header = decode(&stored[0..80])?;
@@ -180,7 +180,7 @@ impl BitcoinAdapter {
 
     /// iterate over transactions that send to a script
     pub fn iter_send_to_script<'s> (&'s self, tip: &Sha256dHash, script: Script) -> Result<impl Iterator<Item=Transaction> +'s, HammersbaldError> {
-        if let Some((tipref, _, _)) = self.get(&tip.data())? {
+        if let Some((tipref, _, _)) = self.get(&tip.as_bytes()[..])? {
             return Ok(BitcoinScriptScan { script, dag: self.dag(tipref) })
         }
         return Err(HammersbaldError::Corrupted("Can not find root for scan".to_string()));
@@ -264,12 +264,12 @@ impl HammersbaldAPI for BitcoinAdapter {
 fn decode<'d, T: ? Sized>(data: &'d [u8]) -> Result<T, HammersbaldError>
     where T: ConsensusDecodable<RawDecoder<Cursor<&'d [u8]>>> {
     let mut decoder: RawDecoder<Cursor<&[u8]>> = RawDecoder::new(Cursor::new(data));
-    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { HammersbaldError::Util(e) })
+    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { HammersbaldError::BitcoinSerialize(e) })
 }
 
 fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, HammersbaldError>
     where T: ConsensusEncodable<RawEncoder<Cursor<Vec<u8>>>> {
-    serialize(data).map_err(|e| { HammersbaldError::Util(e) })
+    serialize(data).map_err(|e| { HammersbaldError::BitcoinSerialize(e) })
 }
 
 #[cfg(test)]
