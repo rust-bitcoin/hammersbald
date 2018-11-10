@@ -24,7 +24,7 @@ use pref::PRef;
 use std::cmp::min;
 
 /// a paged file
-pub trait PagedFile {
+pub trait PagedFile : Send + Sync {
     /// read a page at pref
     fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
     /// length of the storage
