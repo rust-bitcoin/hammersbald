@@ -149,6 +149,7 @@ impl PagedFile for PagedFileAppender {
         else {
             self.lep = PRef::invalid();
         }
+        self.pos = PRef::from(new_len);
         self.file.truncate(new_len)
     }
 
