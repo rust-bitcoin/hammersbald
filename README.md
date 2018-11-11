@@ -1,5 +1,5 @@
 # Hammersbald
-A very fast persistent blockchain store.
+A fast embedded blockchain database.
 
 ## Motivation
 Generic databases and key-value stores offer much more functionality 
@@ -12,8 +12,10 @@ A term often used to express impatience. Hammersbald is the blockchain database 
 Hammersbald sounds also like the name of some ancient northern god.
 
 ## Status
-Work in progress. Not yet released, do not send PRs yet.
+It works.
 
+## Design
+See [Hammersbald](https://medium.com/@tamas.blummer/hammersbald-7c0bda14da1e) on medium
 
 ## API
 This library in contrast only implements the bare minimum of operations:
