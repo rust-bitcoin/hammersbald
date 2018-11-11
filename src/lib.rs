@@ -26,8 +26,6 @@
 #![deny(missing_docs)]
 #![deny(unused_must_use)]
 
-#[macro_use]
-extern crate log;
 #[cfg(feature="bitcoin_support")]
 extern crate bitcoin;
 extern crate siphasher;

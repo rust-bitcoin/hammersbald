@@ -1,7 +1,5 @@
 extern crate hammersbald;
 extern crate rand;
-extern crate simple_logger;
-extern crate log;
 extern crate siphasher;
 
 use hammersbald::persistent::Persistent;
@@ -10,7 +8,6 @@ use hammersbald::api::HammersbaldAPI;
 
 use hammersbald::format::Payload;
 
-use log::Level;
 use siphasher::sip::SipHasher;
 use std::hash::Hasher;
 
@@ -25,26 +22,11 @@ pub fn main () {
         println!("        data: all stored data even if no longer accessible");
         println!("        links: all stored links even if no longer accessible");
         println!("--db name: store base name. Created if does not exist.");
-        println!("--log level: level is one of trace|debug|info|warn|error");
         println!("defaults:");
-        println!("--log info");
         println!("--stats accessible");
         println!("--db testdb");
         println!("--cache 100");
         return;
-    }
-
-    if let Some (log) = find_arg("log") {
-        match log.as_str() {
-            "error" => simple_logger::init_with_level(Level::Error).unwrap(),
-            "warn" => simple_logger::init_with_level(Level::Warn).unwrap(),
-            "info" => simple_logger::init_with_level(Level::Info).unwrap(),
-            "debug" => simple_logger::init_with_level(Level::Debug).unwrap(),
-            "trace" => simple_logger::init_with_level(Level::Trace).unwrap(),
-            _ => panic!("unknown log level")
-        }
-    } else {
-            simple_logger::init_with_level(Level::Info).unwrap();
     }
 
     let mut cache = 100;

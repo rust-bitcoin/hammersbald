@@ -1,7 +1,5 @@
 extern crate hammersbald;
 extern crate rand;
-extern crate simple_logger;
-extern crate log;
 
 use hammersbald::persistent::Persistent;
 use hammersbald::api::HammersbaldFactory;
@@ -12,7 +10,6 @@ use rand::{thread_rng, Rng};
 use std::time::{Instant};
 
 pub fn main () {
-    simple_logger::init_with_level(log::Level::Info).unwrap();
     let mut db = Persistent::new_db("testdb", 100).unwrap();
     db.init().unwrap();
 

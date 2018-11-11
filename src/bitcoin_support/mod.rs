@@ -274,7 +274,6 @@ fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, HammersbaldError>
 
 #[cfg(test)]
 mod test {
-    extern crate simple_logger;
     extern crate rand;
     extern crate hex;
 

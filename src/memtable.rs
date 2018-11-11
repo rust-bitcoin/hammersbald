@@ -75,8 +75,6 @@ impl MemTable {
 
     /// end current batch and start a new batch
     pub fn batch (&mut self)  -> Result<(), HammersbaldError> {
-        debug!("batch end");
-
         self.log_file.flush()?;
         self.log_file.sync()?;
 
@@ -85,23 +83,18 @@ impl MemTable {
 
         self.table_file.sync()?;
         let table_len = self.table_file.len()?;
-        debug!("table length {}", table_len);
 
         self.link_file.sync()?;
         let link_len = self.link_file.len()?;
-        debug!("link length {}", link_len);
 
         self.data_file.flush()?;
         self.data_file.sync()?;
         let data_len = self.data_file.len()?;
-        debug!("data length {}", data_len);
 
         self.log_file.reset(table_len);
         self.log_file.init(data_len, table_len, link_len)?;
         self.log_file.flush()?;
         self.log_file.sync()?;
-
-        debug!("batch start");
 
         Ok(())
     }
@@ -115,7 +108,6 @@ impl MemTable {
     }
 
     pub fn recover(&mut self) -> Result<(), HammersbaldError> {
-        debug!("recover");
         let mut data_len = 0;
         let mut table_len = 0;
         let mut link_len = 0;

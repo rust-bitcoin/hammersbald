@@ -46,35 +46,36 @@ impl RolledFile {
     }
 
     fn open (&mut self) -> Result<(), HammersbaldError> {
-
         // interesting file names are:
         // name.index.extension
         // where index is a number
-        let mut highest_chunk = 0;
-        if let Some(mut dir) = Path::new(&self.name).parent() {
-            if dir.to_string_lossy().to_string().is_empty() {
-                dir = Path::new(".");
-            }
-            for entry in fs::read_dir(dir)? {
-                let path = entry?.path();
-                if path.is_file() {
-                    if let Some (name_index) = path.file_stem() {
-                        // name.index
-                        let ni = Path::new(name_index.clone());
-                        if let Some(name) = ni.file_stem() {
-                            // compare name
-                            if name.to_string_lossy().to_string() == self.name {
-                                // compare extension
-                                if let Some(extension) = path.extension() {
-                                    if extension.to_string_lossy().to_string() == self.extension {
-                                        // parse index
-                                        if let Some(index) = ni.extension() {
-                                            if let Ok(number) =  index.to_string_lossy().parse::<u16>() {
-                                                let filename = path.clone().to_string_lossy().to_string();
-                                                let file = Self::open_file(self.append_only, filename)?;
-                                                self.files.insert(number,
-                                                                  SingleFile::new_chunk(file, number as u64 * self.chunk_size, self.chunk_size)?);
-                                                highest_chunk = max(highest_chunk, number);
+        if let Some(basename) = Path::new(self.name.as_str()).file_name() {
+            let mut highest_chunk = 0;
+            if let Some(mut dir) = Path::new(&self.name).parent() {
+                if dir.to_string_lossy().to_string().is_empty() {
+                    dir = Path::new(".");
+                }
+                for entry in fs::read_dir(dir)? {
+                    let path = entry?.path();
+                    if path.is_file() {
+                        if let Some(name_index) = path.file_stem() {
+                            // name.index
+                            let ni = Path::new(name_index.clone());
+                            if let Some(name) = ni.file_stem() {
+                                // compare name
+                                if name == basename {
+                                    // compare extension
+                                    if let Some(extension) = path.extension() {
+                                        if extension.to_string_lossy().to_string() == self.extension {
+                                            // parse index
+                                            if let Some(index) = ni.extension() {
+                                                if let Ok(number) = index.to_string_lossy().parse::<u16>() {
+                                                    let filename = path.clone().to_string_lossy().to_string();
+                                                    let file = Self::open_file(self.append_only, filename)?;
+                                                    self.files.insert(number,
+                                                                      SingleFile::new_chunk(file, number as u64 * self.chunk_size, self.chunk_size)?);
+                                                    highest_chunk = max(highest_chunk, number);
+                                                }
                                             }
                                         }
                                     }
@@ -84,12 +85,12 @@ impl RolledFile {
                     }
                 }
             }
+            if let Some (file) = self.files.get(&highest_chunk) {
+                self.len = highest_chunk as u64 * self.chunk_size + file.len()?;
+            }
         }
         else {
             return Err(HammersbaldError::Corrupted("invalid db name".to_string()));
-        }
-        if let Some (file) = self.files.get(&highest_chunk) {
-            self.len = highest_chunk as u64 * self.chunk_size + file.len()?;
         }
         Ok(())
     }
