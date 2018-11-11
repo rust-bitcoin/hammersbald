@@ -74,7 +74,11 @@ impl RolledFile {
                                                     let file = Self::open_file(self.append_only, filename)?;
                                                     self.files.insert(number,
                                                                       SingleFile::new_chunk(file, number as u64 * self.chunk_size, self.chunk_size)?);
-                                                    highest_chunk = max(highest_chunk, number);
+                                                    if let Some (file) = self.files.get(&number) {
+                                                        if file.len().unwrap() > 0 {
+                                                            highest_chunk = max(highest_chunk, number);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
