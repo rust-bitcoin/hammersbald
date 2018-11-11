@@ -27,7 +27,7 @@ use error::HammersbaldError;
 /// a trait to create a new db
 pub trait HammersbaldFactory {
     /// create a new db
-    fn new_db (name: &str, cached_data_pages: usize) -> Result<Hammersbald, HammersbaldError>;
+    fn new_db (name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Hammersbald, HammersbaldError>;
 }
 
 /// The blockchain db
@@ -68,8 +68,8 @@ pub trait HammersbaldAPI {
 
 impl Hammersbald {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile) -> Result<Hammersbald, HammersbaldError> {
-        let mem = MemTable::new(log, table, data, link);
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Hammersbald, HammersbaldError> {
+        let mem = MemTable::new(log, table, data, link, bucket_fill_target);
         let mut db = Hammersbald { mem };
         db.recover()?;
         db.load()?;
@@ -197,7 +197,7 @@ mod test {
 
     #[test]
     fn test_two_batches () {
-        let mut db = Transient::new_db("first", 1).unwrap();
+        let mut db = Transient::new_db("first", 1, 1).unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

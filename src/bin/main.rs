@@ -10,7 +10,7 @@ use rand::{thread_rng, Rng};
 use std::time::{Instant};
 
 pub fn main () {
-    let mut db = Persistent::new_db("testdb", 100).unwrap();
+    let mut db = Persistent::new_db("testdb", 100, 64).unwrap();
     db.init().unwrap();
 
     // transaction size assumed 500 bytes

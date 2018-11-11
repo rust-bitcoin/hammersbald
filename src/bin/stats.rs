@@ -36,9 +36,9 @@ pub fn main () {
 
     let mut db;
     if let Some(path) = find_arg("db") {
-        db = Persistent::new_db(path.as_str(), cache).unwrap();
+        db = Persistent::new_db(path.as_str(), cache, 64).unwrap();
     } else {
-        db = Persistent::new_db("testdb", cache).unwrap();
+        db = Persistent::new_db("testdb", cache, 64).unwrap();
     }
 
     db.init().unwrap();

@@ -35,7 +35,6 @@ use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
 
-const BUCKET_FILL_TARGET: u32 = 64;
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
 
@@ -50,17 +49,18 @@ pub struct MemTable {
     data_file: DataFile,
     table_file: TableFile,
     link_file: DataFile,
+    bucket_fill_target: usize
 }
 
 impl MemTable {
-    pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile, link_file: DataFile) -> MemTable {
+    pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile, link_file: DataFile, bucket_fill_target: usize) -> MemTable {
         let mut rng = thread_rng();
 
         MemTable {log_mod: INIT_LOGMOD as u32, step: 0,
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
-            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file}
+            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file, bucket_fill_target}
     }
 
     pub fn init (&mut self) -> Result<(), HammersbaldError> {
@@ -254,7 +254,7 @@ impl MemTable {
 
         self.store_to_bucket(bucket, hash, data_offset)?;
 
-        if thread_rng().next_u32() % BUCKET_FILL_TARGET == 0 && self.step < (1 << 31) {
+        if thread_rng().next_u32() % self.bucket_fill_target as u32 == 0 && self.step < (1 << 31) {
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
                 self.rehash_bucket(step)?;
@@ -506,7 +506,7 @@ mod test {
 
         #[test]
     fn test() {
-        let mut db = Transient::new_db("first", 1).unwrap();
+        let mut db = Transient::new_db("first", 1, 1).unwrap();
         db.init().unwrap();
 
         let mut rng = thread_rng();

@@ -56,7 +56,7 @@ impl Transient {
 }
 
 impl HammersbaldFactory for Transient {
-    fn new_db (_name: &str, cached_data_pages: usize) -> Result<Hammersbald, HammersbaldError> {
+    fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Hammersbald, HammersbaldError> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));
@@ -71,7 +71,7 @@ impl HammersbaldFactory for Transient {
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
                 cached_data_pages)?))?;
-        Hammersbald::new(log, table, data, link)
+        Hammersbald::new(log, table, data, link, bucket_fill_target)
     }
 }
 

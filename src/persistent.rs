@@ -47,7 +47,7 @@ impl Persistent {
 }
 
 impl HammersbaldFactory for Persistent {
-    fn new_db(name: &str, cached_data_pages: usize) -> Result<Hammersbald, HammersbaldError> {
+    fn new_db(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Hammersbald, HammersbaldError> {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(
@@ -68,7 +68,7 @@ impl HammersbaldFactory for Persistent {
             Box::new(CachedFile::new(
             Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?), cached_data_pages)?))?;
 
-        Hammersbald::new(log, table, data, link)
+        Hammersbald::new(log, table, data, link, bucket_fill_target)
     }
 }
 
