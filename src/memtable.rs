@@ -194,6 +194,7 @@ impl MemTable {
                 }
             }
         }
+        self.dirty.clear();
         self.link_file.flush()?;
         self.table_file.flush()?;
         Ok(())
