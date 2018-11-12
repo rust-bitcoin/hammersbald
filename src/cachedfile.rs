@@ -22,37 +22,27 @@ use pagedfile::PagedFile;
 use pref::PRef;
 use error::HammersbaldError;
 
-use std::collections::{HashMap,VecDeque};
-use std::sync::{Arc, RwLock};
-use std::cmp::{max, min};
+use lru_cache::LruCache;
 
-// does not make sense to have a bigger cache
-// until age_desc is iterated sequentially
-// TODO: find a better cache collection
-const MAX_CACHE: usize = 100;
+use std::sync::{Arc, Mutex};
+use std::cmp::max;
 
 pub struct CachedFile {
     file: Box<PagedFile>,
-    cache: RwLock<Cache>
+    cache: Mutex<Cache>
 }
 
 impl CachedFile {
     /// create a read cached file with a page cache of given size
     pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, HammersbaldError> {
         let len = file.len()?;
-        Ok(CachedFile{file, cache: RwLock::new(Cache::new(len, min(MAX_CACHE,pages)))})
+        Ok(CachedFile{file, cache: Mutex::new(Cache::new(len, pages))})
     }
 }
 
 impl PagedFile for CachedFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        {
-            let cache = self.cache.read().unwrap();
-            if let Some(page) = cache.get(pref) {
-                return Ok(Some(page));
-            }
-        }
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.lock().unwrap();
         if let Some(page) = cache.get(pref) {
             return Ok(Some(page));
         }
@@ -68,7 +58,7 @@ impl PagedFile for CachedFile {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
-        self.cache.write().unwrap().reset_len(new_len);
+        self.cache.lock().unwrap().reset_len(new_len);
         self.file.truncate(new_len)
     }
 
@@ -81,59 +71,41 @@ impl PagedFile for CachedFile {
     }
 
     fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.lock().unwrap();
         cache.append(page.clone());
         self.file.append_page(page)
 
     }
 
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.lock().unwrap();
         cache.update(page.clone());
         self.file.update_page(page)
     }
 
     fn flush(&mut self) -> Result<(), HammersbaldError> {
-        self.cache.write().unwrap().clear();
+        self.cache.lock().unwrap().clear();
         self.file.flush()
     }
 }
 
 
 pub struct Cache {
-    reads: HashMap<PRef, Arc<Page>>,
-    age_desc: VecDeque<PRef>,
-    len: u64,
-    size:  usize
+    reads: LruCache<PRef, Arc<Page>>,
+    len: u64
 }
 
 impl Cache {
     pub fn new (len: u64, size: usize) -> Cache {
-        Cache { reads: HashMap::new(), age_desc: VecDeque::new(), len, size }
+        Cache { reads: LruCache::new(size), len }
     }
 
     pub fn cache(&mut self, pref: PRef, page: Arc<Page>) {
-        if self.reads.insert(pref, page).is_none() {
-            self.age_desc.push_back(pref);
-            if self.reads.len() > self.size {
-                while let Some(old) = self.age_desc.pop_front() {
-                    if self.reads.remove(&old).is_some() {
-                        break;
-                    }
-                }
-            }
-        }
-        else {
-            if let Some(pos) = self.age_desc.iter().rposition(|o| *o == pref) {
-                let last = self.age_desc.len() - 1;
-                self.age_desc.swap(pos, last);
-            }
-        }
+        self.reads.insert(pref, page);
     }
 
     pub fn clear(&mut self) {
         self.reads.clear();
-        self.age_desc.clear();
     }
 
     pub fn append (&mut self, page: Page) ->u64 {
@@ -152,18 +124,18 @@ impl Cache {
         self.len
     }
 
-    pub fn get(&self, pref: PRef) -> Option<Page> {
+    pub fn get(&mut self, pref: PRef) -> Option<Page> {
         use std::ops::Deref;
-        if let Some(content) = self.reads.get(&pref) {
-            return Some(content.deref().clone())
+        if let Some(content) = self.reads.get_mut(&pref) {
+            return Some(content.clone().deref().clone())
         }
         None
     }
 
     pub fn reset_len(&mut self, len: u64) {
         self.len = len;
-        let to_delete: Vec<_> = self.reads.keys().filter_map(
-            |o| {
+        let to_delete: Vec<_> = self.reads.iter().filter_map(
+            |(o, _)| {
                 let l = o.as_u64();
                 if l >= len {
                     Some(l)

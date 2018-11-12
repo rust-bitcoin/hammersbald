@@ -31,6 +31,7 @@ extern crate bitcoin;
 extern crate siphasher;
 extern crate rand;
 extern crate byteorder;
+extern crate lru_cache;
 
 mod page;
 mod pagedfile;
