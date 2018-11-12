@@ -136,12 +136,16 @@ impl BitcoinAdapter {
         serialized_block.push(0u8);
         serialized_block.extend(encode(&block.header)?);
         let mut tx_offsets = Vec::new();
+        let mut tx_prefs = Vec::new();
         for t in &block.txdata {
             let pref = self.hammersbald.put_referred(encode(t)?.as_slice(), &vec!())?;
+            tx_prefs.push(pref);
             tx_offsets.write_u48::<BigEndian>(pref.as_u64())?;
             referred.push(pref);
         }
-        serialized_block.write_u48::<BigEndian>(self.hammersbald.put_referred(tx_offsets.as_slice(), &vec!())?.as_u64())?;
+        let stored_tx_offsets = self.hammersbald.put_referred(tx_offsets.as_slice(), &tx_prefs)?;
+        referred.push(stored_tx_offsets);
+        serialized_block.write_u48::<BigEndian>(stored_tx_offsets.as_u64())?;
         serialized_block.write_u32::<BigEndian>(extension.len() as u32)?;
         for d in extension {
             let pref = self.hammersbald.put_referred(d.as_slice(), &vec!())?;
