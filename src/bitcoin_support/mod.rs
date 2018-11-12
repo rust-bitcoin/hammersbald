@@ -135,15 +135,13 @@ impl BitcoinAdapter {
         let mut serialized_block = Vec::new();
         serialized_block.push(0u8);
         serialized_block.extend(encode(&block.header)?);
-        let mut tx_offsets = Vec::new();
         let mut tx_prefs = Vec::new();
         for t in &block.txdata {
             let pref = self.hammersbald.put_referred(encode(t)?.as_slice(), &vec!())?;
             tx_prefs.push(pref);
-            tx_offsets.write_u48::<BigEndian>(pref.as_u64())?;
             referred.push(pref);
         }
-        let stored_tx_offsets = self.hammersbald.put_referred(tx_offsets.as_slice(), &tx_prefs)?;
+        let stored_tx_offsets = self.hammersbald.put_referred(&[], &tx_prefs)?;
         referred.push(stored_tx_offsets);
         serialized_block.write_u48::<BigEndian>(stored_tx_offsets.as_u64())?;
         serialized_block.write_u32::<BigEndian>(extension.len() as u32)?;
@@ -165,11 +163,9 @@ impl BitcoinAdapter {
                 let txdata_offset = PRef::from(data.read_u48::<BigEndian>()?);
                 let mut txdata: Vec<Transaction> = Vec::new();
                 if txdata_offset.is_valid() {
-                    let (_, offsets, _) = self.hammersbald.get_referred(txdata_offset)?;
-                    let mut oc = Cursor::new(offsets);
-                    while let Ok(o) = oc.read_u48::<BigEndian>() {
-                        let pref = PRef::from(o);
-                        let (_, tx, _) = self.hammersbald.get_referred(pref)?;
+                    let (_, _, txrefs) = self.hammersbald.get_referred(txdata_offset)?;
+                    for txref in &txrefs {
+                        let (_, tx, _) = self.hammersbald.get_referred(*txref)?;
                         txdata.push(decode(tx.as_slice())?);
                     }
                 }
