@@ -18,7 +18,7 @@ It works.
 See [Hammersbald](https://medium.com/@tamas.blummer/hammersbald-7c0bda14da1e) on medium
 
 ## API
-This library in contrast only implements the bare minimum of operations:
+This library implements the bare minimum of operations:
 
 * insert data with a key
 * find data with a key
@@ -33,8 +33,6 @@ Inserts must be grouped into batches. All inserts of a batch will be stored
 or none of them, in case the process dies while inserting in a batch.
 
 Data inserted in a batch may be fetched before closing the batch.
-
-Only one process should open the same db.
 
 ## Implementation
 The persistent storage should be opened by only one process. 
