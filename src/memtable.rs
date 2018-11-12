@@ -34,6 +34,7 @@ use rand::{thread_rng, RngCore};
 use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
+use std::cmp::{min, max};
 
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
@@ -60,7 +61,8 @@ impl MemTable {
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
-            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file, bucket_fill_target}
+            dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file,
+            bucket_fill_target: max(min(bucket_fill_target, 128), 1)}
     }
 
     pub fn init (&mut self) -> Result<(), HammersbaldError> {
@@ -194,6 +196,7 @@ impl MemTable {
                 }
             }
         }
+        self.dirty.clear();
         self.link_file.flush()?;
         self.table_file.flush()?;
         Ok(())
