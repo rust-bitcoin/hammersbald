@@ -25,10 +25,8 @@ use format::{Payload, Data};
 
 use bitcoin::blockdata::block::{BlockHeader, Block};
 use bitcoin::blockdata::transaction::Transaction;
-use bitcoin::network::serialize::BitcoinHash;
-use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
-use bitcoin::network::serialize::{RawDecoder, RawEncoder};
-use bitcoin::network::serialize::serialize;
+use bitcoin::util::hash::BitcoinHash;
+use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::util::hash::Sha256dHash;
 use bitcoin::blockdata::script::Script;
 
@@ -302,14 +300,16 @@ impl HammersbaldAPI for BitcoinAdapter {
 }
 
 fn decode<'d, T: ? Sized>(data: &'d [u8]) -> Result<T, HammersbaldError>
-    where T: ConsensusDecodable<RawDecoder<Cursor<&'d [u8]>>> {
-    let mut decoder: RawDecoder<Cursor<&[u8]>> = RawDecoder::new(Cursor::new(data));
-    ConsensusDecodable::consensus_decode(&mut decoder).map_err(|e| { HammersbaldError::BitcoinSerialize(e) })
+    where T: Decodable<Cursor<&'d [u8]>> {
+    let mut decoder  = Cursor::new(data);
+    Decodable::consensus_decode(&mut decoder).map_err(|e| { HammersbaldError::BitcoinSerialize(e) })
 }
 
 fn encode<T: ? Sized>(data: &T) -> Result<Vec<u8>, HammersbaldError>
-    where T: ConsensusEncodable<RawEncoder<Cursor<Vec<u8>>>> {
-    serialize(data).map_err(|e| { HammersbaldError::BitcoinSerialize(e) })
+    where T: Encodable<Vec<u8>> {
+    let mut result = vec!();
+    data.consensus_encode(&mut result).map_err(|e| { HammersbaldError::BitcoinSerialize(e) })?;
+    Ok(result)
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@
 //!
 //!
 #[cfg(feature="bitcoin_support")]
-use bitcoin::network::serialize;
+use bitcoin::consensus::encode;
 
 use std::convert;
 use std::error::Error;
@@ -38,7 +38,7 @@ pub enum HammersbaldError {
     IO(io::Error),
     /// Wrapped bitcoin util error
     #[cfg(feature="bitcoin_support")]
-    BitcoinSerialize(serialize::Error),
+    BitcoinSerialize(encode::Error),
     /// Lock poisoned
     Poisoned(String),
     /// Queue error
