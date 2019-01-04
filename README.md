@@ -50,12 +50,17 @@ let mut db = persistent("dbname", CACHED_PAGES, BUCKET_FILL_TARGET).unwrap();
 
 db.put(b"some key", b"some data", &vec!()).unwrap();
 
+db.batch().unwrap();
+
 if let Some((pos, data, refs)) = db.get(b"some key").unwrap() {
     assert_eq!(data, b"some data".to_vec());
 }
 else {
     panic!("can not find inserted data");
 }
+
+
+db.shutdown();
 ````
 
 ## Implementation

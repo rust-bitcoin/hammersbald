@@ -44,8 +44,6 @@ pub fn transient(bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Hamme
 
 /// public API to Hammersbald
 pub trait HammersbaldAPI : Send + Sync {
-    /// initialize a db
-    fn init (&mut self) -> Result<(), HammersbaldError>;
     /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), HammersbaldError>;
 
@@ -120,10 +118,6 @@ impl Hammersbald {
 }
 
 impl HammersbaldAPI for Hammersbald {
-
-    fn init (&mut self) -> Result<(), HammersbaldError> {
-        self.mem.init()
-    }
 
     fn batch (&mut self)  -> Result<(), HammersbaldError> {
         self.mem.batch()
@@ -218,7 +212,6 @@ mod test {
     #[test]
     fn test_two_batches () {
         let mut db = Transient::new_db("first", 1, 1).unwrap();
-        db.init().unwrap();
 
         let mut rng = thread_rng();
 

@@ -65,11 +65,6 @@ impl MemTable {
             bucket_fill_target: max(min(bucket_fill_target, 128), 1)}
     }
 
-    pub fn init (&mut self) -> Result<(), HammersbaldError> {
-        self.log_file.init(self.data_file.len()?, self.table_file.len()?, self.link_file.len()?)?;
-        Ok(())
-    }
-
     pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
         (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap(), self.link_file.len().unwrap(),
         self.sip0, self.sip1)
@@ -508,7 +503,6 @@ mod test {
         #[test]
     fn test() {
         let mut db = Transient::new_db("first", 1, 1).unwrap();
-        db.init().unwrap();
 
         let mut rng = thread_rng();
         let mut key = [0x0u8;32];
