@@ -54,6 +54,7 @@ mod api;
 pub mod bitcoin_support;
 
 pub use pref::PRef;
+pub use error::HammersbaldError;
 pub use api::{
     HammersbaldAPI,
     persistent,

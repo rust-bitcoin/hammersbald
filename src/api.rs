@@ -43,7 +43,7 @@ pub fn transient(bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Hamme
 }
 
 /// public API to Hammersbald
-pub trait HammersbaldAPI {
+pub trait HammersbaldAPI : Send + Sync {
     /// initialize a db
     fn init (&mut self) -> Result<(), HammersbaldError>;
     /// end current batch and start a new batch
