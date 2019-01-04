@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Tamas Blummer
+// Copyright 2018,2019 Tamas Blummer
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,7 +72,7 @@ impl ops::AddAssign<u64> for PRef {
         #[cfg(debug_assertions)]
         {
             if self.0 + rhs >= INVALID {
-                panic!("Pref::from(INVALID)");
+                panic!("pref would become invalid through addition");
             }
         }
         self.0 += rhs;
