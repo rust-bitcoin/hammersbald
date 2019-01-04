@@ -1,48 +1,33 @@
-extern crate hammersbald;
-extern crate rand;
-extern crate siphasher;
-
-use hammersbald::persistent::Persistent;
-use hammersbald::api::HammersbaldFactory;
-use hammersbald::api::HammersbaldAPI;
-
-use hammersbald::format::Payload;
+//
+// Copyright 2019 Tamas Blummer
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//!
+//! # Statistics for a Hammersbald db
+//!
+//!
+use api::Hammersbald;
+use format::Payload;
 
 use siphasher::sip::SipHasher;
+
+use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 
-use std::env::args;
-use std::collections::{HashSet, HashMap};
-
-pub fn main () {
-    if find_opt("help") {
-        println!("{} [--help] [--stats data|links|accessible] [--db database] [--log trace|debug|info|warn|error] --cache pages", args().next().unwrap());
-        println!("--stats what:");
-        println!("        accessible: accessible stored data and links");
-        println!("        data: all stored data even if no longer accessible");
-        println!("        links: all stored links even if no longer accessible");
-        println!("--db name: store base name. Created if does not exist.");
-        println!("defaults:");
-        println!("--stats accessible");
-        println!("--db testdb");
-        println!("--cache 100");
-        return;
-    }
-
-    let mut cache = 100;
-    if let Some(path) = find_arg("cache") {
-        cache = path.parse::<usize>().unwrap();
-    }
-
-    let mut db;
-    if let Some(path) = find_arg("db") {
-        db = Persistent::new_db(path.as_str(), cache, 64).unwrap();
-    } else {
-        db = Persistent::new_db("testdb", cache, 64).unwrap();
-    }
-
-    db.init().unwrap();
-
+/// print some statistics on a db
+#[allow(unused)]
+fn stats(db: &Hammersbald) {
     let (step, log_mod, blen, tlen, dlen, llen, sip0, sip1) = db.params();
     println!("File sizes: table: {}, data: {}, links: {}\nHash table: buckets: {}, log_mod: {}, step: {}", tlen, dlen, llen, blen, log_mod, step);
 
@@ -119,33 +104,11 @@ pub fn main () {
     }
     println!("Referred: {}", referred);
     println!("Garbage: indexed: {}, referred: {}, links: {}", indexed_garbage, referred_garbage, n_links - used_buckets);
-
-    db.shutdown();
 }
+
 
 fn hash (key: &[u8], sip0: u64, sip1: u64) -> u32 {
     let mut hasher = SipHasher::new_with_keys(sip0, sip1);
     hasher.write(key);
     hasher.finish() as u32
-}
-
-// Returns key-value zipped iterator.
-fn zipped_args() -> impl Iterator<Item = (String, String)> {
-    let key_args = args().filter(|arg| arg.starts_with("--")).map(|mut arg| arg.split_off(2));
-    let val_args = args().skip(1).filter(|arg| !arg.starts_with("--"));
-    key_args.zip(val_args)
-}
-
-fn find_opt(key: &str) -> bool {
-    let mut key_args = args().filter(|arg| arg.starts_with("--")).map(|mut arg| arg.split_off(2));
-    key_args.find(|ref k| k.as_str() == key).is_some()
-}
-
-fn find_arg(key: &str) -> Option<String> {
-    zipped_args().find(|&(ref k, _)| k.as_str() == key).map(|(_, v)| v)
-}
-
-#[allow(unused)]
-fn find_args(key: &str) -> Vec<String> {
-    zipped_args().filter(|&(ref k, _)| k.as_str() == key).map(|(_, v)| v).collect()
 }

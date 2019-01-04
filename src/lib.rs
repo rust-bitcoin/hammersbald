@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Tamas Blummer
+// Copyright 2018,2019 Tamas Blummer
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,12 +42,20 @@ mod singlefile;
 mod rolledfile;
 mod asyncfile;
 mod memtable;
-pub mod format;
-pub mod api;
-pub mod datafile;
-pub mod error;
-pub mod pref;
-pub mod transient;
-pub mod persistent;
+mod format;
+mod datafile;
+mod pref;
+mod transient;
+mod persistent;
+mod error;
+mod stats;
+mod api;
 #[cfg(feature="bitcoin_support")]
 pub mod bitcoin_support;
+
+pub use pref::PRef;
+pub use api::{
+    HammersbaldAPI,
+    persistent,
+    transient
+};

@@ -483,8 +483,6 @@ mod test {
     extern crate rand;
 
     use transient::Transient;
-    use api::HammersbaldFactory;
-    use api::HammersbaldAPI;
 
     use super::*;
     use self::rand::thread_rng;

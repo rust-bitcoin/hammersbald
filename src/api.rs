@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Tamas Blummer
+// Copyright 2018,2019 Tamas Blummer
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,28 +14,35 @@
 // limitations under the License.
 //
 //!
-//! # The blockchain db
+//! # Hammersbald API
 //!
-use pref::PRef;
 use logfile::LogFile;
 use tablefile::TableFile;
 use datafile::{DataFile, DagIterator};
 use memtable::MemTable;
-use format::{Payload, Envelope};
-use error::HammersbaldError;
+use format::{Payload,Envelope};
+use persistent::Persistent;
+use transient::Transient;
 
-/// a trait to create a new db
-pub trait HammersbaldFactory {
-    /// create a new db
-    fn new_db (name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Hammersbald, HammersbaldError>;
-}
+pub use pref::PRef;
+pub use error::HammersbaldError;
 
 /// The blockchain db
 pub struct Hammersbald {
     mem: MemTable
 }
 
-/// public API to the blockchain db
+/// create or open a persistent db
+pub fn persistent(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+    Persistent::new_db(name, cached_data_pages,bucket_fill_target)
+}
+
+/// create a transient db
+pub fn transient(bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+    Transient::new_db("",0,bucket_fill_target)
+}
+
+/// public API to Hammersbald
 pub trait HammersbaldAPI {
     /// initialize a db
     fn init (&mut self) -> Result<(), HammersbaldError>;
@@ -62,15 +69,15 @@ pub trait HammersbaldAPI {
     /// returns (key, data, referred)
     fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError>;
 
-    /// iterator for a DAG
-    fn dag<'a>(&'a self, root: PRef) -> DagIterator<'a>;
+    /// iterator of data backward from tip following references
+    fn iter<'a>(&'a self, tip: PRef) -> HammersbaldIterator<'a>;
 }
 
 impl Hammersbald {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Hammersbald, HammersbaldError> {
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
         let mem = MemTable::new(log, table, data, link, bucket_fill_target);
-        let mut db = Hammersbald { mem };
+        let mut db = Box::new(Hammersbald { mem });
         db.recover()?;
         db.load()?;
         db.batch()?;
@@ -106,11 +113,6 @@ impl Hammersbald {
         self.mem.link_envelopes()
     }
 
-    /// get indexed or referred payload
-    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, HammersbaldError> {
-        self.mem.get_envelope(pref)
-    }
-
     /// get db params
     pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
         self.mem.params()
@@ -118,24 +120,19 @@ impl Hammersbald {
 }
 
 impl HammersbaldAPI for Hammersbald {
-    /// initialize a db
+
     fn init (&mut self) -> Result<(), HammersbaldError> {
         self.mem.init()
     }
 
-
-    /// end current batch and start a new batch
     fn batch (&mut self)  -> Result<(), HammersbaldError> {
         self.mem.batch()
     }
 
-    /// stop background writer
     fn shutdown (&mut self) {
         self.mem.shutdown()
     }
 
-    /// store data with a key
-    /// storing with the same key makes previous data unaddressable
     fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
         #[cfg(debug_assertions)]
         {
@@ -178,8 +175,32 @@ impl HammersbaldAPI for Hammersbald {
         }
     }
 
-    fn dag(&self, root: PRef) -> DagIterator {
-        self.mem.dag(root)
+    fn iter(&self, root: PRef) -> HammersbaldIterator {
+        HammersbaldIterator{dagi: self.mem.dag(root)}
+    }
+}
+
+/// iterate data content
+pub struct HammersbaldIterator<'a> {
+    dagi: DagIterator<'a>
+}
+
+impl<'a> Iterator for HammersbaldIterator<'a> {
+    type Item = (PRef, Vec<u8>, Vec<u8>, Vec<PRef>);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if let Some((pref, envelope)) = self.dagi.next() {
+            match Payload::deserialize(envelope.payload()).unwrap() {
+                Payload::Indexed(indexed) => {
+                    return Some((pref, indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred()))
+                },
+                Payload::Referred(referred) => {
+                    return Some((pref, vec!(), referred.data.to_vec(), referred.referred()))
+                },
+                _ => return None
+            }
+        }
+        None
     }
 }
 
@@ -190,7 +211,6 @@ mod test {
 
     use transient::Transient;
 
-    use super::*;
     use self::rand::thread_rng;
     use std::collections::HashMap;
     use api::test::rand::RngCore;

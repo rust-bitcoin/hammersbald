@@ -20,7 +20,7 @@
 
 use error::HammersbaldError;
 use logfile::LogFile;
-use api::{HammersbaldFactory, Hammersbald};
+use api::{Hammersbald, HammersbaldAPI};
 use tablefile::TableFile;
 use datafile::DataFile;
 use pref::PRef;
@@ -50,13 +50,11 @@ struct Inner {
 
 impl Transient {
     /// create a new file
-    pub fn new (append: bool) -> Transient {
+    fn new (append: bool) -> Transient {
         Transient {inner: Mutex::new(Inner{data: Vec::new(), pos: 0, append})}
     }
-}
 
-impl HammersbaldFactory for Transient {
-    fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Hammersbald, HammersbaldError> {
+    pub fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));
