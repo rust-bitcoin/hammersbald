@@ -53,19 +53,19 @@ pub trait HammersbaldAPI : Send + Sync {
     /// store data with a key
     /// storing with the same key makes previous data unaccessible
     /// returns the pref the data was stored
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError>;
+    fn put(&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError>;
 
     /// retrieve single data by key
     /// returns (pref, data, referred)
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, HammersbaldError>;
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Option<Vec<PRef>>)>, HammersbaldError>;
 
-    /// store referred data
-    /// returns the pref the data was stored
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError>;
+    /// store data
+    /// returns a persistent reference
+    fn put_data(&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError>;
 
-    /// get data
+    /// retrieve data using a persistent reference
     /// returns (key, data, referred)
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError>;
+    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<PRef>>), HammersbaldError>;
 
     /// iterator of data backward from tip following references
     fn iter<'a>(&'a self, tip: PRef) -> HammersbaldIterator<'a>;
@@ -127,7 +127,7 @@ impl HammersbaldAPI for Hammersbald {
         self.mem.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
+    fn put(&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
@@ -137,30 +137,34 @@ impl HammersbaldAPI for Hammersbald {
         let data_offset = self.mem.append_data(key, data, referred)?;
         #[cfg(debug_assertions)]
         {
-            if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
-                return Err(HammersbaldError::ForwardReference);
+            if let Some (ref rr) = referred {
+                if rr.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
+                    return Err(HammersbaldError::ForwardReference);
+                }
             }
         }
         self.mem.put(key, data_offset)?;
         Ok(data_offset)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, HammersbaldError> {
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Option<Vec<PRef>>)>, HammersbaldError> {
         self.mem.get(key)
     }
 
-    fn put_referred(&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
+    fn put_data(&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
         let data_offset = self.mem.append_referred(data, referred)?;
         #[cfg(debug_assertions)]
         {
-            if referred.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
-                return Err(HammersbaldError::ForwardReference);
+            if let Some(rr) = referred {
+                if rr.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
+                    return Err(HammersbaldError::ForwardReference);
+                }
             }
         }
         Ok(data_offset)
     }
 
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Vec<PRef>), HammersbaldError> {
+    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<PRef>>), HammersbaldError> {
         let envelope = self.mem.get_envelope(pref)?;
         match Payload::deserialize(envelope.payload())? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec(), referred.referred())),
@@ -180,7 +184,7 @@ pub struct HammersbaldIterator<'a> {
 }
 
 impl<'a> Iterator for HammersbaldIterator<'a> {
-    type Item = (PRef, Vec<u8>, Vec<u8>, Vec<PRef>);
+    type Item = (PRef, Vec<u8>, Vec<u8>, Option<Vec<PRef>>);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if let Some((pref, envelope)) = self.dagi.next() {
@@ -222,25 +226,25 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let pref = db.put(&key, &data, &vec!()).unwrap();
+            let pref = db.put(&key, &data, None).unwrap();
             check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), vec!())));
+            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), None)));
         }
 
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let pref = db.put(&key, &data, &vec!()).unwrap();
+            let pref = db.put(&key, &data, None).unwrap();
             check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), vec!())));
+            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), None)));
         }
         db.shutdown();
     }

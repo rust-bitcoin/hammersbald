@@ -111,27 +111,38 @@ pub struct Data<'e> {
 
 impl<'e> Data<'e> {
     /// new serialize a vector of pref
-    pub fn from_referred(referred: &[PRef]) -> Vec<u8> {
-        let mut rv = vec!(0u8;referred.len()*6);
-        for (i, r) in referred.iter().enumerate() {
-            BigEndian::write_u48(&mut rv[i*6 .. i*6+6], r.as_u64());
+    pub fn from_referred(referred: Option<&[PRef]>) -> Option<Vec<u8>> {
+        if let Some(rr) = referred {
+            let mut rv = vec!(0u8; rr.len() * 6);
+            for (i, r) in rr.iter().enumerate() {
+                BigEndian::write_u48(&mut rv[i * 6..i * 6 + 6], r.as_u64());
+            }
+            return Some(rv)
         }
-        rv
+        None
     }
 
     /// create new data
-    pub fn new(data: &'e [u8], referred: &'e [u8]) -> Data<'e> {
-        Data{data, referred}
+    pub fn new(data: &'e [u8], referred: Option<&'e [u8]>) -> Data<'e> {
+        if let Some(rr) = referred {
+            Data { data, referred: rr }
+        }
+        else {
+            Data { data, referred: &[] }
+        }
     }
 
     /// get referred
-    pub fn referred(&self) -> Vec<PRef> {
-        let mut referred = vec!();
-        for i in 0 .. self.referred.len()/6 {
-            let r = PRef::from(BigEndian::read_u48(&self.referred[i*6 .. i*6+6]));
-            referred.push(r);
+    pub fn referred(&self) -> Option<Vec<PRef>> {
+        if self.referred.len() > 0 {
+            let mut referred = vec!();
+            for i in 0..self.referred.len() / 6 {
+                let r = PRef::from(BigEndian::read_u48(&self.referred[i * 6..i * 6 + 6]));
+                referred.push(r);
+            }
+            return Some(referred);
         }
-        referred
+        None
     }
 
     /// serialize for storage

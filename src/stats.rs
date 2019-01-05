@@ -80,7 +80,9 @@ fn stats(db: &Hammersbald) {
                     if root.iter().any(|hash| *hash == h) == false {
                         panic!("ERROR root {} points data with different key hash", pos);
                     }
-                    indexed.data.referred().iter().for_each(|o| {referred_set.insert(*o);});
+                    if let Some (rr) = indexed.data.referred() {
+                        rr.iter().for_each(|o| { referred_set.insert(*o); });
+                    }
                 } else {
                     indexed_garbage += 1;
                 }
@@ -91,7 +93,9 @@ fn stats(db: &Hammersbald) {
                     referred_garbage += 1;
                 }
                 referred += 1;
-                data.referred().iter().for_each(|o| {referred_set.insert(*o);});
+                if let Some(dr) = data.referred () {
+                    dr.iter().for_each(|o| { referred_set.insert(*o); });
+                }
             },
             _ => panic!("Unexpected payload type in data at {}", pos)
         }

@@ -48,7 +48,7 @@ const BUCKET_FILL_TARGET:usize = 2;
 
 let mut db = persistent("dbname", CACHED_PAGES, BUCKET_FILL_TARGET).unwrap();
 
-db.put(b"some key", b"some data", &vec!()).unwrap();
+db.put(b"some key", b"some data", None).unwrap();
 
 db.batch().unwrap();
 

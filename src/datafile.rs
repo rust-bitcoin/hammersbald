@@ -93,9 +93,14 @@ impl DataFile {
     }
 
     /// append indexed data
-    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
-        let rv = Data::from_referred(referred.as_slice());
-        let indexed = IndexedData::new(key, Data::new(data, rv.as_slice()));
+    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
+        let rv = Data::from_referred(referred);
+        let indexed = if let Some(ref rr) = rv {
+            IndexedData::new(key, Data::new(data, Some(rr.as_slice())))
+        }
+        else {
+            IndexedData::new(key, Data::new(data, None))
+        };
 
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
@@ -109,9 +114,15 @@ impl DataFile {
     }
 
     /// append referred data
-    pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
-        let rv = Data::from_referred(referred.as_slice());
-        let data = Data::new(data, rv.as_slice());
+    pub fn append_referred (&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
+        let rv = Data::from_referred(referred);
+        let data = if let Some(ref rr) = rv {
+            Data::new(data, Some(rr.as_slice()))
+        }
+        else {
+            Data::new(data, None)
+        };
+
         let mut payload = vec!();
         Payload::Referred(data).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
@@ -191,12 +202,14 @@ impl<'f> DagIterator<'f> {
         DagIterator {file, pos, next}
     }
 
-    fn schedule_descending (&mut self, mut referred: Vec<PRef>) {
-        referred.sort_unstable_by(|a, b| {
-            b.cmp(a)
-        });
-        for pref in referred {
-            self.next.push_back(pref);
+    fn schedule_descending (&mut self, referred: Option<Vec<PRef>>) {
+        if let Some(mut rr) = referred {
+            rr.sort_unstable_by(|a, b| {
+                b.cmp(a)
+            });
+            for pref in rr {
+                self.next.push_back(pref);
+            }
         }
     }
 }

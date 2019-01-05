@@ -228,11 +228,11 @@ impl MemTable {
         self.link_file.envelopes()
     }
 
-    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
+    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
         self.data_file.append_data(key, data, referred)
     }
 
-    pub fn append_referred (&mut self, data: &[u8], referred: &Vec<PRef>) -> Result<PRef, HammersbaldError> {
+    pub fn append_referred (&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
         self.data_file.append_referred(data, referred)
     }
 
@@ -340,7 +340,7 @@ impl MemTable {
     }
 
     // get the data last associated with the key
-    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Vec<PRef>)>, HammersbaldError> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Option<Vec<PRef>>)>, HammersbaldError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(ref bucket) = self.buckets.get(bucket_number) {
@@ -512,13 +512,13 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let o = db.put(&key, &data, &vec!()).unwrap();
+            let o = db.put(&key, &data, None).unwrap();
             check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, (o, data)) in check {
-            assert_eq!(db.get(&k[..]).unwrap().unwrap(), (o, data, vec!()));
+            assert_eq!(db.get(&k[..]).unwrap().unwrap(), (o, data, None));
         }
         db.shutdown();
     }
