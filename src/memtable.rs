@@ -228,12 +228,12 @@ impl MemTable {
         self.link_file.envelopes()
     }
 
-    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
-        self.data_file.append_data(key, data, referred)
+    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+        self.data_file.append_data(key, data)
     }
 
-    pub fn append_referred (&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
-        self.data_file.append_referred(data, referred)
+    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+        self.data_file.append_referred(data)
     }
 
     pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, HammersbaldError> {
@@ -336,7 +336,7 @@ impl MemTable {
     }
 
     // get the data last associated with the key
-    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Option<Vec<PRef>>)>, HammersbaldError> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         if let Some(ref bucket) = self.buckets.get(bucket_number) {
@@ -345,7 +345,7 @@ impl MemTable {
                     let envelope = self.data_file.get_envelope(*data)?;
                     if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
                         if indexed.key == key {
-                            return Ok(Some((*data, indexed.data.data.to_vec(), indexed.data.referred())));
+                            return Ok(Some((*data, indexed.data.data.to_vec())));
                         }
                     } else {
                         return Err(HammersbaldError::Corrupted("pref should point to indexed data".to_string()));
@@ -508,13 +508,13 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let o = db.put(&key, &data, None).unwrap();
+            let o = db.put(&key, &data).unwrap();
             check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, (o, data)) in check {
-            assert_eq!(db.get(&k[..]).unwrap().unwrap(), (o, data, None));
+            assert_eq!(db.get(&k[..]).unwrap().unwrap(), (o, data));
         }
         db.shutdown();
     }

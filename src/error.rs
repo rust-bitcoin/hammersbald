@@ -32,8 +32,8 @@ pub enum HammersbaldError {
     InvalidOffset,
     /// corrupted data
     Corrupted(String),
-    /// attempt to reference forward
-    ForwardReference,
+    /// key too long
+    KeyTooLong,
     /// wrapped IO error
     IO(io::Error),
     /// Wrapped bitcoin util error
@@ -49,7 +49,7 @@ impl Error for HammersbaldError {
     fn description(&self) -> &str {
         match *self {
             HammersbaldError::InvalidOffset => "invalid pref",
-            HammersbaldError::ForwardReference => "forward reference",
+            HammersbaldError::KeyTooLong => "key too long",
             HammersbaldError::Corrupted (ref s) => s.as_str(),
             HammersbaldError::IO(_) => "IO Error",
             #[cfg(feature="bitcoin_support")]
@@ -62,7 +62,7 @@ impl Error for HammersbaldError {
     fn cause(&self) -> Option<&Error> {
         match *self {
             HammersbaldError::InvalidOffset => None,
-            HammersbaldError::ForwardReference => None,
+            HammersbaldError::KeyTooLong => None,
             HammersbaldError::Corrupted (_) => None,
             HammersbaldError::IO(ref e) => Some(e),
             #[cfg(feature="bitcoin_support")]

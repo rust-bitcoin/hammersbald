@@ -105,59 +105,25 @@ impl<'e> Payload<'e> {
 pub struct Data<'e> {
     /// data
     pub data: &'e [u8],
-    /// further accessible data [PRef]
-    referred: &'e [u8]
 }
 
 impl<'e> Data<'e> {
-    /// new serialize a vector of pref
-    pub fn from_referred(referred: Option<&[PRef]>) -> Option<Vec<u8>> {
-        if let Some(rr) = referred {
-            let mut rv = vec!(0u8; rr.len() * 6);
-            for (i, r) in rr.iter().enumerate() {
-                BigEndian::write_u48(&mut rv[i * 6..i * 6 + 6], r.as_u64());
-            }
-            return Some(rv)
-        }
-        None
-    }
-
     /// create new data
-    pub fn new(data: &'e [u8], referred: Option<&'e [u8]>) -> Data<'e> {
-        if let Some(rr) = referred {
-            Data { data, referred: rr }
-        }
-        else {
-            Data { data, referred: &[] }
-        }
-    }
-
-    /// get referred
-    pub fn referred(&self) -> Option<Vec<PRef>> {
-        if self.referred.len() > 0 {
-            let mut referred = vec!();
-            for i in 0..self.referred.len() / 6 {
-                let r = PRef::from(BigEndian::read_u48(&self.referred[i * 6..i * 6 + 6]));
-                referred.push(r);
-            }
-            return Some(referred);
-        }
-        None
+    pub fn new(data: &'e [u8]) -> Data<'e> {
+        Data { data }
     }
 
     /// serialize for storage
     pub fn serialize (&self, result: &mut Write) {
         result.write_u24::<BigEndian>(self.data.len() as u32).unwrap();
         result.write(self.data).unwrap();
-        result.write(self.referred).unwrap();
     }
 
     /// deserialize from storage
     pub fn deserialize(slice: &'e [u8]) -> Data {
         let data_len = BigEndian::read_u24(&slice[0 .. 3]) as usize;
         let data = &slice[3 .. 3+data_len];
-        let referred = &slice[3+data_len .. ];
-        Data {data, referred }
+        Data {data}
     }
 }
 

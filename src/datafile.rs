@@ -86,15 +86,8 @@ impl DataFile {
     }
 
     /// append indexed data
-    pub fn append_data (&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
-        let rv = Data::from_referred(referred);
-        let indexed = if let Some(ref rr) = rv {
-            IndexedData::new(key, Data::new(data, Some(rr.as_slice())))
-        }
-        else {
-            IndexedData::new(key, Data::new(data, None))
-        };
-
+    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+        let indexed = IndexedData::new(key, Data::new(data));
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
@@ -107,15 +100,8 @@ impl DataFile {
     }
 
     /// append referred data
-    pub fn append_referred (&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
-        let rv = Data::from_referred(referred);
-        let data = if let Some(ref rr) = rv {
-            Data::new(data, Some(rr.as_slice()))
-        }
-        else {
-            Data::new(data, None)
-        };
-
+    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+         let data = Data::new(data);
         let mut payload = vec!();
         Payload::Referred(data).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice(), self.appender.lep());

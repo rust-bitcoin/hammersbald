@@ -71,7 +71,6 @@ fn stats(db: &Hammersbald) {
     let mut indexed_garbage = 0;
     let mut referred_garbage = 0;
     let mut referred = 0;
-    let mut referred_set = HashSet::new();
     for (pos, envelope) in db.data_envelopes() {
         match Payload::deserialize(envelope.payload()).unwrap() {
             Payload::Indexed(indexed) => {
@@ -80,31 +79,18 @@ fn stats(db: &Hammersbald) {
                     if root.iter().any(|hash| *hash == h) == false {
                         panic!("ERROR root {} points data with different key hash", pos);
                     }
-                    if let Some (rr) = indexed.data.referred() {
-                        rr.iter().for_each(|o| { referred_set.insert(*o); });
-                    }
                 } else {
                     indexed_garbage += 1;
                 }
-                referred_set.remove(&pos);
             },
             Payload::Referred(data) => {
-                if !referred_set.remove(&pos) {
-                    referred_garbage += 1;
-                }
                 referred += 1;
-                if let Some(dr) = data.referred () {
-                    dr.iter().for_each(|o| { referred_set.insert(*o); });
-                }
             },
             _ => panic!("Unexpected payload type in data at {}", pos)
         }
     }
     if !roots.is_empty() {
         panic!("ERROR {} roots point to non-existent data", roots.len());
-    }
-    if !referred_set.is_empty() {
-        panic!("ERROR {} references point to nowhere", referred_set.len());
     }
     println!("Referred: {}", referred);
     println!("Garbage: indexed: {}, referred: {}, links: {}", indexed_garbage, referred_garbage, n_links - used_buckets);

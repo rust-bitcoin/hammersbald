@@ -48,11 +48,11 @@ const BUCKET_FILL_TARGET:usize = 2;
 
 let mut db = persistent("dbname", CACHED_PAGES, BUCKET_FILL_TARGET).unwrap();
 
-db.put(b"some key", b"some data", None).unwrap();
+db.put(b"some key", b"some data").unwrap();
 
 db.batch().unwrap();
 
-if let Some((pos, data, refs)) = db.get(b"some key").unwrap() {
+if let Some((pos, data)) = db.get(b"some key").unwrap() {
     assert_eq!(data, b"some data".to_vec());
 }
 else {

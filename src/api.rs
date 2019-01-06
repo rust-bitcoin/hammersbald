@@ -23,11 +23,17 @@ use memtable::MemTable;
 use format::{Payload,Envelope};
 use persistent::Persistent;
 use transient::Transient;
+use pref::PRef;
+use error::HammersbaldError;
 
-pub use pref::PRef;
-pub use error::HammersbaldError;
+use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
 
-/// The blockchain db
+use std::{
+    io,
+    io::{Cursor, Read, Write}
+};
+
+/// Hammersbald
 pub struct Hammersbald {
     mem: MemTable
 }
@@ -50,25 +56,84 @@ pub trait HammersbaldAPI : Send + Sync {
     /// stop background writer
     fn shutdown (&mut self);
 
-    /// store data with a key
-    /// storing with the same key makes previous data unaccessible
-    /// returns the pref the data was stored
-    fn put(&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError>;
+    /// store data accessible with key
+    /// returns a persistent reference to stored data
+    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError>;
 
-    /// retrieve single data by key
-    /// returns (pref, data, referred)
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Option<Vec<PRef>>)>, HammersbaldError>;
+    /// retrieve data with key
+    /// returns Some(persistent reference, data) or None
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError>;
 
     /// store data
     /// returns a persistent reference
-    fn put_data(&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError>;
+    fn put_referred(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError>;
 
     /// retrieve data using a persistent reference
-    /// returns (key, data, referred)
-    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<PRef>>), HammersbaldError>;
+    /// returns (key, data)
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError>;
 
     /// iterator of data
     fn iter(&self) -> HammersbaldIterator;
+}
+
+/// A helper to build Hammersbald data elements
+pub struct HammersbaldDataWriter {
+    data: Vec<u8>
+}
+
+impl HammersbaldDataWriter {
+    /// create a new builder
+    pub fn new () -> HammersbaldDataWriter {
+        HammersbaldDataWriter { data: vec!() }
+    }
+
+    /// serialized data
+    pub fn as_slice<'a> (&'a self) -> &'a [u8] {
+        self.data.as_slice()
+    }
+
+    /// append a persistent reference
+    pub fn write_ref(&mut self, pref: PRef) {
+        self.data.write_u48::<BigEndian>(pref.as_u64()).unwrap();
+    }
+
+    /// return a reader
+    pub fn reader<'a>(&'a self) -> Cursor<&'a [u8]> {
+        Cursor::new(self.data.as_slice())
+    }
+}
+
+impl Write for HammersbaldDataWriter {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
+        self.data.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), io::Error> {
+        Ok(())
+    }
+}
+
+/// Helper to read Hammersbald data elements
+pub struct HammersbaldDataReader<'a> {
+    reader: Cursor<&'a [u8]>
+}
+
+impl<'a> HammersbaldDataReader<'a> {
+    /// create a new reader
+    pub fn new (data: &'a [u8]) -> HammersbaldDataReader<'a> {
+        HammersbaldDataReader{ reader: Cursor::new(data) }
+    }
+
+    /// read a persistent reference
+    pub fn read_ref (&mut self) -> Result<PRef, io::Error> {
+        Ok(PRef::from(self.reader.read_u48::<BigEndian>()?))
+    }
+}
+
+impl<'a> Read for HammersbaldDataReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
+        self.reader.read(buf)
+    }
 }
 
 impl Hammersbald {
@@ -127,48 +192,32 @@ impl HammersbaldAPI for Hammersbald {
         self.mem.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
+    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
-                return Err(HammersbaldError::ForwardReference);
+                return Err(HammersbaldError::KeyTooLong);
             }
         }
-        let data_offset = self.mem.append_data(key, data, referred)?;
-        #[cfg(debug_assertions)]
-        {
-            if let Some (ref rr) = referred {
-                if rr.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
-                    return Err(HammersbaldError::ForwardReference);
-                }
-            }
-        }
+        let data_offset = self.mem.append_data(key, data)?;
         self.mem.put(key, data_offset)?;
         Ok(data_offset)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>, Option<Vec<PRef>>)>, HammersbaldError> {
+    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
         self.mem.get(key)
     }
 
-    fn put_data(&mut self, data: &[u8], referred: Option<&[PRef]>) -> Result<PRef, HammersbaldError> {
-        let data_offset = self.mem.append_referred(data, referred)?;
-        #[cfg(debug_assertions)]
-        {
-            if let Some(rr) = referred {
-                if rr.iter().any(|o| o.as_u64() >= data_offset.as_u64()) {
-                    return Err(HammersbaldError::ForwardReference);
-                }
-            }
-        }
+    fn put_referred(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+        let data_offset = self.mem.append_referred(data)?;
         Ok(data_offset)
     }
 
-    fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<PRef>>), HammersbaldError> {
+    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError> {
         let envelope = self.mem.get_envelope(pref)?;
         match Payload::deserialize(envelope.payload())? {
-            Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec(), referred.referred())),
-            Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred())),
+            Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec())),
+            Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec())),
             _ => Err(HammersbaldError::Corrupted("referred should point to data".to_string()))
         }
     }
@@ -184,16 +233,16 @@ pub struct HammersbaldIterator<'a> {
 }
 
 impl<'a> Iterator for HammersbaldIterator<'a> {
-    type Item = (PRef, Vec<u8>, Vec<u8>, Option<Vec<PRef>>);
+    type Item = (PRef, Vec<u8>, Vec<u8>);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if let Some((pref, envelope)) = self.ei.next() {
             match Payload::deserialize(envelope.payload()).unwrap() {
                 Payload::Indexed(indexed) => {
-                    return Some((pref, indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred()))
+                    return Some((pref, indexed.key.to_vec(), indexed.data.data.to_vec()))
                 },
                 Payload::Referred(referred) => {
-                    return Some((pref, vec!(), referred.data.to_vec(), referred.referred()))
+                    return Some((pref, vec!(), referred.data.to_vec()))
                 },
                 _ => return None
             }
@@ -226,25 +275,25 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let pref = db.put(&key, &data, None).unwrap();
+            let pref = db.put(&key, &data).unwrap();
             check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), None)));
+            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec())));
         }
 
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let pref = db.put(&key, &data, None).unwrap();
+            let pref = db.put(&key, &data).unwrap();
             check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec(), None)));
+            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec())));
         }
         db.shutdown();
     }
