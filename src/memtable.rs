@@ -20,7 +20,7 @@
 //!
 use error::HammersbaldError;
 use pref::PRef;
-use datafile::{DataFile, DagIterator};
+use datafile::{DataFile, EnvelopeIterator};
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
 use logfile::LogFile;
 use page::PAGE_SIZE;
@@ -220,7 +220,7 @@ impl MemTable {
         self.table_file.iter()
     }
 
-    pub fn data_envelopes<'a>(&'a self) -> impl Iterator<Item=(PRef, Envelope)> +'a {
+    pub fn data_envelopes<'a>(&'a self) -> EnvelopeIterator<'a> {
         self.data_file.envelopes()
     }
 
@@ -238,10 +238,6 @@ impl MemTable {
 
     pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, HammersbaldError> {
         self.data_file.get_envelope(pref)
-    }
-
-    pub fn dag(&self, root: PRef) -> DagIterator {
-        self.data_file.dag(root)
     }
 
     pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), HammersbaldError>{

@@ -18,7 +18,7 @@
 //!
 use logfile::LogFile;
 use tablefile::TableFile;
-use datafile::{DataFile, DagIterator};
+use datafile::{DataFile, EnvelopeIterator};
 use memtable::MemTable;
 use format::{Payload,Envelope};
 use persistent::Persistent;
@@ -67,8 +67,8 @@ pub trait HammersbaldAPI : Send + Sync {
     /// returns (key, data, referred)
     fn get_data(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<PRef>>), HammersbaldError>;
 
-    /// iterator of data backward from tip following references
-    fn iter<'a>(&'a self, tip: PRef) -> HammersbaldIterator<'a>;
+    /// iterator of data
+    fn iter(&self) -> HammersbaldIterator;
 }
 
 impl Hammersbald {
@@ -173,21 +173,21 @@ impl HammersbaldAPI for Hammersbald {
         }
     }
 
-    fn iter(&self, root: PRef) -> HammersbaldIterator {
-        HammersbaldIterator{dagi: self.mem.dag(root)}
+    fn iter(&self) -> HammersbaldIterator {
+        HammersbaldIterator{ ei: self.mem.data_envelopes()}
     }
 }
 
 /// iterate data content
 pub struct HammersbaldIterator<'a> {
-    dagi: DagIterator<'a>
+    ei: EnvelopeIterator<'a>
 }
 
 impl<'a> Iterator for HammersbaldIterator<'a> {
     type Item = (PRef, Vec<u8>, Vec<u8>, Option<Vec<PRef>>);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if let Some((pref, envelope)) = self.dagi.next() {
+        if let Some((pref, envelope)) = self.ei.next() {
             match Payload::deserialize(envelope.payload()).unwrap() {
                 Payload::Indexed(indexed) => {
                     return Some((pref, indexed.key.to_vec(), indexed.data.data.to_vec(), indexed.data.referred()))
