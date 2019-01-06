@@ -69,7 +69,7 @@ impl Transient {
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(Box::new(Transient::new(true)))?),
                 cached_data_pages)?))?;
-        Hammersbald::new(log, table, data, link, bucket_fill_target)
+        Ok(Box::new(Hammersbald::new(log, table, data, link, bucket_fill_target)?))
     }
 }
 

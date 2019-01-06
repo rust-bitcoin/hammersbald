@@ -50,8 +50,6 @@ mod persistent;
 mod error;
 mod stats;
 mod api;
-#[cfg(feature="bitcoin_support")]
-pub mod bitcoin_support;
 
 pub use pref::PRef;
 pub use error::HammersbaldError;
@@ -59,6 +57,13 @@ pub use api::{
     HammersbaldAPI,
     HammersbaldDataWriter,
     HammersbaldDataReader,
+    HammersbaldIterator,
     persistent,
     transient
 };
+
+#[cfg(feature="bitcoin_support")]
+mod bitcoin_adaptor;
+
+#[cfg(feature="bitcoin_support")]
+pub use bitcoin_adaptor::BitcoinAdaptor;

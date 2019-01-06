@@ -58,19 +58,19 @@ pub trait HammersbaldAPI : Send + Sync {
 
     /// store data accessible with key
     /// returns a persistent reference to stored data
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError>;
+    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError>;
 
     /// retrieve data with key
     /// returns Some(persistent reference, data) or None
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError>;
+    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError>;
 
     /// store data
     /// returns a persistent reference
-    fn put_referred(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError>;
+    fn put(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError>;
 
     /// retrieve data using a persistent reference
     /// returns (key, data)
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError>;
+    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError>;
 
     /// iterator of data
     fn iter(&self) -> HammersbaldIterator;
@@ -138,9 +138,9 @@ impl<'a> Read for HammersbaldDataReader<'a> {
 
 impl Hammersbald {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Hammersbald, HammersbaldError> {
         let mem = MemTable::new(log, table, data, link, bucket_fill_target);
-        let mut db = Box::new(Hammersbald { mem });
+        let mut db = Hammersbald { mem };
         db.recover()?;
         db.load()?;
         db.batch()?;
@@ -192,7 +192,7 @@ impl HammersbaldAPI for Hammersbald {
         self.mem.shutdown()
     }
 
-    fn put(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
@@ -204,16 +204,16 @@ impl HammersbaldAPI for Hammersbald {
         Ok(data_offset)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
+    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
         self.mem.get(key)
     }
 
-    fn put_referred(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+    fn put(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
         let data_offset = self.mem.append_referred(data)?;
         Ok(data_offset)
     }
 
-    fn get_referred(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError> {
+    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError> {
         let envelope = self.mem.get_envelope(pref)?;
         match Payload::deserialize(envelope.payload())? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec())),
@@ -275,25 +275,25 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let pref = db.put(&key, &data).unwrap();
+            let pref = db.put_keyed(&key, &data).unwrap();
             check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec())));
+            assert_eq!(db.get_keyed(&k[..]).unwrap(), Some((*o, v.to_vec())));
         }
 
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let pref = db.put(&key, &data).unwrap();
+            let pref = db.put_keyed(&key, &data).unwrap();
             check.insert(key, (pref, data));
         }
         db.batch().unwrap();
 
         for (k, (o, v)) in check.iter() {
-            assert_eq!(db.get(&k[..]).unwrap(), Some((*o, v.to_vec())));
+            assert_eq!(db.get_keyed(&k[..]).unwrap(), Some((*o, v.to_vec())));
         }
         db.shutdown();
     }

@@ -57,6 +57,6 @@ impl Persistent {
             Box::new(CachedFile::new(
             Box::new(RolledFile::new(name, "tb", false, TABLE_CHUNK_SIZE)?), cached_data_pages)?))?;
 
-        Hammersbald::new(log, table, data, link, bucket_fill_target)
+        Ok(Box::new(Hammersbald::new(log, table, data, link, bucket_fill_target)?))
     }
 }

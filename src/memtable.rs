@@ -508,13 +508,13 @@ mod test {
         for _ in 0 .. 10000 {
             rng.fill_bytes(&mut key);
             rng.fill_bytes(&mut data);
-            let o = db.put(&key, &data).unwrap();
+            let o = db.put_keyed(&key, &data).unwrap();
             check.insert(key, (o, data.to_vec()));
         }
         db.batch().unwrap();
 
         for (k, (o, data)) in check {
-            assert_eq!(db.get(&k[..]).unwrap().unwrap(), (o, data));
+            assert_eq!(db.get_keyed(&k[..]).unwrap().unwrap(), (o, data));
         }
         db.shutdown();
     }
