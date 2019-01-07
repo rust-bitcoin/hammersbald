@@ -72,6 +72,10 @@ pub trait HammersbaldAPI : Send + Sync {
     /// returns (key, data)
     fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError>;
 
+    /// forget a key (if known)
+    /// This is not a real delete as data will be still accessible through its PRef, but contains hash table growth
+    fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError>;
+
     /// iterator of data
     fn iter(&self) -> HammersbaldIterator;
 }
@@ -220,6 +224,10 @@ impl HammersbaldAPI for Hammersbald {
             Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec())),
             _ => Err(HammersbaldError::Corrupted("referred should point to data".to_string()))
         }
+    }
+
+    fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {
+        self.mem.forget(key)
     }
 
     fn iter(&self) -> HammersbaldIterator {

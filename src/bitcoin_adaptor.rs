@@ -98,6 +98,10 @@ impl HammersbaldAPI for BitcoinAdaptor {
         self.hammersbald.get(pref)
     }
 
+    fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {
+        self.hammersbald.forget(key)
+    }
+
     fn iter(&self) -> HammersbaldIterator {
         self.hammersbald.iter()
     }

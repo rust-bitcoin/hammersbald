@@ -41,6 +41,7 @@ const INIT_LOGMOD :usize = 8;
 
 pub struct MemTable {
     step: usize,
+    forget: usize,
     log_mod: u32,
     sip0: u64,
     sip1: u64,
@@ -57,7 +58,7 @@ impl MemTable {
     pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile, link_file: DataFile, bucket_fill_target: usize) -> MemTable {
         let mut rng = thread_rng();
 
-        MemTable {log_mod: INIT_LOGMOD as u32, step: 0,
+        MemTable {log_mod: INIT_LOGMOD as u32, step: 0, forget: 0,
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
@@ -251,33 +252,48 @@ impl MemTable {
 
         self.store_to_bucket(bucket, hash, data_offset)?;
 
-        if hash % self.bucket_fill_target as u32 == 0 && self.step < (1 << 31) {
-            if self.step < (1 << self.log_mod) {
-                let step = self.step;
-                self.rehash_bucket(step)?;
-            }
+        if self.forget == 0 {
+            if hash % self.bucket_fill_target as u32 == 0 && self.step < (1 << 31) {
+                if self.step < (1 << self.log_mod) {
+                    let step = self.step;
+                    self.rehash_bucket(step)?;
+                }
 
-            self.step += 1;
-            if self.step > (1 << (self.log_mod + 1)) {
-                self.log_mod += 1;
-                self.step = 0;
-            }
+                self.step += 1;
+                if self.step > (1 << (self.log_mod + 1)) {
+                    self.log_mod += 1;
+                    self.step = 0;
+                }
 
-            self.buckets.push(Bucket::default());
-            self.dirty.append();
+                self.buckets.push(Bucket::default());
+                self.dirty.append();
+            }
+        }
+        else {
+            self.forget -= 1;
         }
         Ok(())
     }
 
-    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket: usize) -> Result<(), HammersbaldError> {
+    pub fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {
+        let hash = self.hash(key);
+        let bucket = self.bucket_for_hash(hash);
+        if self.remove_duplicate(key, hash, bucket)? {
+            self.forget += 1;
+        }
+        Ok(())
+    }
+
+    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket: usize) -> Result<bool, HammersbaldError> {
+        let mut remove = None;
         if let Some(bucket) = self.buckets.get_mut(bucket) {
-            let mut remove = None;
             for (n, (_, pref)) in bucket.slots.iter().enumerate()
                 .filter(|s| (s.1).0 == hash) {
                 let envelope = self.data_file.get_envelope(*pref)?;
                 if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
                     if indexed.key == key {
                         remove = Some(n);
+                        break;
                     }
                 }
             }
@@ -285,7 +301,7 @@ impl MemTable {
                 bucket.slots.remove(r);
             }
         }
-        Ok(())
+        Ok(remove.is_some())
     }
 
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), HammersbaldError> {
@@ -516,9 +532,15 @@ mod test {
         }
         db.batch().unwrap();
 
-        for (k, (o, data)) in check {
-            assert_eq!(db.get_keyed(&k[..]).unwrap().unwrap(), (o, data));
+        for (k, (o, data)) in &check {
+            assert_eq!(db.get_keyed(&k[..]).unwrap().unwrap(), (*o, data.clone()));
         }
+
+        for (k, (_, _)) in &check {
+            db.forget(k).unwrap();
+            assert!(db.get_keyed(&k[..]).unwrap().is_none());
+        }
+
         db.shutdown();
     }
 }
