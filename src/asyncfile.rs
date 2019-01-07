@@ -18,7 +18,7 @@
 //! an append only file written in background
 //!
 
-use page::Page;
+use page::{Page, PAGE_SIZE};
 use pagedfile::PagedFile;
 
 use error::HammersbaldError;
@@ -70,10 +70,29 @@ impl AsyncFile {
             inner.flushed.notify_all();
         }
     }
+
+    fn read_in_queue (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        let queue = self.inner.queue.lock().expect("page queue lock poisoned");
+        if queue.len () > 0 {
+            let file = self.inner.file.lock().expect("file lock poisoned");
+            let len = file.len()?;
+            if pref.as_u64() >= len {
+                let index = ((pref.as_u64() - len) / PAGE_SIZE as u64) as usize;
+                if index < queue.len() {
+                    let page = queue[index].clone();
+                    return Ok(Some(page));
+                }
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl PagedFile for AsyncFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        if let Some(page) = self.read_in_queue(pref)? {
+            return Ok(Some(page));
+        }
         self.inner.file.lock().unwrap().read_page(pref)
     }
 
