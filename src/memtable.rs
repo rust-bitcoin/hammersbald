@@ -154,6 +154,9 @@ impl MemTable {
             if let Payload::Link(ref link) = Payload::deserialize(envelope.payload())? {
                 if let Some(bucket) = link_to_bucket.remove(&pos) {
                     self.buckets[bucket].slots = link.slots();
+                    if link_to_bucket.is_empty() {
+                        break;
+                    }
                 }
             }
         }
