@@ -32,7 +32,7 @@ use siphasher::sip::SipHasher;
 use rand::{thread_rng, RngCore};
 
 use std::hash::Hasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::cmp::{min, max};
 
@@ -46,6 +46,7 @@ pub struct MemTable {
     sip0: u64,
     sip1: u64,
     buckets: Vec<Bucket>,
+    ambiguous: HashSet<u32>,
     dirty: Dirty,
     log_file: LogFile,
     data_file: DataFile,
@@ -62,6 +63,7 @@ impl MemTable {
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
             buckets: vec!(Bucket::default(); INIT_BUCKETS),
+            ambiguous: HashSet::new(),
             dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file,
             bucket_fill_target: max(min(bucket_fill_target, 128), 1)}
     }
@@ -151,10 +153,18 @@ impl MemTable {
                 link_to_bucket.insert(link, n);
             }
         }
+        let mut seen = HashSet::new();
         for (pos, envelope) in self.link_file.envelopes() {
             if let Payload::Link(ref link) = Payload::deserialize(envelope.payload())? {
                 if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    self.buckets[bucket].slots = link.slots();
+                    let slots = link.slots();
+                    seen.clear();
+                    for (h, _) in &slots {
+                        if !seen.insert(*h) {
+                            self.ambiguous.insert(*h);
+                        }
+                    }
+                    self.buckets[bucket].slots = slots;
                     if link_to_bucket.is_empty() {
                         break;
                     }
@@ -287,14 +297,21 @@ impl MemTable {
     fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket: usize) -> Result<bool, HammersbaldError> {
         let mut remove = None;
         if let Some(bucket) = self.buckets.get_mut(bucket) {
-            for (n, (_, pref)) in bucket.slots.iter().enumerate()
-                .filter(|s| (s.1).0 == hash) {
-                let envelope = self.data_file.get_envelope(*pref)?;
-                if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
-                    if indexed.key == key {
-                        remove = Some(n);
-                        break;
+            if self.ambiguous.contains(&hash) {
+                for (n, (_, pref)) in bucket.slots.iter().enumerate()
+                    .filter(|s| (s.1).0 == hash) {
+                    let envelope = self.data_file.get_envelope(*pref)?;
+                    if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
+                        if indexed.key == key {
+                            remove = Some(n);
+                            break;
+                        }
                     }
+                }
+            }
+            else {
+                if let Some((n, _)) = bucket.slots.iter().enumerate().find(|s| (s.1).0 == hash) {
+                    remove = Some(n);
                 }
             }
             if let Some(r) = remove {
@@ -306,6 +323,9 @@ impl MemTable {
 
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), HammersbaldError> {
         if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
+            if bucket.slots.iter().any(|s| s.0 == hash ) {
+                self.ambiguous.insert(hash);
+            }
             bucket.slots.push((hash, pref));
         } else {
             return Err(HammersbaldError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
