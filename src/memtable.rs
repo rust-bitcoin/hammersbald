@@ -248,7 +248,7 @@ impl MemTable {
 
         self.store_to_bucket(bucket, hash, data_offset)?;
 
-        if thread_rng().next_u32() % self.bucket_fill_target as u32 == 0 && self.step < (1 << 31) {
+        if hash % self.bucket_fill_target as u32 == 0 && self.step < (1 << 31) {
             if self.step < (1 << self.log_mod) {
                 let step = self.step;
                 self.rehash_bucket(step)?;
