@@ -308,6 +308,9 @@ impl MemTable {
                         }
                     }
                 }
+                if remove.is_some() && bucket.slots.iter().filter(|s| s.0 == hash).count() <= 2 {
+                    self.ambiguous.remove(&hash);
+                }
             }
             else {
                 if let Some((n, _)) = bucket.slots.iter().enumerate().find(|s| (s.1).0 == hash) {
