@@ -66,10 +66,10 @@ impl BitcoinAdaptor {
     }
 
     /// Retrieve some bitcoin object
-    pub fn get_encodable<T: ? Sized>(&self, pref: PRef) -> Result<T, Box<Error>>
+    pub fn get_decodable<T: ? Sized>(&self, pref: PRef) -> Result<(Vec<u8>, T), Box<Error>>
         where T: Decodable<Cursor<Vec<u8>>>{
-        let (_, data) = self.hammersbald.get(pref)?;
-        Ok(decode(data)?)
+        let (key, data) = self.hammersbald.get(pref)?;
+        Ok((key, decode(data)?))
     }
 
     /// Store some bitcoin object with arbitary key
@@ -79,7 +79,7 @@ impl BitcoinAdaptor {
     }
 
     /// Retrieve some bitcoin object with arbitary key
-    pub fn get_keyed_encodable<T: ? Sized>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<Error>>
+    pub fn get_keyed_decodable<T: ? Sized>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<Error>>
         where T: Decodable<Cursor<Vec<u8>>>{
         if let Some((pref, data)) = self.hammersbald.get_keyed(key)? {
             return Ok(Some((pref, decode(data)?)));
@@ -210,7 +210,7 @@ mod test {
         // store the transaction without associating a key
         let txref = bdb.put_encodable(&tx).unwrap();
         // retrieve by direct reference
-        let tx2 = bdb.get_encodable::<Transaction>(txref).unwrap();
+        let (_, tx2) = bdb.get_decodable::<Transaction>(txref).unwrap();
         assert_eq!(tx, tx2);
 
         // store the transaction with its hash as key
@@ -252,7 +252,7 @@ mod test {
         // find
         if let Some((_, block1test)) = bdb.get_hash_keyed(&block1.bitcoin_hash()).unwrap() {
             assert_eq!(lb, block1test);
-            let gen = bdb.get_encodable(lb.previous).unwrap();
+            let (_, gen) = bdb.get_decodable(lb.previous).unwrap();
             assert_eq!(genesis, gen);
         }
         else {
