@@ -66,10 +66,25 @@ impl BitcoinAdaptor {
     }
 
     /// Retrieve some bitcoin object
-    pub fn get_encodable<T: ? Sized + BitcoinHash>(&self, pref: PRef) -> Result<T, Box<Error>>
+    pub fn get_encodable<T: ? Sized>(&self, pref: PRef) -> Result<T, Box<Error>>
         where T: Decodable<Cursor<Vec<u8>>>{
         let (_, data) = self.hammersbald.get(pref)?;
         Ok(decode(data)?)
+    }
+
+    /// Store some bitcoin object with arbitary key
+    pub fn put_keyed_encodable<T: ? Sized>( &mut self, key: &[u8], encodable: &T) -> Result<PRef, Box<Error>>
+        where T: Encodable<Vec<u8>> {
+        Ok(self.hammersbald.put_keyed(key, encode(encodable)?.as_slice())?)
+    }
+
+    /// Retrieve some bitcoin object with arbitary key
+    pub fn get_keyed_encodable<T: ? Sized>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<Error>>
+        where T: Decodable<Cursor<Vec<u8>>>{
+        if let Some((pref, data)) = self.hammersbald.get_keyed(key)? {
+            return Ok(Some((pref, decode(data)?)));
+        }
+        Ok(None)
     }
 }
 
