@@ -77,8 +77,9 @@ Example use:
         // store the transaction without associating a key
         let txref = bdb.put_encodable(&tx).unwrap();
         // retrieve by direct reference
-        let tx2 = bdb.get_encodable::<Transaction>(txref).unwrap();
+        let (key, tx2) = bdb.get_decodable::<Transaction>(txref).unwrap();
         assert_eq!(tx, tx2);
+        assert_eq!(key, tx.bitcoin_hash().as_bytes().to_vec());
 
         // store the transaction with its hash as key
         let txref2 = bdb.put_hash_keyed(&tx).unwrap();
