@@ -103,3 +103,5 @@ The store is a persistent hash map using [Linear Hashing](https://en.wikipedia.o
 The data storage size is limited to 2^48 (256TiB) due to the use of 6 byte persistent
 pointers. A data element can not exceed 2^24 (16MiB) in length. Key length is limited to 255 bytes. 
 
+## Release Notes
+1.5 upgrade to bitcoin 0.16
