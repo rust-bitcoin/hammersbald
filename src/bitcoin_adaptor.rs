@@ -86,6 +86,11 @@ impl BitcoinAdaptor {
         }
         Ok(None)
     }
+
+    /// quick check if the db contains a key. This might return false positive.
+    pub fn may_have_hash_key (&self, key: &Sha256dHash) -> Result<bool, Box<Error>> {
+        Ok(self.hammersbald.may_have_key(&key.as_bytes()[..])?)
+    }
 }
 
 impl HammersbaldAPI for BitcoinAdaptor {
@@ -111,6 +116,10 @@ impl HammersbaldAPI for BitcoinAdaptor {
 
     fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError> {
         self.hammersbald.get(pref)
+    }
+
+    fn may_have_key (&self, key: &[u8]) -> Result<bool, HammersbaldError> {
+        self.hammersbald.may_have_key(key)
     }
 
     fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {

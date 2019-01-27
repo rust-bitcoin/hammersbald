@@ -356,6 +356,19 @@ impl MemTable {
         self.log_file.log_page(bucket_page, &self.table_file)
     }
 
+    pub fn may_have_key(&self, key: &[u8]) -> Result<bool, HammersbaldError> {
+        let hash = self.hash(key);
+        let bucket_number = self.bucket_for_hash(hash);
+        if let Some(bucket) = self.buckets.get(bucket_number) {
+            if bucket.slots.iter().any (|(h, _)| *h == hash) {
+                return Ok (true);
+            }
+        } else {
+            return Err(HammersbaldError::Corrupted(format!("bucket {} should exist", bucket_number)));
+        }
+        Ok(false)
+    }
+
     // get the data last associated with the key
     pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
         let hash = self.hash(key);
