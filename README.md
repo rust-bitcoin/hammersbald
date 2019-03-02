@@ -79,7 +79,7 @@ Example use:
         // retrieve by direct reference
         let (key, tx2) = bdb.get_decodable::<Transaction>(txref).unwrap();
         assert_eq!(tx, tx2);
-        assert_eq!(key, tx.bitcoin_hash().as_bytes().to_vec());
+        assert_eq!(key, tx.bitcoin_hash()[..].to_vec());
 
         // store the transaction with its hash as key
         let txref2 = bdb.put_hash_keyed(&tx).unwrap();
@@ -104,5 +104,9 @@ The data storage size is limited to 2^48 (256TiB) due to the use of 6 byte persi
 pointers. A data element can not exceed 2^24 (16MiB) in length. Key length is limited to 255 bytes. 
 
 ## Release Notes
+1.6.0 upgrade to rust-bitcoin 0.17
+
 1.5.1 add API may_have_key
+
 1.5 upgrade to bitcoin 0.16
+

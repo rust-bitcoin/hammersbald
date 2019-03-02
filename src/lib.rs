@@ -28,6 +28,8 @@
 
 #[cfg(feature="bitcoin_support")]
 extern crate bitcoin;
+#[cfg(feature="bitcoin_support")]
+extern crate bitcoin_hashes;
 extern crate siphasher;
 extern crate rand;
 extern crate byteorder;

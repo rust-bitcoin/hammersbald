@@ -22,9 +22,10 @@ use HammersbaldAPI;
 use HammersbaldError;
 use HammersbaldIterator;
 
+use bitcoin_hashes::sha256d;
+
 use bitcoin::{
     BitcoinHash,
-    util::hash::Sha256dHash,
     consensus::{Decoder, Encoder, Decodable, Encodable, encode}
 };
 
@@ -47,13 +48,13 @@ impl BitcoinAdaptor {
     /// Store some bitcoin object that has a bitcoin hash
     pub fn put_hash_keyed<T: ? Sized + BitcoinHash>(&mut self, encodable: &T) -> Result<PRef, Box<Error>>
         where T: Encodable<Vec<u8>> {
-        Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash().as_bytes()[..], encode(encodable)?.as_slice())?)
+        Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash()[..], encode(encodable)?.as_slice())?)
     }
 
     /// Retrieve a bitcoin_object with its hash
-    pub fn get_hash_keyed<T: ? Sized + BitcoinHash>(&self, id: &Sha256dHash) -> Result<Option<(PRef, T)>, Box<Error>>
+    pub fn get_hash_keyed<T: ? Sized + BitcoinHash>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<Error>>
         where T: Decodable<Cursor<Vec<u8>>>{
-        if let Some((pref, data)) = self.hammersbald.get_keyed(&id.as_bytes()[..])? {
+        if let Some((pref, data)) = self.hammersbald.get_keyed(&id[..])? {
             return Ok(Some((pref, decode(data)?)))
         }
         Ok(None)
@@ -88,8 +89,8 @@ impl BitcoinAdaptor {
     }
 
     /// quick check if the db contains a key. This might return false positive.
-    pub fn may_have_hash_key (&self, key: &Sha256dHash) -> Result<bool, Box<Error>> {
-        Ok(self.hammersbald.may_have_key(&key.as_bytes()[..])?)
+    pub fn may_have_hash_key (&self, key: &sha256d::Hash) -> Result<bool, Box<Error>> {
+        Ok(self.hammersbald.may_have_key(&key[..])?)
     }
 }
 
@@ -181,7 +182,7 @@ mod test {
 
     // need to implement if put_hash_keyed and get_hash_keyed should be used
     impl BitcoinHash for LinkedBlock {
-        fn bitcoin_hash(&self) -> Sha256dHash {
+        fn bitcoin_hash(&self) -> sha256d::Hash {
             self.block.bitcoin_hash()
         }
     }
