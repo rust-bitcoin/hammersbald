@@ -82,6 +82,7 @@ impl PagedFileAppender {
     }
 
     pub fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError> {
+        let mut pages = Vec::with_capacity(buf.len()/PAGE_SIZE+1);
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -94,7 +95,7 @@ impl PagedFileAppender {
                 self.pos += space as u64;
                 if self.pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
                     page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
-                    self.file.append_page(page.clone())?;
+                    pages.push(page.clone());
                     self.pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
                 }
             }
@@ -102,6 +103,7 @@ impl PagedFileAppender {
                 self.page = None;
             }
         }
+        self.file.append_pages(&pages)?;
         Ok(self.pos)
     }
 
