@@ -111,6 +111,13 @@ impl PagedFile for Transient {
         Ok(())
     }
 
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        for page in pages {
+            self.append_page(page.clone())?;
+        }
+        Ok(())
+    }
+
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(page.pref().as_u64()))?;

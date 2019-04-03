@@ -77,6 +77,14 @@ impl PagedFile for CachedFile {
 
     }
 
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        let mut cache = self.cache.lock().unwrap();
+        for p in pages {
+            cache.append(p.clone());
+        }
+        self.file.append_pages(pages)
+    }
+
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         let mut cache = self.cache.lock().unwrap();
         cache.update(page.clone());

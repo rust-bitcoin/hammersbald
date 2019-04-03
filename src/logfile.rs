@@ -87,8 +87,12 @@ impl PagedFile for LogFile {
     fn shutdown (&mut self) {}
 
     fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-         self.file.append_page(page)
-     }
+        self.file.append_page(page)
+    }
+
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        self.file.append_pages(pages)
+    }
 
     fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
         unimplemented!()

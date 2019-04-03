@@ -27,7 +27,6 @@ use pref::PRef;
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::collections::VecDeque;
 
 pub struct AsyncFile {
     inner: Arc<AsyncFileInner>
@@ -38,14 +37,14 @@ struct AsyncFileInner {
     work: Condvar,
     flushed: Condvar,
     run: AtomicBool,
-    queue: Mutex<VecDeque<Page>>
+    queue: Mutex<Vec<Page>>
 }
 
 impl AsyncFileInner {
     pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, HammersbaldError> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
-            queue: Mutex::new(VecDeque::new())})
+            queue: Mutex::new(Vec::new())})
     }
 }
 
@@ -64,9 +63,8 @@ impl AsyncFile {
                 queue = inner.work.wait(queue).expect("page queue lock poisoned");
             }
             let mut file = inner.file.lock().expect("file lock poisoned");
-            while let Some(page) = queue.pop_front() {
-                file.append_page(page).expect("can not extend data file");
-            }
+            file.append_pages(&queue).expect("can not write in background");
+            queue.clear();
             inner.flushed.notify_all();
         }
     }
@@ -121,7 +119,16 @@ impl PagedFile for AsyncFile {
 
     fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
-        queue.push_back(page);
+        queue.push(page);
+        self.inner.work.notify_one();
+        Ok(())
+    }
+
+    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        let mut queue = self.inner.queue.lock().unwrap();
+        for page in pages {
+            queue.push(page.clone());
+        }
         self.inner.work.notify_one();
         Ok(())
     }

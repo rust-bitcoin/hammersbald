@@ -37,6 +37,8 @@ pub trait PagedFile : Send + Sync {
     fn shutdown (&mut self);
     /// append a page
     fn append_page (&mut self, page: Page) -> Result<(), HammersbaldError>;
+    /// append pages
+    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError>;
     /// write a page at its position
     fn update_page (&mut self, page: Page) -> Result<u64, HammersbaldError>;
     /// flush buffered writes
@@ -163,6 +165,10 @@ impl PagedFile for PagedFileAppender {
 
     fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         self.file.append_page(page)
+    }
+
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        self.file.append_pages(pages)
     }
 
     fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
