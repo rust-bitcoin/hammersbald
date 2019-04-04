@@ -117,13 +117,6 @@ impl PagedFile for AsyncFile {
         self.inner.run.store(false, Ordering::Release)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        let mut queue = self.inner.queue.lock().unwrap();
-        queue.push(page);
-        self.inner.work.notify_one();
-        Ok(())
-    }
-
     fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
         for page in pages {

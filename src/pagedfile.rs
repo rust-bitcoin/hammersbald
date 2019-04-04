@@ -35,8 +35,6 @@ pub trait PagedFile : Send + Sync {
     fn sync (&self) -> Result<(), HammersbaldError>;
     /// shutdown async write
     fn shutdown (&mut self);
-    /// append a page
-    fn append_page (&mut self, page: Page) -> Result<(), HammersbaldError>;
     /// append pages
     fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError>;
     /// write a page at its position
@@ -165,10 +163,6 @@ impl PagedFile for PagedFileAppender {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        self.file.append_page(page)
-    }
-
     fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         self.file.append_pages(pages)
     }
@@ -181,7 +175,7 @@ impl PagedFile for PagedFileAppender {
         if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
                 page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
-                self.file.append_page(page.clone())?;
+                self.file.append_pages(&vec!(page.clone()))?;
                 self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
             }
         }

@@ -81,13 +81,6 @@ impl PagedFile for SingleFile {
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        let mut file = self.file.lock().unwrap();
-        file.write(&page.into_buf())?;
-        self.len += PAGE_SIZE as u64;
-        Ok(())
-    }
-
     fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         let mut buf = vec!(0u8; pages.len()*PAGE_SIZE);
         for (i, p) in pages.iter().enumerate() {

@@ -151,25 +151,6 @@ impl PagedFile for RolledFile {
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        let chunk = (self.len / self.chunk_size) as u16;
-
-        if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
-            let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
-                + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new_chunk(file, self.len, self.chunk_size)?);
-        }
-
-        if let Some (file) = self.files.get_mut(&chunk) {
-            file.append_page(page)?;
-            self.len += PAGE_SIZE as u64;
-            return Ok(())
-        }
-        else {
-            return Err(HammersbaldError::Corrupted(format!("missing chunk in append {}", chunk)));
-        }
-    }
-
     fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         let mut start = 0;
         while start < pages.len() {
