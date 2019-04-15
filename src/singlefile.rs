@@ -49,21 +49,25 @@ impl SingleFile {
 }
 
 impl PagedFile for SingleFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let o = pref.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(HammersbaldError::Corrupted("read from wrong file".to_string()));
         }
+        let mut result = Vec::new();
         let pos = o - self.base;
         if pos >= self.len {
-            return Ok(None);
+            return Ok(result);
         }
 
         let mut file = self.file.lock().unwrap();
-        let mut buffer = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(pos))?;
+        let mut buffer = vec!(0u8; PAGE_SIZE * n);
         file.read(&mut buffer)?;
-        Ok(Some(Page::from_buf(buffer)))
+        for i in 0 .. n {
+            result.push(Page::from_slice(&buffer[i*PAGE_SIZE .. (i+1)*PAGE_SIZE]));
+        }
+        Ok(result)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {

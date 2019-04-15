@@ -68,8 +68,8 @@ impl LogFile {
 }
 
 impl PagedFile for LogFile {
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        self.file.read_page(pref)
+    fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        self.file.read_pages(pref, n)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {

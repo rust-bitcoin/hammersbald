@@ -25,8 +25,8 @@ use std::cmp::min;
 
 /// a paged file
 pub trait PagedFile : Send + Sync {
-    /// read a page at pref
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
+    /// read n page starting at pref
+    fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError>;
     /// length of the storage
     fn len (&self) -> Result<u64, HammersbaldError>;
     /// truncate storage
@@ -126,11 +126,18 @@ impl PagedFileAppender {
 }
 
 impl PagedFile for PagedFileAppender {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        let mut result = Vec::new();
         if let Some(ref page) = self.page {
-            if self.pos.this_page() == pref {
-                return Ok(Some(page.clone()))
+            let before = min(pref + n * PAGE_SIZE, page.pref());
+            if before > pref {
+                let np = (before - pref) / PAGE_SIZE;
+                result.append(self.file.read_pages(pref, np));
             }
+            if self.pos.this_page() <= pref + n * PAGE_SIZE {
+                result.push(page.clone());
+            }
+            let after = min(pref + n * PAGE_SIZE, self.pos.this_page() + PAGE_SIZE);
         }
         return self.file.read_page(pref)
     }
