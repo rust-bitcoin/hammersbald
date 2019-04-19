@@ -15,7 +15,7 @@ name = "hammersbald"
 path = "src/lib.rs"
 
 [features]
-bitcoin_support=["bitcoin"]
+bitcoin_support=["bitcoin", "bitcoin_hashes"]
 
 [dependencies]
 rand="0.5"
