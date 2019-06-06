@@ -41,36 +41,42 @@ impl CachedFile {
 }
 
 impl PagedFile for CachedFile {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
     fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let mut result = Vec::new();
         let mut cache = self.cache.lock().unwrap();
         let mut from = pref;
         let mut until = pref;
         for i in 0..n {
-            if let Some(page) = cache.get(pref + i*PAGE_SIZE) {
+            if let Some(page) = cache.get(pref + (i*PAGE_SIZE) as u64) {
                 if from < until {
-                    let npages = (until - from) / PAGE_SIZE;
-                    if let Some(pages) = self.file.read_pages(from, npages) {
-                        for p in &pages {
-                            cache.cache(p.pref(), Arc::new(page.clone()));
-                            result.push(*p);
-                        }
+                    let npages = ((until.as_u64() - from.as_u64()) / PAGE_SIZE as u64) as usize;
+                    for p in self.file.read_pages(from, npages)? {
+                        cache.cache(p.pref(), Arc::new(page.clone()));
+                        result.push(p);
                     }
                 }
                 result.push(page);
-                from = pref + (i+1)*PAGE_SIZE;
+                from = pref + ((i+1)*PAGE_SIZE) as u64;
             }
             else {
-                until = pref + (i+1)*PAGE_SIZE;
+                until = pref + ((i+1)*PAGE_SIZE) as u64;
             }
         }
         if from < until {
-            let npages = (until - from) / PAGE_SIZE;
-            if let Some(pages) = self.file.read_pages(from, npages) {
-                for p in &pages {
-                    cache.cache(p.pref(), Arc::new(p.clone()));
-                    result.push(*p);
-                }
+            let npages = ((until.as_u64() - from.as_u64()) / PAGE_SIZE as u64) as usize;
+            for p in self.file.read_pages(from, npages)? {
+                cache.cache(p.pref(), Arc::new(p.clone()));
+                result.push(p);
             }
         }
 

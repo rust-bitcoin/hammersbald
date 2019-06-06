@@ -25,6 +25,8 @@ use std::cmp::min;
 
 /// a paged file
 pub trait PagedFile : Send + Sync {
+    /// read a page starting at pref
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
     /// read n page starting at pref
     fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError>;
     /// length of the storage
@@ -106,9 +108,12 @@ impl PagedFileAppender {
     }
 
     pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
+        let np = buf.len() / PAGE_SIZE;
+        let pages = self.read_pages(pos, np)?;
+        let mut pi = pages.iter();
         let mut read = 0;
         while read < buf.len() {
-            if let Some(ref page) = self.read_page(pos.this_page())? {
+            if let Some(page) = pi.next() {
                 let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
@@ -126,20 +131,36 @@ impl PagedFileAppender {
 }
 
 impl PagedFile for PagedFileAppender {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
     fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
-        let mut result = Vec::new();
         if let Some(ref page) = self.page {
-            let before = min(pref + n * PAGE_SIZE, page.pref());
+            let mut result = Vec::new();
+            let before = min(pref + (n * PAGE_SIZE) as u64, page.pref());
             if before > pref {
-                let np = (before - pref) / PAGE_SIZE;
-                result.append(self.file.read_pages(pref, np));
+                let np = ((before.as_u64() - pref.as_u64()) / PAGE_SIZE as u64) as usize;
+                result.extend(self.file.read_pages(pref, np)?);
             }
-            if self.pos.this_page() <= pref + n * PAGE_SIZE {
+            if self.pos.this_page() <= pref + (n * PAGE_SIZE) as u64 {
                 result.push(page.clone());
             }
-            let after = min(pref + n * PAGE_SIZE, self.pos.this_page() + PAGE_SIZE);
+            let after = min(pref + (n * PAGE_SIZE) as u64, self.pos.this_page() + PAGE_SIZE as u64);
+            if after > self.pos.this_page() + PAGE_SIZE as u64 {
+                let start = self.pos.this_page() + PAGE_SIZE as u64;
+                let np = ((after.as_u64() - start.as_u64()) / PAGE_SIZE as u64) as usize;
+                result.extend(self.file.read_pages(start, np)?);
+            }
+            return Ok(result);
         }
-        return self.file.read_page(pref)
+        return self.file.read_pages(pref, n)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {
@@ -148,7 +169,7 @@ impl PagedFile for PagedFileAppender {
 
     fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         if new_len >= PAGE_SIZE as u64 {
-            if let Some(last_page) = self.file.read_page(PRef::from(new_len - PAGE_SIZE as u64))? {
+            if let Some(last_page) = self.file.read_pages(PRef::from(new_len - PAGE_SIZE as u64), 1)?.first() {
                 self.lep = last_page.read_pref(PAGE_PAYLOAD_SIZE);
             }
             else {
@@ -212,9 +233,11 @@ impl<'file> Iterator for PagedFileIterator<'file> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber <= (1 << 35) / PAGE_SIZE as u64 {
             let pref = PRef::from((self.pagenumber)* PAGE_SIZE as u64);
-            if let Ok(Some(page)) = self.file.read_page(pref) {
-                self.pagenumber += 1;
-                return Some(page);
+            if let Ok(pages) = self.file.read_pages(pref, 1) {
+                if let Some(page) = pages.first() {
+                    self.pagenumber += 1;
+                    return Some(page.clone());
+                }
             }
         }
         None

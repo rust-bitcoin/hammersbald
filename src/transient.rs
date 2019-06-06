@@ -74,15 +74,25 @@ impl Transient {
 }
 
 impl PagedFile for Transient {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
     fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let mut result = Vec::new();
         let mut inner = self.inner.lock().unwrap();
         let len = inner.seek(SeekFrom::End(0))?;
         if pref.as_u64() >= len {
-            return Ok(None);
+            return Ok(result);
         }
         inner.seek(SeekFrom::Start(pref.as_u64()))?;
-        for i in 0 .. n {
+        for _ in 0 .. n {
             let mut buffer = [0u8; PAGE_SIZE];
             inner.read(&mut buffer)?;
             result.push(Page::from_buf(buffer));

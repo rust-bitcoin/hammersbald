@@ -49,6 +49,16 @@ impl SingleFile {
 }
 
 impl PagedFile for SingleFile {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
     fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let o = pref.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
@@ -63,7 +73,7 @@ impl PagedFile for SingleFile {
         let mut file = self.file.lock().unwrap();
         file.seek(SeekFrom::Start(pos))?;
         let mut buffer = vec!(0u8; PAGE_SIZE * n);
-        file.read(&mut buffer)?;
+        file.read_exact(&mut buffer)?;
         for i in 0 .. n {
             result.push(Page::from_slice(&buffer[i*PAGE_SIZE .. (i+1)*PAGE_SIZE]));
         }
@@ -91,7 +101,7 @@ impl PagedFile for SingleFile {
             buf.as_mut_slice()[i*PAGE_SIZE..(i+1)*PAGE_SIZE].copy_from_slice(&p.clone().into_buf()[..]);
         }
         let mut file = self.file.lock().unwrap();
-        file.write(buf.as_slice())?;
+        file.write_all(buf.as_slice())?;
         self.len += pages.len()as u64*PAGE_SIZE as u64;
         Ok(())
     }
@@ -105,7 +115,7 @@ impl PagedFile for SingleFile {
 
         let mut file = self.file.lock().unwrap();
         file.seek(SeekFrom::Start(pos))?;
-        file.write(&page.into_buf())?;
+        file.write_all(&page.into_buf())?;
         self.len = max(self.len, pos + PAGE_SIZE as u64);
         Ok(self.len)
     }
