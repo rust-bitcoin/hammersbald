@@ -26,7 +26,7 @@ use pref::PRef;
 use std::sync::Mutex;
 use std::fs::File;
 use std::io::{Read,Write,Seek,SeekFrom};
-use std::cmp::{max, min};
+use std::cmp::max;
 
 pub struct SingleFile {
     file: Mutex<File>,
@@ -69,15 +69,13 @@ impl PagedFile for SingleFile {
         if pos >= self.len {
             return Ok(result);
         }
-        let available = min(n, ((self.len - pos)/PAGE_SIZE as u64) as usize);
-        if available > 0 {
-            let mut file = self.file.lock().unwrap();
-            file.seek(SeekFrom::Start(pos))?;
-            let mut buffer = vec!(0u8; PAGE_SIZE * available);
-            file.read_exact(&mut buffer)?;
-            for i in 0..available {
-                result.push(Page::from_slice(&buffer[i * PAGE_SIZE..(i + 1) * PAGE_SIZE]));
-            }
+
+        let mut file = self.file.lock().unwrap();
+        file.seek(SeekFrom::Start(pos))?;
+        let mut buffer = vec!(0u8; PAGE_SIZE * n);
+        file.read_exact(&mut buffer)?;
+        for i in 0 .. n {
+            result.push(Page::from_slice(&buffer[i*PAGE_SIZE .. (i+1)*PAGE_SIZE]));
         }
         Ok(result)
     }

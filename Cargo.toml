@@ -15,15 +15,15 @@ name = "hammersbald"
 path = "src/lib.rs"
 
 [features]
-bitcoin_support=["bitcoin", "bitcoin_hashes"]
+bitcoin_support=["bitcoin"]
 
 [dependencies]
 rand="0.5"
 siphasher = "0.2"
 byteorder="1.2"
 lru-cache = "0.1.1"
-bitcoin = { version = "0.18", optional = true }
-bitcoin_hashes = { version = "0.3", optional = true }
+bitcoin = { version = "0.17", optional = true }
+bitcoin_hashes = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
 hex = "0.3"

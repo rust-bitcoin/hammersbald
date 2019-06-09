@@ -21,7 +21,7 @@ use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use error::HammersbaldError;
 use pref::PRef;
 
-use std::cmp::{max,min};
+use std::cmp::min;
 
 /// a paged file
 pub trait PagedFile : Send + Sync {
@@ -142,25 +142,24 @@ impl PagedFile for PagedFileAppender {
     }
 
     fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
-        let end = pref + (n * PAGE_SIZE) as u64;
         if let Some(ref page) = self.page {
             let mut result = Vec::new();
-            if pref < self.pos.this_page() {
-                let np = ((min(self.pos.this_page().as_u64(), end.as_u64()) - pref.as_u64()) / PAGE_SIZE as u64) as usize;
+            let before = min(pref + (n * PAGE_SIZE) as u64, page.pref());
+            if before > pref {
+                let np = ((before.as_u64() - pref.as_u64()) / PAGE_SIZE as u64) as usize;
                 result.extend(self.file.read_pages(pref, np)?);
                 if result.len() < np {
                     return Ok(result);
                 }
             }
-            if end > self.pos.this_page() {
-                if pref <= self.pos.this_page() {
-                    result.push(page.clone());
-                }
-                if end > self.pos.this_page() + PAGE_SIZE as u64 {
-                    let start = max(pref, self.pos.this_page() + PAGE_SIZE as u64);
-                    let np = ((end.as_u64() - start.as_u64()) / PAGE_SIZE as u64) as usize;
-                    result.extend(self.file.read_pages(start, np)?);
-                }
+            if self.pos.this_page() >= pref && self.pos.this_page() <= pref + (n * PAGE_SIZE) as u64 {
+                result.push(page.clone());
+            }
+            let after = min(pref + (n * PAGE_SIZE) as u64, self.pos.this_page() + PAGE_SIZE as u64);
+            if after > self.pos.this_page() + PAGE_SIZE as u64 {
+                let start = self.pos.this_page() + PAGE_SIZE as u64;
+                let np = ((after.as_u64() - start.as_u64()) / PAGE_SIZE as u64) as usize;
+                result.extend(self.file.read_pages(start, np)?);
             }
             return Ok(result);
         }
