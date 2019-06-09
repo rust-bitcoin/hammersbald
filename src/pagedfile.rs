@@ -108,7 +108,7 @@ impl PagedFileAppender {
     }
 
     pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
-        let np = buf.len() / PAGE_SIZE;
+        let np = buf.len() / PAGE_SIZE + if buf.len() % PAGE_SIZE != 0 {1} else {0};
         let pages = self.read_pages(pos, np)?;
         let mut pi = pages.iter();
         let mut read = 0;
@@ -148,8 +148,11 @@ impl PagedFile for PagedFileAppender {
             if before > pref {
                 let np = ((before.as_u64() - pref.as_u64()) / PAGE_SIZE as u64) as usize;
                 result.extend(self.file.read_pages(pref, np)?);
+                if result.len() < np {
+                    return Ok(result);
+                }
             }
-            if self.pos.this_page() <= pref + (n * PAGE_SIZE) as u64 {
+            if self.pos.this_page() >= pref && self.pos.this_page() <= pref + (n * PAGE_SIZE) as u64 {
                 result.push(page.clone());
             }
             let after = min(pref + (n * PAGE_SIZE) as u64, self.pos.this_page() + PAGE_SIZE as u64);
