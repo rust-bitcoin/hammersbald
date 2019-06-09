@@ -55,31 +55,23 @@ impl PagedFile for CachedFile {
         let mut result = Vec::new();
         let mut cache = self.cache.lock().unwrap();
         let mut from = pref;
-        let mut until = pref;
-        for i in 0..n {
-            if let Some(page) = cache.get(pref + (i*PAGE_SIZE) as u64) {
-                if from < until {
-                    let npages = ((until.as_u64() - from.as_u64()) / PAGE_SIZE as u64) as usize;
-                    for p in self.file.read_pages(from, npages)? {
-                        cache.cache(p.pref(), Arc::new(page.clone()));
-                        result.push(p);
-                    }
-                }
+        let until = pref + (n * PAGE_SIZE) as u64;
+        while from < until {
+            if let Some(page) = cache.get(from) {
                 result.push(page);
-                from = pref + ((i+1)*PAGE_SIZE) as u64;
+                from += PAGE_SIZE as u64;
             }
             else {
-                until = pref + ((i+1)*PAGE_SIZE) as u64;
+                let mut n = 0;
+                let mut next = from;
+                while next < until && cache.get(next).is_none() {
+                    n += 1;
+                    next += PAGE_SIZE as u64;
+                }
+                result.extend(self.file.read_pages(from, n)?);
+                from = next;
             }
         }
-        if from < until {
-            let npages = ((until.as_u64() - from.as_u64()) / PAGE_SIZE as u64) as usize;
-            for p in self.file.read_pages(from, npages)? {
-                cache.cache(p.pref(), Arc::new(p.clone()));
-                result.push(p);
-            }
-        }
-
         Ok(result)
     }
 
