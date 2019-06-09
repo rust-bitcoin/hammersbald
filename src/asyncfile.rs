@@ -27,6 +27,7 @@ use pref::PRef;
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::cmp::min;
 
 pub struct AsyncFile {
     inner: Arc<AsyncFileInner>
@@ -105,7 +106,7 @@ impl PagedFile for AsyncFile {
             let file = self.inner.file.lock().expect("file lock poisoned");
             file_end = PRef::from(file.len()?);
             if pref < file_end {
-                let np = ((file_end.as_u64() - pref.as_u64())/PAGE_SIZE as u64) as usize;
+                let np = min(need, ((file_end.as_u64() - pref.as_u64())/PAGE_SIZE as u64) as usize);
                 need -= np;
                 result.extend(file.read_pages(pref, np)?);
             }
