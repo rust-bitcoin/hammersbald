@@ -75,7 +75,7 @@ impl Error for HammersbaldError {
 
 impl fmt::Display for HammersbaldError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Hammersbald error: {} cause: {:?}", self.description(), self.cause())
+        write!(f, "Hammersbald error: {} cause: {:?}", self.description(), self.source())
     }
 }
 

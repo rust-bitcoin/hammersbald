@@ -27,7 +27,6 @@ use pref::PRef;
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::collections::VecDeque;
 
 pub struct AsyncFile {
     inner: Arc<AsyncFileInner>
@@ -38,14 +37,14 @@ struct AsyncFileInner {
     work: Condvar,
     flushed: Condvar,
     run: AtomicBool,
-    queue: Mutex<VecDeque<Page>>
+    queue: Mutex<Vec<Page>>
 }
 
 impl AsyncFileInner {
     pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, HammersbaldError> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
-            queue: Mutex::new(VecDeque::new())})
+            queue: Mutex::new(Vec::new())})
     }
 }
 
@@ -64,9 +63,8 @@ impl AsyncFile {
                 queue = inner.work.wait(queue).expect("page queue lock poisoned");
             }
             let mut file = inner.file.lock().expect("file lock poisoned");
-            while let Some(page) = queue.pop_front() {
-                file.append_page(page).expect("can not extend data file");
-            }
+            file.append_pages(&queue).expect("can not write in background");
+            queue.clear();
             inner.flushed.notify_all();
         }
     }
@@ -90,10 +88,40 @@ impl AsyncFile {
 
 impl PagedFile for AsyncFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        if let Some(page) = self.read_in_queue(pref)? {
-            return Ok(Some(page));
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
         }
-        self.inner.file.lock().unwrap().read_page(pref)
+        else {
+            Ok(None)
+        }
+    }
+
+    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        let mut result = Vec::new();
+        let mut need = n;
+        let file_end ;
+        {
+            let file = self.inner.file.lock().expect("file lock poisoned");
+            file_end = PRef::from(file.len()?);
+            if pref < file_end {
+                let np = ((file_end.as_u64() - pref.as_u64())/PAGE_SIZE as u64) as usize;
+                need -= np;
+                result.extend(file.read_pages(pref, np)?);
+            }
+        }
+        if need > 0 {
+            let mut next = file_end;
+            while let Some(page) = self.read_in_queue(next)? {
+                result.push(page);
+                next += PAGE_SIZE as u64;
+                need -= 1;
+                if need == 0 {
+                    break;
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {
@@ -119,9 +147,11 @@ impl PagedFile for AsyncFile {
         self.inner.run.store(false, Ordering::Release)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
-        queue.push_back(page);
+        for page in pages {
+            queue.push(page.clone());
+        }
         self.inner.work.notify_one();
         Ok(())
     }

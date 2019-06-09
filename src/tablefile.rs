@@ -74,18 +74,30 @@ impl PagedFile for TableFile {
     fn shutdown (&mut self) {}
 
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        if let Some(page) = self.file.read_page(pref)? {
-            if page.pref() != pref {
-                return Err(HammersbaldError::Corrupted(format!("table page {} does not have the pref of its position", pref)));
-            }
-            return Ok(Some(page));
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
         }
-        Ok(None)
+        else {
+            Ok(None)
+        }
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), HammersbaldError> {
+    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        let result = self.file.read_pages(pref, n)?;
+        for (i, page) in result.iter().enumerate() {
+            if page.pref() != pref + (i * PAGE_SIZE) as u64 {
+                return Err(HammersbaldError::Corrupted(format!("table page {} does not have the pref of its position",
+                                                               pref + (i * PAGE_SIZE) as u64)));
+            }
+        }
+        Ok(result)
+    }
+
+    fn append_pages(&mut self, _: &Vec<Page>) -> Result<(), HammersbaldError> {
         unimplemented!()
     }
+
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
         self.file.update_page(page)
     }
@@ -101,9 +113,11 @@ impl<'a> Iterator for BucketIterator<'a> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         let table_offset = TableFile::table_offset(self.n);
-        if let Ok(Some(page)) = self.file.read_page(table_offset.this_page()) {
-            self.n += 1;
-            return Some(page.read_pref(table_offset.in_page_pos()))
+        if let Ok(pages) = self.file.read_pages(table_offset.this_page(), 1) {
+            if let Some(page) = pages.first() {
+                self.n += 1;
+                return Some(page.read_pref(table_offset.in_page_pos()))
+            }
         }
         None
     }

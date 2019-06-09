@@ -25,8 +25,10 @@ use std::cmp::min;
 
 /// a paged file
 pub trait PagedFile : Send + Sync {
-    /// read a page at pref
+    /// read a page starting at pref
     fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
+    /// read n page starting at pref
+    fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError>;
     /// length of the storage
     fn len (&self) -> Result<u64, HammersbaldError>;
     /// truncate storage
@@ -35,8 +37,8 @@ pub trait PagedFile : Send + Sync {
     fn sync (&self) -> Result<(), HammersbaldError>;
     /// shutdown async write
     fn shutdown (&mut self);
-    /// append a page
-    fn append_page (&mut self, page: Page) -> Result<(), HammersbaldError>;
+    /// append pages
+    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError>;
     /// write a page at its position
     fn update_page (&mut self, page: Page) -> Result<u64, HammersbaldError>;
     /// flush buffered writes
@@ -80,6 +82,7 @@ impl PagedFileAppender {
     }
 
     pub fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError> {
+        let mut pages = Vec::with_capacity(buf.len()/PAGE_SIZE+1);
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -92,7 +95,7 @@ impl PagedFileAppender {
                 self.pos += space as u64;
                 if self.pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
                     page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
-                    self.file.append_page(page.clone())?;
+                    pages.push(page.clone());
                     self.pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
                 }
             }
@@ -100,13 +103,17 @@ impl PagedFileAppender {
                 self.page = None;
             }
         }
+        self.file.append_pages(&pages)?;
         Ok(self.pos)
     }
 
     pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
+        let np = buf.len() / PAGE_SIZE + if buf.len() % PAGE_SIZE != 0 {1} else {0};
+        let pages = self.read_pages(pos, np)?;
+        let mut pi = pages.iter();
         let mut read = 0;
         while read < buf.len() {
-            if let Some(ref page) = self.read_page(pos.this_page())? {
+            if let Some(page) = pi.next() {
                 let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
@@ -125,12 +132,38 @@ impl PagedFileAppender {
 
 impl PagedFile for PagedFileAppender {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        if let Some(ref page) = self.page {
-            if self.pos.this_page() == pref {
-                return Ok(Some(page.clone()))
-            }
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
         }
-        return self.file.read_page(pref)
+        else {
+            Ok(None)
+        }
+    }
+
+    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        if let Some(ref page) = self.page {
+            let mut result = Vec::new();
+            let before = min(pref + (n * PAGE_SIZE) as u64, page.pref());
+            if before > pref {
+                let np = ((before.as_u64() - pref.as_u64()) / PAGE_SIZE as u64) as usize;
+                result.extend(self.file.read_pages(pref, np)?);
+                if result.len() < np {
+                    return Ok(result);
+                }
+            }
+            if self.pos.this_page() >= pref && self.pos.this_page() <= pref + (n * PAGE_SIZE) as u64 {
+                result.push(page.clone());
+            }
+            let after = min(pref + (n * PAGE_SIZE) as u64, self.pos.this_page() + PAGE_SIZE as u64);
+            if after > self.pos.this_page() + PAGE_SIZE as u64 {
+                let start = self.pos.this_page() + PAGE_SIZE as u64;
+                let np = ((after.as_u64() - start.as_u64()) / PAGE_SIZE as u64) as usize;
+                result.extend(self.file.read_pages(start, np)?);
+            }
+            return Ok(result);
+        }
+        return self.file.read_pages(pref, n)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {
@@ -139,7 +172,7 @@ impl PagedFile for PagedFileAppender {
 
     fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         if new_len >= PAGE_SIZE as u64 {
-            if let Some(last_page) = self.file.read_page(PRef::from(new_len - PAGE_SIZE as u64))? {
+            if let Some(last_page) = self.file.read_pages(PRef::from(new_len - PAGE_SIZE as u64), 1)?.first() {
                 self.lep = last_page.read_pref(PAGE_PAYLOAD_SIZE);
             }
             else {
@@ -161,8 +194,8 @@ impl PagedFile for PagedFileAppender {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        self.file.append_page(page)
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        self.file.append_pages(pages)
     }
 
     fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
@@ -173,7 +206,7 @@ impl PagedFile for PagedFileAppender {
         if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
                 page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
-                self.file.append_page(page.clone())?;
+                self.file.append_pages(&vec!(page.clone()))?;
                 self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
             }
         }
@@ -203,9 +236,11 @@ impl<'file> Iterator for PagedFileIterator<'file> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber <= (1 << 35) / PAGE_SIZE as u64 {
             let pref = PRef::from((self.pagenumber)* PAGE_SIZE as u64);
-            if let Ok(Some(page)) = self.file.read_page(pref) {
-                self.pagenumber += 1;
-                return Some(page);
+            if let Ok(pages) = self.file.read_pages(pref, 1) {
+                if let Some(page) = pages.first() {
+                    self.pagenumber += 1;
+                    return Some(page.clone());
+                }
             }
         }
         None

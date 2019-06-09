@@ -42,15 +42,37 @@ impl CachedFile {
 
 impl PagedFile for CachedFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
+        }
+        else {
+            Ok(None)
+        }
+    }
+
+    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        let mut result = Vec::new();
         let mut cache = self.cache.lock().unwrap();
-        if let Some(page) = cache.get(pref) {
-            return Ok(Some(page));
+        let mut from = pref;
+        let until = pref + (n * PAGE_SIZE) as u64;
+        while from < until {
+            if let Some(page) = cache.get(from) {
+                result.push(page);
+                from += PAGE_SIZE as u64;
+            }
+            else {
+                let mut n = 0;
+                let mut next = from;
+                while next < until && cache.get(next).is_none() {
+                    n += 1;
+                    next += PAGE_SIZE as u64;
+                }
+                result.extend(self.file.read_pages(from, n)?);
+                from = next;
+            }
         }
-        if let Some(page) = self.file.read_page (pref)? {
-            cache.cache(pref, Arc::new(page.clone()));
-            return Ok(Some(page));
-        }
-        Ok(None)
+        Ok(result)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {
@@ -70,11 +92,12 @@ impl PagedFile for CachedFile {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         let mut cache = self.cache.lock().unwrap();
-        cache.append(page.clone());
-        self.file.append_page(page)
-
+        for p in pages {
+            cache.append(p.clone());
+        }
+        self.file.append_pages(pages)
     }
 
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
