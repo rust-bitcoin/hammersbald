@@ -100,18 +100,26 @@ impl PagedFile for AsyncFile {
     fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let mut result = Vec::new();
         let mut need = n;
-        let from ;
+        let file_end ;
         {
             let file = self.inner.file.lock().expect("file lock poisoned");
-            from = PRef::from(file.len()?);
-            if pref < from {
-                let np = ((from.as_u64() - pref.as_u64())/PAGE_SIZE as u64) as usize;
+            file_end = PRef::from(file.len()?);
+            if pref < file_end {
+                let np = ((file_end.as_u64() - pref.as_u64())/PAGE_SIZE as u64) as usize;
                 need -= np;
                 result.extend(file.read_pages(pref, np)?);
             }
         }
         if need > 0 {
-            result.extend(self.inner.file.lock().unwrap().read_pages(from, need)?);
+            let mut next = file_end;
+            while let Some(page) = self.read_in_queue(next)? {
+                result.push(page);
+                next += PAGE_SIZE as u64;
+                need -= 1;
+                if need == 0 {
+                    break;
+                }
+            }
         }
         Ok(result)
     }
