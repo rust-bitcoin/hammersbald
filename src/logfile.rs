@@ -68,7 +68,7 @@ impl LogFile {
 }
 
 impl PagedFile for LogFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
         self.file.read_page(pref)
     }
 
