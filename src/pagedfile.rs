@@ -142,12 +142,13 @@ impl PagedFile for PagedFileAppender {
     }
 
     fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
-        let end = pref + (n * PAGE_SIZE) as u64;
+        let end = pref.add_pages(n);
         if let Some(ref page) = self.page {
             let mut result = Vec::new();
             if pref < self.pos.this_page() {
-                let np = ((min(self.pos.this_page().as_u64(), end.as_u64()) - pref.as_u64()) / PAGE_SIZE as u64) as usize;
-                result.extend(self.file.read_pages(pref, np)?);
+                let np = pref.pages_until(min(self.pos.this_page(), end));
+                let pages = self.file.read_pages(pref, np)?;
+                result.extend(pages);
                 if result.len() < np {
                     return Ok(result);
                 }
@@ -156,10 +157,11 @@ impl PagedFile for PagedFileAppender {
                 if pref <= self.pos.this_page() {
                     result.push(page.clone());
                 }
-                if end > self.pos.this_page() + PAGE_SIZE as u64 {
-                    let start = max(pref, self.pos.this_page() + PAGE_SIZE as u64);
-                    let np = ((end.as_u64() - start.as_u64()) / PAGE_SIZE as u64) as usize;
-                    result.extend(self.file.read_pages(start, np)?);
+                if end > self.pos.this_page().next_page() {
+                    let start = max(pref, self.pos.this_page().next_page());
+                    let np = start.pages_until(end);
+                    let pages = self.file.read_pages(start, np)?;
+                    result.extend(pages);
                 }
             }
             return Ok(result);
