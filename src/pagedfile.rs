@@ -113,9 +113,9 @@ impl PagedFileAppender {
         let mut pi = pages.iter();
         let mut read = 0;
         while read < buf.len() {
-            if let Some(page) = pi.next () {
+            if let Some(ref page) = pi.next () {
                 let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
-                page.read(pos.in_page_pos(), &mut buf[read..read + have]);
+                page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
                 pos += have as u64;
                 if pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
