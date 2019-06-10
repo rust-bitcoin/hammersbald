@@ -25,7 +25,7 @@ use std::cmp::{max,min};
 
 /// a paged file
 pub trait PagedFile : Send + Sync {
-    /// read a page starting at pref
+    /// read a page at pref
     fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
     /// read n page starting at pref
     fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError>;
@@ -108,22 +108,20 @@ impl PagedFileAppender {
     }
 
     pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
-        let np = buf.len() / PAGE_SIZE + if buf.len() % PAGE_SIZE != 0 {1} else {0};
-        let pages = self.read_pages(pos, np)?;
+        let np = pos.this_page().pages_until((pos + (buf.len() as u64)).next_page());
+        let pages = self.read_pages(pos.this_page(), np)?;
         let mut pi = pages.iter();
         let mut read = 0;
-        while read < buf.len() {
-            if let Some(page) = pi.next() {
-                let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
-                page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
-                read += have;
-                pos += have as u64;
-                if pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
-                    pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
-                }
-            }
-            else {
+        while let Some(page) = pi.next() {
+            if read == buf.len() {
                 break;
+            }
+            let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
+            page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
+            read += have;
+            pos += have as u64;
+            if pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
+                pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
             }
         }
         Ok(pos)
