@@ -129,4 +129,19 @@ impl PRef {
     pub fn in_page_pos(&self) -> usize {
         (self.0 % PAGE_SIZE as u64) as usize
     }
+
+    /// number of pages from this until an other
+    pub fn pages_until(&self, other: PRef) -> usize {
+        ((other.0 - self.0)/PAGE_SIZE as u64) as usize
+    }
+
+    /// next page
+    pub fn next_page (&self) -> PRef {
+        PRef(self.0 + PAGE_SIZE as u64)
+    }
+
+    /// previous page
+    pub fn prev_page (&self) -> PRef {
+        PRef(self.0 - PAGE_SIZE as u64)
+    }
 }

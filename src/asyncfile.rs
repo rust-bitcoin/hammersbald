@@ -18,7 +18,7 @@
 //! an append only file written in background
 //!
 
-use page::{Page, PAGE_SIZE};
+use page::Page;
 use pagedfile::PagedFile;
 
 use error::HammersbaldError;
@@ -27,7 +27,6 @@ use pref::PRef;
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::cmp::min;
 
 pub struct AsyncFile {
     inner: Arc<AsyncFileInner>
@@ -74,9 +73,9 @@ impl AsyncFile {
         let queue = self.inner.queue.lock().expect("page queue lock poisoned");
         if queue.len () > 0 {
             let file = self.inner.file.lock().expect("file lock poisoned");
-            let len = file.len()?;
-            if pref.as_u64() >= len {
-                let index = ((pref.as_u64() - len) / PAGE_SIZE as u64) as usize;
+            let len = PRef::from(file.len()?);
+            if pref >= len {
+                let index = pref.pages_until(len);
                 if index < queue.len() {
                     let page = queue[index].clone();
                     return Ok(Some(page));
@@ -98,29 +97,17 @@ impl PagedFile for AsyncFile {
         }
     }
 
-    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+    fn read_pages(&self, mut pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let mut result = Vec::new();
-        let mut need = n;
-        let file_end ;
-        {
-            let file = self.inner.file.lock().expect("file lock poisoned");
-            file_end = PRef::from(file.len()?);
-            if pref < file_end {
-                let np = min(need, ((file_end.as_u64() - pref.as_u64())/PAGE_SIZE as u64) as usize);
-                need -= np;
-                result.extend(file.read_pages(pref, np)?);
-            }
+
+        while let Some(page) = self.read_in_queue(pref)? {
+            result.push(page);
+            pref = pref.next_page();
         }
-        if need > 0 {
-            let mut next = file_end;
-            while let Some(page) = self.read_in_queue(next)? {
-                result.push(page);
-                next += PAGE_SIZE as u64;
-                need -= 1;
-                if need == 0 {
-                    break;
-                }
-            }
+        let have = result.len();
+        if have < n {
+            let file = self.inner.file.lock().expect("file lock poisoned");
+            result.extend(file.read_pages(pref, n - have)?);
         }
         Ok(result)
     }
