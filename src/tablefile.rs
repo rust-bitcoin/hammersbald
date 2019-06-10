@@ -113,11 +113,9 @@ impl<'a> Iterator for BucketIterator<'a> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         let table_offset = TableFile::table_offset(self.n);
-        if let Ok(pages) = self.file.read_pages(table_offset.this_page(), 1) {
-            if let Some(page) = pages.first() {
-                self.n += 1;
-                return Some(page.read_pref(table_offset.in_page_pos()))
-            }
+        if let Ok(Some(page)) = self.file.read_page(table_offset.this_page()) {
+            self.n += 1;
+            return Some(page.read_pref(table_offset.in_page_pos()))
         }
         None
     }
