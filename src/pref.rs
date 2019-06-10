@@ -144,4 +144,9 @@ impl PRef {
     pub fn prev_page (&self) -> PRef {
         PRef(self.0 - PAGE_SIZE as u64)
     }
+
+    /// add n pages
+    pub fn add_pages(&self, n: usize) -> PRef {
+        PRef(self.0 + n as u64 *PAGE_SIZE as u64)
+    }
 }
