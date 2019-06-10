@@ -128,7 +128,7 @@ impl PagedFile for RolledFile {
         while result.len() < n {
             let chunk = (pref.as_u64() / self.chunk_size) as u16;
             if let Some(file) = self.files.get(&chunk) {
-                let has = min(result.len() - n, ((self.chunk_size - pref.as_u64() % self.chunk_size) / PAGE_SIZE as u64) as usize);
+                let has = min(n - result.len(), ((self.chunk_size - pref.as_u64() % self.chunk_size) / PAGE_SIZE as u64) as usize);
                 result.extend(file.read_pages(pref, has)?);
                 pref = pref.add_pages(has);
             }
