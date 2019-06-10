@@ -170,8 +170,8 @@ impl PagedFile for RolledFile {
     fn shutdown (&mut self) {}
 
     fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
-        let mut start = 0;
-        while start < pages.len() {
+        let mut wrote = 0;
+        while wrote < pages.len() {
             let chunk = (self.len / self.chunk_size) as u16;
 
             if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
@@ -182,9 +182,9 @@ impl PagedFile for RolledFile {
 
             if let Some (file) = self.files.get_mut(&chunk) {
                 let fits = (self.chunk_size - self.len % self.chunk_size) as usize/PAGE_SIZE;
-                let write = min(fits, pages.len() - start);
-                file.append_pages(&pages[start .. start + write].to_vec())?;
-                start += write;
+                let write = min(fits, pages.len() - wrote);
+                file.append_pages(&pages[wrote .. wrote + write].to_vec())?;
+                wrote += write;
                 self.len += (write*PAGE_SIZE) as u64;
             }
             else {
