@@ -173,7 +173,7 @@ impl PagedFile for PagedFileAppender {
 
     fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
         if new_len >= PAGE_SIZE as u64 {
-            if let Some(last_page) = self.file.read_pages(PRef::from(new_len - PAGE_SIZE as u64), 1)?.first() {
+            if let Some(last_page) = self.file.read_page(PRef::from(new_len - PAGE_SIZE as u64))? {
                 self.lep = last_page.read_pref(PAGE_PAYLOAD_SIZE);
             }
             else {
@@ -237,11 +237,9 @@ impl<'file> Iterator for PagedFileIterator<'file> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.pagenumber <= (1 << 35) / PAGE_SIZE as u64 {
             let pref = PRef::from((self.pagenumber)* PAGE_SIZE as u64);
-            if let Ok(pages) = self.file.read_pages(pref, 1) {
-                if let Some(page) = pages.first() {
-                    self.pagenumber += 1;
-                    return Some(page.clone());
-                }
+            if let Ok(Some(page)) = self.file.read_page(pref) {
+                self.pagenumber += 1;
+                return Some(page);
             }
         }
         None
