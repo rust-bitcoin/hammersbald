@@ -48,33 +48,32 @@ impl PagedFile for CachedFile {
         }
         if let Some(page) = self.file.read_page (pref)? {
             cache.cache(pref, Arc::new(page.clone()));
-            return Ok(Some(page))
+            return Ok(Some(page));
         }
         Ok(None)
     }
 
-    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+    fn read_pages(&self, mut pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let mut result = Vec::new();
         let mut cache = self.cache.lock().unwrap();
-        let mut from = pref;
-        let until = from.add_pages(n);
-        while from < until {
-            if let Some(page) = cache.get(from) {
+        let until = pref.add_pages(n);
+        while pref < until {
+            if let Some(page) = cache.get(pref) {
                 result.push(page);
-                from = from.next_page();
+                pref = pref.next_page();
             }
             else {
                 let mut n = 0;
-                let mut next = from;
+                let mut next = pref;
                 while next < until && cache.get(next).is_none() {
                     n += 1;
                     next = next.next_page();
                 }
-                for (i, page) in self.file.read_pages(from, n)?.iter().enumerate() {
-                    cache.cache(from.add_pages(i), Arc::new(page.clone()));
+                for (i, page) in self.file.read_pages(pref, n)?.iter().enumerate() {
+                    cache.cache(pref.add_pages(i), Arc::new(page.clone()));
                     result.push(page.clone());
                 }
-                from = next;
+                pref = next;
             }
         }
         Ok(result)
