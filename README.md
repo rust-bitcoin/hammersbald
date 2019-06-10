@@ -104,6 +104,8 @@ The data storage size is limited to 2^48 (256TiB) due to the use of 6 byte persi
 pointers. A data element can not exceed 2^24 (16MiB) in length. Key length is limited to 255 bytes. 
 
 ## Release Notes
+1.7.0 group subsequent reads and writes, upgrade to rust-bitcoin 0.18
+
 1.6.0 upgrade to rust-bitcoin 0.17
 
 1.5.1 add API may_have_key
