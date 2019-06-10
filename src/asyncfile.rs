@@ -18,7 +18,7 @@
 //! an append only file written in background
 //!
 
-use page::{Page, PAGE_SIZE};
+use page::Page;
 use pagedfile::PagedFile;
 
 use error::HammersbaldError;
@@ -27,7 +27,6 @@ use pref::PRef;
 use std::sync::{Mutex, Arc, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::collections::VecDeque;
 
 pub struct AsyncFile {
     inner: Arc<AsyncFileInner>
@@ -38,14 +37,14 @@ struct AsyncFileInner {
     work: Condvar,
     flushed: Condvar,
     run: AtomicBool,
-    queue: Mutex<VecDeque<Page>>
+    queue: Mutex<Vec<Page>>
 }
 
 impl AsyncFileInner {
     pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, HammersbaldError> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
-            queue: Mutex::new(VecDeque::new())})
+            queue: Mutex::new(Vec::new())})
     }
 }
 
@@ -64,9 +63,8 @@ impl AsyncFile {
                 queue = inner.work.wait(queue).expect("page queue lock poisoned");
             }
             let mut file = inner.file.lock().expect("file lock poisoned");
-            while let Some(page) = queue.pop_front() {
-                file.append_page(page).expect("can not extend data file");
-            }
+            file.append_pages(&queue).expect("can not write in background");
+            queue.clear();
             inner.flushed.notify_all();
         }
     }
@@ -75,9 +73,9 @@ impl AsyncFile {
         let queue = self.inner.queue.lock().expect("page queue lock poisoned");
         if queue.len () > 0 {
             let file = self.inner.file.lock().expect("file lock poisoned");
-            let len = file.len()?;
-            if pref.as_u64() >= len {
-                let index = ((pref.as_u64() - len) / PAGE_SIZE as u64) as usize;
+            let len = PRef::from(file.len()?);
+            if pref >= len {
+                let index = pref.pages_until(len);
                 if index < queue.len() {
                     let page = queue[index].clone();
                     return Ok(Some(page));
@@ -90,10 +88,28 @@ impl AsyncFile {
 
 impl PagedFile for AsyncFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        if let Some(page) = self.read_in_queue(pref)? {
-            return Ok(Some(page));
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
         }
-        self.inner.file.lock().unwrap().read_page(pref)
+        else {
+            Ok(None)
+        }
+    }
+
+    fn read_pages(&self, mut pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        let mut result = Vec::new();
+
+        while let Some(page) = self.read_in_queue(pref)? {
+            result.push(page);
+            pref = pref.next_page();
+        }
+        let have = result.len();
+        if have < n {
+            let file = self.inner.file.lock().expect("file lock poisoned");
+            result.extend(file.read_pages(pref, n - have)?);
+        }
+        Ok(result)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {
@@ -119,9 +135,11 @@ impl PagedFile for AsyncFile {
         self.inner.run.store(false, Ordering::Release)
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
-        queue.push_back(page);
+        for page in pages {
+            queue.push(page.clone());
+        }
         self.inner.work.notify_one();
         Ok(())
     }

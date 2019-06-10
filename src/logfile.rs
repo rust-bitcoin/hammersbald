@@ -43,7 +43,7 @@ impl LogFile {
         first.write_pref(6, PRef::from(table_len));
         first.write_pref(12, PRef::from(link_len));
 
-        self.append_page(first)?;
+        self.append_pages(&vec!(first))?;
         self.flush()?;
         Ok(())
     }
@@ -55,7 +55,7 @@ impl LogFile {
     pub fn log_page(&mut self, pref: PRef, source: &PagedFile) -> Result<(), HammersbaldError>{
         if pref.as_u64() < self.source_len && self.logged.insert(pref) {
             if let Some(page) = source.read_page(pref)? {
-                self.append_page(page)?;
+                self.append_pages(&vec!(page))?;
             }
         }
         Ok(())
@@ -72,6 +72,10 @@ impl PagedFile for LogFile {
         self.file.read_page(pref)
     }
 
+    fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        self.file.read_pages(pref, n)
+    }
+
     fn len(&self) -> Result<u64, HammersbaldError> {
         self.file.len()
     }
@@ -86,9 +90,9 @@ impl PagedFile for LogFile {
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-         self.file.append_page(page)
-     }
+    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        self.file.append_pages(pages)
+    }
 
     fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
         unimplemented!()

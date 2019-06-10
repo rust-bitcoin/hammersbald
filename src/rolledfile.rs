@@ -27,7 +27,7 @@ use singlefile::SingleFile;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::Path;
-use std::cmp::max;
+use std::cmp::{max, min};
 
 pub struct RolledFile {
     name: String,
@@ -114,11 +114,29 @@ impl RolledFile {
 
 impl PagedFile for RolledFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let chunk = (pref.as_u64() / self.chunk_size) as u16;
-        if let Some(file) = self.files.get(&chunk) {
-            return file.read_page(pref);
+        let result = self.read_pages(pref, 1)?;
+        if let Some (page) = result.first() {
+            Ok(Some(page.clone()))
         }
-        Ok(None)
+        else {
+            Ok(None)
+        }
+    }
+
+    fn read_pages(&self, mut pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
+        let mut result = Vec::new();
+        while result.len() < n {
+            let chunk = (pref.as_u64() / self.chunk_size) as u16;
+            if let Some(file) = self.files.get(&chunk) {
+                let has = min(n - result.len(), ((self.chunk_size - pref.as_u64() % self.chunk_size) / PAGE_SIZE as u64) as usize);
+                result.extend(file.read_pages(pref, has)?);
+                pref = pref.add_pages(has);
+            }
+            else {
+                break;
+            }
+        }
+        Ok(result)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {
@@ -151,23 +169,29 @@ impl PagedFile for RolledFile {
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
-        let chunk = (self.len / self.chunk_size) as u16;
+    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+        let mut wrote = 0;
+        while wrote < pages.len() {
+            let chunk = (self.len / self.chunk_size) as u16;
 
-        if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
-            let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
-                + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
-            self.files.insert(chunk, SingleFile::new_chunk(file, self.len, self.chunk_size)?);
-        }
+            if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
+                let file = Self::open_file(self.append_only, (((self.name.clone() + ".")
+                    + chunk.to_string().as_str()) + ".") + self.extension.as_str())?;
+                self.files.insert(chunk, SingleFile::new_chunk(file, self.len, self.chunk_size)?);
+            }
 
-        if let Some (file) = self.files.get_mut(&chunk) {
-            file.append_page(page)?;
-            self.len += PAGE_SIZE as u64;
-            return Ok(())
+            if let Some (file) = self.files.get_mut(&chunk) {
+                let fits = (self.chunk_size - self.len % self.chunk_size) as usize/PAGE_SIZE;
+                let write = min(fits, pages.len() - wrote);
+                file.append_pages(&pages[wrote .. wrote + write].to_vec())?;
+                wrote += write;
+                self.len += (write*PAGE_SIZE) as u64;
+            }
+            else {
+                return Err(HammersbaldError::Corrupted(format!("missing chunk in append {}", chunk)));
+            }
         }
-        else {
-            return Err(HammersbaldError::Corrupted(format!("missing chunk in append {}", chunk)));
-        }
+        Ok(())
     }
 
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
