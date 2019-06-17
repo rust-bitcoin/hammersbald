@@ -30,21 +30,13 @@ pub struct Envelope {
 
 impl Envelope {
     /// create a new envelope
-    pub fn new (payload: &[u8], previous: PRef) -> Envelope {
-        let mut buffer = vec!();
-        buffer.write_u48::<BigEndian>(previous.as_u64()).unwrap();
-        buffer.write(payload).unwrap();
-        Envelope{buffer}
-    }
-
-    /// previous envelope
-    pub fn previous(&self) -> PRef {
-        PRef::from(BigEndian::read_u48(&self.buffer.as_slice()[0 .. 6]))
+    pub fn new (payload: &[u8]) -> Envelope {
+        Envelope{buffer: payload.to_vec()}
     }
 
     /// envelope payload
     pub fn payload (&self) -> &[u8] {
-        &self.buffer.as_slice()[6..]
+        self.buffer.as_slice()
     }
 
     /// serialize for storage

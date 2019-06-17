@@ -204,7 +204,7 @@ impl MemTable {
     }
 
     fn invalid_offsets_page(pos: PRef) -> Page {
-        let mut page = Page::new(pos);
+        let mut page = Page::new_table_page(pos);
         if pos.as_u64() == 0 {
             for o in 0 .. BUCKETS_FIRST_PAGE {
                 page.write_pref(FIRST_PAGE_HEAD + o*BUCKET_SIZE, PRef::invalid());

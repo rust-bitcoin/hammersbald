@@ -33,11 +33,16 @@ pub struct Page {
 }
 
 impl Page {
-    /// create an empty page
-    pub fn new (pref: PRef) -> Page {
+    /// create an empty page for a position in the table file
+    pub fn new_table_page(pref: PRef) -> Page {
         let mut page = Page{ content: [0u8; PAGE_SIZE] };
         page.write_pref(PAGE_PAYLOAD_SIZE, pref);
         page
+    }
+
+    /// create an empty page
+    pub fn new() -> Page {
+        Page{ content: [0u8; PAGE_SIZE] }
     }
 
     /// create a Page from read buffer
