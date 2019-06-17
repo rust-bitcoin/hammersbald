@@ -59,26 +59,17 @@ pub trait PagedFileWrite {
 pub struct PagedFileAppender {
     file: Box<PagedFile>,
     pos: PRef,
-    page: Option<Page>,
-    lep: PRef
+    page: Option<Page>
 }
 
 impl PagedFileAppender {
     /// create a reader that starts at a position
-    pub fn new (file: Box<PagedFile>, pos: PRef, lep: PRef) -> PagedFileAppender {
-        PagedFileAppender {file, pos, page: None, lep}
+    pub fn new (file: Box<PagedFile>, pos: PRef) -> PagedFileAppender {
+        PagedFileAppender {file, pos, page: None}
     }
 
     pub fn position (&self) -> PRef {
         self.pos
-    }
-
-    pub fn lep (&self) -> PRef {
-        self.lep
-    }
-
-    pub fn advance (&mut self) {
-        self.lep = self.pos;
     }
 
     pub fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError> {
@@ -86,18 +77,16 @@ impl PagedFileAppender {
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
-                self.page = Some(Page::new(self.lep));
+                self.page = Some(Page::new());
             }
             if let Some(ref mut page) = self.page {
-                let space = min(PAGE_PAYLOAD_SIZE - self.pos.in_page_pos(), buf.len() - wrote);
+                let space = min(PAGE_SIZE - self.pos.in_page_pos(), buf.len() - wrote);
                 page.write(self.pos.in_page_pos(), &buf[wrote..wrote + space]);
                 wrote += space;
-                self.pos += space as u64;
-                if self.pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
-                    page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
+                if self.pos.in_page_pos() + space == PAGE_SIZE {
                     pages.push(page.clone());
-                    self.pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
                 }
+                self.pos += space as u64;
             }
             if self.pos.in_page_pos() == 0 {
                 self.page = None;
@@ -114,13 +103,10 @@ impl PagedFileAppender {
         let mut read = 0;
         while read < buf.len() {
             if let Some(ref page) = pi.next () {
-                let have = min(PAGE_PAYLOAD_SIZE - pos.in_page_pos(), buf.len() - read);
+                let have = min(PAGE_SIZE - pos.in_page_pos(), buf.len() - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
                 pos += have as u64;
-                if pos.in_page_pos() == PAGE_PAYLOAD_SIZE {
-                    pos += (PAGE_SIZE - PAGE_PAYLOAD_SIZE) as u64;
-                }
             }
             else {
                 break;
@@ -174,17 +160,6 @@ impl PagedFile for PagedFileAppender {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
-        if new_len >= PAGE_SIZE as u64 {
-            if let Some(last_page) = self.file.read_page(PRef::from(new_len - PAGE_SIZE as u64))? {
-                self.lep = last_page.read_pref(PAGE_PAYLOAD_SIZE);
-            }
-            else {
-                return Err(HammersbaldError::Corrupted("where is the last page?".to_string()));
-            }
-        }
-        else {
-            self.lep = PRef::invalid();
-        }
         self.pos = PRef::from(new_len);
         self.file.truncate(new_len)
     }
@@ -208,7 +183,6 @@ impl PagedFile for PagedFileAppender {
     fn flush(&mut self) -> Result<(), HammersbaldError> {
         if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
-                page.write_pref(PAGE_PAYLOAD_SIZE, self.lep);
                 self.file.append_pages(&vec!(page.clone()))?;
                 self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
             }

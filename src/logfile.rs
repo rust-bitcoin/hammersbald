@@ -38,7 +38,7 @@ impl LogFile {
 
     pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), HammersbaldError> {
         self.truncate(0)?;
-        let mut first = Page::new(PRef::from(0));
+        let mut first = Page::new();
         first.write_pref(0, PRef::from(data_len));
         first.write_pref(6, PRef::from(table_len));
         first.write_pref(12, PRef::from(link_len));

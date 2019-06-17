@@ -18,7 +18,7 @@
 //! Specific implementation details to data file
 //!
 
-use page::{PAGE_PAYLOAD_SIZE, PAGE_SIZE};
+use page::PAGE_SIZE;
 use pagedfile::{PagedFile, PagedFileAppender};
 use format::{Envelope, Payload, Data, IndexedData, Link};
 use error::HammersbaldError;
@@ -39,23 +39,17 @@ impl DataFile {
             return Err(HammersbaldError::Corrupted("data file does not end at page boundary".to_string()));
         }
         if len >= PAGE_SIZE as u64 {
-            if let Some(last) = file.read_page(PRef::from(len - PAGE_SIZE as u64))? {
-                let lep = last.read_pref(PAGE_PAYLOAD_SIZE);
-                return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len), lep)});
-            }
-            else {
-                Err(HammersbaldError::Corrupted("missing first data page".to_string()))
-            }
+            return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len))});
         }
         else {
-            let appender = PagedFileAppender::new(file, PRef::from(0), PRef::invalid());
+            let appender = PagedFileAppender::new(file, PRef::from(0));
             return Ok(DataFile{appender})
         }
     }
 
     /// return an iterator of all payloads
     pub fn envelopes<'a>(&'a self) -> EnvelopeIterator<'a> {
-        EnvelopeIterator::new(&self.appender, self.appender.lep())
+        EnvelopeIterator::new(&self.appender)
     }
 
     /// shutdown
@@ -76,11 +70,10 @@ impl DataFile {
     pub fn append_link (&mut self, link: Link) -> Result<PRef, HammersbaldError> {
         let mut payload = vec!();
         Payload::Link(link).serialize(&mut payload);
-        let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
+        let envelope = Envelope::new(payload.as_slice());
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.advance();
         self.appender.append(store.as_slice())?;
         Ok(me)
     }
@@ -90,25 +83,23 @@ impl DataFile {
         let indexed = IndexedData::new(key, Data::new(data));
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
-        let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
+        let envelope = Envelope::new(payload.as_slice());
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.advance();
         self.appender.append(store.as_slice())?;
         Ok(me)
     }
 
     /// append referred data
     pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
-         let data = Data::new(data);
+        let data = Data::new(data);
         let mut payload = vec!();
         Payload::Referred(data).serialize(&mut payload);
-        let envelope = Envelope::new(payload.as_slice(), self.appender.lep());
+        let envelope = Envelope::new(payload.as_slice());
         let mut store = vec!();
         envelope.serialize(&mut store);
         let me = self.appender.position();
-        self.appender.advance();
         self.appender.append(store.as_slice())?;
         Ok(me)
     }
@@ -142,8 +133,8 @@ pub struct EnvelopeIterator<'f> {
 
 impl<'f> EnvelopeIterator<'f> {
     /// create a new iterator
-    pub fn new (file: &'f PagedFileAppender, pos: PRef) -> EnvelopeIterator<'f> {
-        EnvelopeIterator {file, pos}
+    pub fn new (file: &'f PagedFileAppender) -> EnvelopeIterator<'f> {
+        EnvelopeIterator {file, pos: PRef::from(0)}
     }
 }
 
@@ -156,11 +147,12 @@ impl<'f> Iterator for EnvelopeIterator<'f> {
             let start = pos;
             let mut len = [0u8;3];
             pos = self.file.read(pos, &mut len).unwrap();
-            let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
-            self.file.read(pos, &mut buf).unwrap();
-            let envelope = Envelope::deseralize(buf);
-            self.pos = envelope.previous();
-            return Some((start, envelope))
+            if pos > self.pos {
+                let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
+                self.pos = self.file.read(pos, &mut buf).unwrap();
+                let envelope = Envelope::deseralize(buf);
+                return Some((start, envelope))
+            }
         }
         None
     }
