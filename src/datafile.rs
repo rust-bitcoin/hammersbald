@@ -111,6 +111,16 @@ impl DataFile {
 
     /// flush buffers
     pub fn flush (&mut self) -> Result<(), HammersbaldError> {
+        let pos = self.appender.position();
+        if pos.in_page_pos() > 0 {
+            if PAGE_SIZE - pos.in_page_pos() >= 4 {
+                let padding = vec!(0u8; PAGE_SIZE - pos.in_page_pos() - 4);
+                self.append_referred(padding.as_slice())?;
+            } else {
+                let padding = vec!(0u8; 2 * PAGE_SIZE - pos.in_page_pos() - 4);
+                self.append_referred(padding.as_slice())?;
+            }
+        }
         self.appender.flush()
     }
 
