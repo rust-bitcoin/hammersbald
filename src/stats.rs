@@ -20,9 +20,10 @@
 use api::Hammersbald;
 use format::Payload;
 
-use bitcoin_hashes::siphash24;
+use siphasher::sip::SipHasher;
 
 use std::collections::{HashMap, HashSet};
+use std::hash::Hasher;
 
 /// print some statistics on a db
 #[allow(unused)]
@@ -97,5 +98,7 @@ fn stats(db: &Hammersbald) {
 
 
 fn hash (key: &[u8], sip0: u64, sip1: u64) -> u32 {
-    siphash24::Hash::hash_to_u64_with_keys(sip0, sip1, key) as u32
+    let mut hasher = SipHasher::new_with_keys(sip0, sip1);
+    hasher.write(key);
+    hasher.finish() as u32
 }

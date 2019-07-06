@@ -19,9 +19,9 @@ bitcoin_support=["bitcoin"]
 
 [dependencies]
 rand="0.5"
+siphasher = "0.2"
 byteorder="1.2"
 lru-cache = "0.1.1"
-bitcoin_hashes = "0.4"
 bitcoin = { version = "0.18", optional = true }
 
 [dev-dependencies]

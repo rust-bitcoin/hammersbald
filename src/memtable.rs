@@ -28,10 +28,10 @@ use pagedfile::PagedFile;
 use format::{Link, Payload, Envelope};
 use page::Page;
 
-use bitcoin_hashes::siphash24;
-
+use siphasher::sip::SipHasher;
 use rand::{thread_rng, RngCore};
 
+use std::hash::Hasher;
 use std::collections::HashMap;
 use std::fmt;
 use std::cmp::{min, max};
@@ -430,7 +430,9 @@ impl MemTable {
     }
 
     fn hash (&self, key: &[u8]) -> u32 {
-        siphash24::Hash::hash_to_u64_with_keys(self.sip0, self.sip1, key) as u32
+        let mut hasher = SipHasher::new_with_keys(self.sip0, self.sip1);
+        hasher.write(key);
+        hasher.finish() as u32
     }
 }
 
