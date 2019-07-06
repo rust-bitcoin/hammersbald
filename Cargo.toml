@@ -23,6 +23,7 @@ siphasher = "0.2"
 byteorder="1.2"
 lru-cache = "0.1.1"
 bitcoin = { version = "0.18", optional = true }
+bitcoin_hashes = { version = "0.3", optional = true }
 
 [dev-dependencies]
 hex = "0.3"
