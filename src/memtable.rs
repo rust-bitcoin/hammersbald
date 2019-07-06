@@ -35,6 +35,7 @@ use rand::{thread_rng, RngCore};
 use std::collections::HashMap;
 use std::fmt;
 use std::cmp::{min, max};
+use std::sync::RwLock;
 
 const INIT_BUCKETS: usize = 512;
 const INIT_LOGMOD :usize = 8;
@@ -45,7 +46,7 @@ pub struct MemTable {
     log_mod: u32,
     sip0: u64,
     sip1: u64,
-    buckets: Vec<Bucket>,
+    buckets: RwLock<Vec<Bucket>>,
     dirty: Dirty,
     log_file: LogFile,
     data_file: DataFile,
@@ -61,13 +62,13 @@ impl MemTable {
         MemTable {log_mod: INIT_LOGMOD as u32, step: 0, forget: 0,
             sip0: rng.next_u64(),
             sip1: rng.next_u64(),
-            buckets: vec!(Bucket::default(); INIT_BUCKETS),
+            buckets: RwLock::new(vec!(Bucket::default(); INIT_BUCKETS)),
             dirty: Dirty::new(INIT_BUCKETS), log_file, table_file, data_file, link_file,
             bucket_fill_target: max(min(bucket_fill_target, 128), 1)}
     }
 
     pub fn params(&self) -> (usize, u32, usize, u64, u64, u64, u64, u64) {
-        (self.step, self.log_mod, self.buckets.len(), self.table_file.len().unwrap(), self.data_file.len().unwrap(), self.link_file.len().unwrap(),
+        (self.step, self.log_mod, self.buckets.read().unwrap().len(), self.table_file.len().unwrap(), self.data_file.len().unwrap(), self.link_file.len().unwrap(),
         self.sip0, self.sip1)
     }
 
@@ -137,7 +138,7 @@ impl MemTable {
     pub fn load (&mut self) -> Result<(), HammersbaldError>{
         if let Some(first) = self.table_file.read_page(PRef::from(0))? {
             let n_buckets = first.read_pref(0).as_u64() as u32;
-            self.buckets = vec!(Bucket::default(); n_buckets as usize);
+            self.buckets = RwLock::new(Vec::with_capacity(n_buckets as usize));
             self.dirty = Dirty::new(n_buckets as usize);
             self.step = first.read_pref(6).as_u64() as usize;
             self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
@@ -145,26 +146,23 @@ impl MemTable {
             self.sip1 = first.read_u64(20);
         }
 
-        let mut link_to_bucket = HashMap::new();
-        for (n, link) in self.table_file.iter().enumerate() {
-            if link.is_valid() {
-                link_to_bucket.insert(link, n);
-            }
+        let mut buckets = self.buckets.write().unwrap();
+        for link in self.table_file.iter() {
+            buckets.push(Bucket{ stored: link, slots: None});
         }
 
-        for (pos, envelope) in self.link_file.envelopes() {
-            if let Payload::Link(ref link) = Payload::deserialize(envelope.payload())? {
-                if let Some(bucket) = link_to_bucket.remove(&pos) {
-                    let slots = link.slots();
-                    self.buckets[bucket].slots = slots;
-                    if link_to_bucket.is_empty() {
-                        break;
+        Ok(())
+    }
+
+    fn resolve_bucket(&self, bucket_number: usize) -> Result<(), HammersbaldError> {
+        if let Some(mut bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
+            if bucket.slots.is_none () {
+                if bucket.stored.is_valid() {
+                    if let Ok(Payload::Link(link)) = Payload::deserialize(self.link_file.get_envelope(bucket.stored)?.payload()) {
+                        bucket.slots = Some(link.slots());
                     }
                 }
             }
-        }
-        if !link_to_bucket.is_empty() {
-            return Err(HammersbaldError::Corrupted(format!("could not find links for {} bucket(s)", link_to_bucket.len())));
         }
         Ok(())
     }
@@ -174,7 +172,7 @@ impl MemTable {
             // first page
             let fp = PRef::from(0);
             let mut page = self.table_file.read_page(fp)?.unwrap_or(Self::invalid_offsets_page(fp));
-            page.write_pref(0, PRef::from(self.buckets.len() as u64));
+            page.write_pref(0, PRef::from(self.buckets.read().unwrap().len() as u64));
             page.write_pref(6, PRef::from(self.step as u64));
             page.write_u64(12, self.sip0);
             page.write_u64(20, self.sip1);
@@ -184,16 +182,19 @@ impl MemTable {
             let dirty_iterator = DirtyIterator::new(&self.dirty);
             for (bucket_number, _) in dirty_iterator.enumerate().filter(|a| a.1) {
                 let bucket_pref= TableFile::table_offset(bucket_number);
-                if let Some(bucket) = self.buckets.get(bucket_number) {
+                if let Some(mut bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
                     let mut page = self.table_file.read_page(bucket_pref.this_page())?.unwrap_or(Self::invalid_offsets_page(bucket_pref.this_page()));
-                    let link = if bucket.slots.len() > 0 {
-                        let slots = Link::from_slots(bucket.slots.as_slice());
-                        self.link_file.append_link(Link::deserialize(slots.as_slice()))?
-                    } else {
-                        PRef::invalid()
-                    };
-                    page.write_pref(bucket_pref.in_page_pos(), link);
-                    self.table_file.update_page(page)?;
+                    if let Some (ref slots) = bucket.slots {
+                        let link = if slots.len() > 0 {
+                            let slots = Link::from_slots(slots.as_slice());
+                            self.link_file.append_link(Link::deserialize(slots.as_slice()))?
+                        } else {
+                            PRef::invalid()
+                        };
+                        bucket.stored = link;
+                        page.write_pref(bucket_pref.in_page_pos(), link);
+                        self.table_file.update_page(page)?;
+                    }
                 }
             }
         }
@@ -218,7 +219,7 @@ impl MemTable {
         page
     }
 
-    pub fn slots<'a>(&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn slots<'a>(&'a self) -> impl Iterator<Item=Vec<(u32, PRef)>> +'a {
         BucketIterator{file: self, n:0}
     }
 
@@ -267,7 +268,7 @@ impl MemTable {
                     self.step = 0;
                 }
 
-                self.buckets.push(Bucket::default());
+                self.buckets.write().unwrap().push(Bucket::default());
                 self.dirty.append();
             }
         }
@@ -286,29 +287,41 @@ impl MemTable {
         Ok(())
     }
 
-    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket: usize) -> Result<bool, HammersbaldError> {
+    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket_number: usize) -> Result<bool, HammersbaldError> {
         let mut remove = None;
-        if let Some(bucket) = self.buckets.get_mut(bucket) {
-            for (n, (_, pref)) in bucket.slots.iter().enumerate()
-                .filter(|s| (s.1).0 == hash) {
-                let envelope = self.data_file.get_envelope(*pref)?;
-                if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
-                    if indexed.key == key {
-                        remove = Some(n);
-                        break;
+        self.resolve_bucket(bucket_number)?;
+        if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
+            if let Some(ref mut slots) = bucket.slots {
+                for (n, (_, pref)) in slots.iter().enumerate()
+                    .filter(|s| (s.1).0 == hash) {
+                    let envelope = self.data_file.get_envelope(*pref)?;
+                    if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
+                        if indexed.key == key {
+                            remove = Some(n);
+                            break;
+                        }
                     }
                 }
+                if let Some(r) = remove {
+                    slots.remove(r);
+                }
             }
-            if let Some(r) = remove {
-                bucket.slots.remove(r);
-            }
+        }
+        if remove.is_some() {
+            self.modify_bucket(bucket_number)?;
         }
         Ok(remove.is_some())
     }
 
     fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), HammersbaldError> {
-        if let Some(bucket) = self.buckets.get_mut(bucket as usize) {
-            bucket.slots.push((hash, pref));
+        self.resolve_bucket(bucket)?;
+        if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket as usize) {
+            if let Some(ref mut slots) = bucket.slots {
+                slots.push((hash, pref));
+            }
+            else {
+                bucket.slots = Some(vec!((hash, pref)));
+            }
         } else {
             return Err(HammersbaldError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
@@ -320,14 +333,22 @@ impl MemTable {
         let mut rewrite = false;
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
-        if let Some(b) = self.buckets.get(bucket as usize) {
-            for (hash, pref) in &b.slots {
-                let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
-                if new_bucket != bucket {
-                    moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, *pref));
-                    rewrite = true;
-                } else {
-                    new_bucket_store.slots.push((*hash, *pref));
+        self.resolve_bucket(bucket)?;
+        if let Some(b) = self.buckets.read().unwrap().get(bucket as usize) {
+            if let Some(ref slots) = b.slots {
+                for (hash, pref) in slots {
+                    let new_bucket = (hash & (!0u32 >> (32 - self.log_mod - 1))) as usize; // hash % 2^(log_mod + 1)
+                    if new_bucket != bucket {
+                        moves.entry(new_bucket).or_insert(Vec::new()).push((*hash, *pref));
+                        rewrite = true;
+                    } else {
+                        if let Some(ref mut slots) = new_bucket_store.slots {
+                            slots.push((*hash, *pref));
+                        }
+                        else {
+                            new_bucket_store.slots = Some(vec!((*hash, *pref)));
+                        }
+                    }
                 }
             }
         }
@@ -340,7 +361,7 @@ impl MemTable {
                     self.store_to_bucket(bucket, hash, pref)?;
                 }
             }
-            self.buckets[bucket] = new_bucket_store;
+            self.buckets.write().unwrap()[bucket] = new_bucket_store;
             self.modify_bucket(bucket)?;
         }
         Ok(())
@@ -359,9 +380,12 @@ impl MemTable {
     pub fn may_have_key(&self, key: &[u8]) -> Result<bool, HammersbaldError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
-        if let Some(bucket) = self.buckets.get(bucket_number) {
-            if bucket.slots.iter().any (|(h, _)| *h == hash) {
-                return Ok (true);
+        self.resolve_bucket(bucket_number)?;
+        if let Some(bucket) = self.buckets.read().unwrap().get(bucket_number) {
+            if let Some (ref slots) = bucket.slots {
+                if slots.iter().any(|(h, _)| *h == hash) {
+                    return Ok(true);
+                }
             }
         } else {
             return Err(HammersbaldError::Corrupted(format!("bucket {} should exist", bucket_number)));
@@ -373,16 +397,19 @@ impl MemTable {
     pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
-        if let Some(ref bucket) = self.buckets.get(bucket_number) {
-            for (h, data) in &bucket.slots {
-                if *h == hash {
-                    let envelope = self.data_file.get_envelope(*data)?;
-                    if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
-                        if indexed.key == key {
-                            return Ok(Some((*data, indexed.data.data.to_vec())));
+        self.resolve_bucket(bucket_number)?;
+        if let Some(ref bucket) = self.buckets.read().unwrap().get(bucket_number) {
+            if let Some(ref slots) = bucket.slots {
+                for (h, data) in slots {
+                    if *h == hash {
+                        let envelope = self.data_file.get_envelope(*data)?;
+                        if let Payload::Indexed(indexed) = Payload::deserialize(envelope.payload())? {
+                            if indexed.key == key {
+                                return Ok(Some((*data, indexed.data.data.to_vec())));
+                            }
+                        } else {
+                            return Err(HammersbaldError::Corrupted("pref should point to indexed data".to_string()));
                         }
-                    } else {
-                        return Err(HammersbaldError::Corrupted("pref should point to indexed data".to_string()));
                     }
                 }
             }
@@ -457,16 +484,22 @@ impl Dirty {
 
 struct BucketIterator<'a> {
     file: &'a MemTable,
-    n: u32
+    n: usize
 }
 
 impl<'a> Iterator for BucketIterator<'a> {
-    type Item = &'a Vec<(u32, PRef)>;
+    type Item = Vec<(u32, PRef)>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if let Some(bucket) = self.file.buckets.get(self.n as usize) {
+        self.file.resolve_bucket(self.n).unwrap();
+        if let Some(bucket) = self.file.buckets.read().unwrap().get(self.n) {
             self.n += 1;
-            return Some(&bucket.slots);
+            if let Some(ref slots) = bucket.slots {
+                return Some(slots.clone());
+            }
+            else {
+                return Some(vec!());
+            }
         }
         None
     }
@@ -498,8 +531,10 @@ impl<'b> Iterator for DirtyIterator<'b> {
 
 #[derive(Clone, Default)]
 pub struct Bucket {
-    slots: Vec<(u32, PRef)>
+    stored: PRef,
+    slots: Option<Vec<(u32, PRef)>>
 }
+
 
 #[cfg(test)]
 mod test {

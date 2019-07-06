@@ -165,7 +165,7 @@ impl Hammersbald {
     }
 
     /// get hash table bucket iterator
-    pub fn slots<'a> (&'a self) -> impl Iterator<Item=&'a Vec<(u32, PRef)>> +'a {
+    pub fn slots<'a> (&'a self) -> impl Iterator<Item=Vec<(u32, PRef)>> +'a {
         self.mem.slots()
     }
 
