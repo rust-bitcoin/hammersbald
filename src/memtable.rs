@@ -138,7 +138,7 @@ impl MemTable {
     pub fn load (&mut self) -> Result<(), HammersbaldError>{
         if let Some(first) = self.table_file.read_page(PRef::from(0))? {
             let n_buckets = first.read_pref(0).as_u64() as u32;
-            self.buckets = RwLock::new(Vec::with_capacity(n_buckets as usize));
+            self.buckets = RwLock::new(vec![Bucket::default(); n_buckets as usize]);
             self.dirty = Dirty::new(n_buckets as usize);
             self.step = first.read_pref(6).as_u64() as usize;
             self.log_mod = (32 - n_buckets.leading_zeros()) as u32 - 2;
@@ -147,15 +147,16 @@ impl MemTable {
         }
 
         let mut buckets = self.buckets.write().unwrap();
-        for link in self.table_file.iter() {
-            buckets.push(Bucket{ stored: link, slots: None});
+
+        for (i, link) in self.table_file.iter().enumerate() {
+            buckets[i].stored = link;
         }
 
         Ok(())
     }
 
     fn resolve_bucket(&self, bucket_number: usize) -> Result<(), HammersbaldError> {
-        if let Some(mut bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
+        if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
             if bucket.slots.is_none () {
                 if bucket.stored.is_valid() {
                     if let Ok(Payload::Link(link)) = Payload::deserialize(self.link_file.get_envelope(bucket.stored)?.payload()) {
