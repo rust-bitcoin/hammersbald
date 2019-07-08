@@ -114,29 +114,11 @@ impl RolledFile {
 
 impl PagedFile for RolledFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let result = self.read_pages(pref, 1)?;
-        if let Some (page) = result.first() {
-            Ok(Some(page.clone()))
+        let chunk = (pref.as_u64() / self.chunk_size) as u16;
+        if let Some(file) = self.files.get(&chunk) {
+            return file.read_page(pref);
         }
-        else {
-            Ok(None)
-        }
-    }
-
-    fn read_pages(&self, mut pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
-        let mut result = Vec::new();
-        while result.len() < n {
-            let chunk = (pref.as_u64() / self.chunk_size) as u16;
-            if let Some(file) = self.files.get(&chunk) {
-                let has = min(n - result.len(), ((self.chunk_size - pref.as_u64() % self.chunk_size) / PAGE_SIZE as u64) as usize);
-                result.extend(file.read_pages(pref, has)?);
-                pref = pref.add_pages(has);
-            }
-            else {
-                break;
-            }
-        }
-        Ok(result)
+        Ok(None)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {

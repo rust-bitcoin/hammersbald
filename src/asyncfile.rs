@@ -77,7 +77,7 @@ impl AsyncFile {
             let file = self.inner.file.lock().expect("file lock poisoned");
             let len = PRef::from(file.len()?);
             if pref >= len {
-                let index = pref.pages_until(len);
+                let index = len.pages_until(pref);
                 if index < queue.len() {
                     let page = queue[index].clone();
                     return Ok(Some(page));
@@ -90,28 +90,11 @@ impl AsyncFile {
 
 impl PagedFile for AsyncFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let result = self.read_pages(pref, 1)?;
-        if let Some (page) = result.first() {
-            Ok(Some(page.clone()))
+        if let Some(page) = self.read_in_queue(pref)? {
+            return Ok(Some(page));
         }
-        else {
-            Ok(None)
-        }
-    }
-
-    fn read_pages(&self, mut pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
-        let mut result = Vec::new();
-
-        while let Some(page) = self.read_in_queue(pref)? {
-            result.push(page);
-            pref = pref.next_page();
-        }
-        let have = result.len();
-        if have < n {
-            let file = self.inner.file.lock().expect("file lock poisoned");
-            result.extend(file.read_pages(pref, n - have)?);
-        }
-        Ok(result)
+        let file = self.inner.file.lock().expect("file lock poisoned");
+        file.read_page(pref)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {

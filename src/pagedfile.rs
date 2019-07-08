@@ -22,13 +22,12 @@ use error::HammersbaldError;
 use pref::PRef;
 
 use std::cmp::{max,min};
+use std::io::{self, ErrorKind};
 
 /// a paged file
 pub trait PagedFile : Send + Sync {
     /// read a page at pref
     fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
-    /// read n page starting at pref
-    fn read_pages (&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError>;
     /// length of the storage
     fn len (&self) -> Result<u64, HammersbaldError>;
     /// truncate storage
@@ -95,19 +94,16 @@ impl PagedFileAppender {
     }
 
     pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
-        let np = pos.this_page().pages_until((pos + ((buf.len() as u64)/PAGE_PAYLOAD_SIZE as u64 + 1) * PAGE_SIZE as u64).next_page());
-        let pages = self.read_pages(pos.this_page(), np)?;
-        let mut pi = pages.iter();
         let mut read = 0;
         while read < buf.len() {
-            if let Some(ref page) = pi.next () {
+            if let Some(ref page) = self.read_page (pos.this_page())? {
                 let have = min(PAGE_SIZE - pos.in_page_pos(), buf.len() - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
                 pos += have as u64;
             }
             else {
-                break;
+                return Err(HammersbaldError::IO(io::Error::from(ErrorKind::UnexpectedEof)));
             }
         }
         Ok(pos)
@@ -116,41 +112,12 @@ impl PagedFileAppender {
 
 impl PagedFile for PagedFileAppender {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let result = self.read_pages(pref, 1)?;
-        if let Some (page) = result.first() {
-            Ok(Some(page.clone()))
-        }
-        else {
-            Ok(None)
-        }
-    }
-
-    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         if let Some(ref page) = self.page {
-            let end = pref.add_pages(n);
-            let mut result = Vec::new();
-            if pref < self.pos.this_page() {
-                let np = pref.pages_until(min(self.pos.this_page(), end));
-                let pages = self.file.read_pages(pref, np)?;
-                result.extend(pages);
-                if result.len() < np {
-                    return Ok(result);
-                }
+            if pref.this_page() == self.pos.this_page() {
+                return Ok(Some(page.clone()));
             }
-            if end > self.pos.this_page() {
-                if pref <= self.pos.this_page() {
-                    result.push(page.clone());
-                }
-                if end > self.pos.this_page().next_page() {
-                    let start = max(pref, self.pos.this_page().next_page());
-                    let np = start.pages_until(end);
-                    let pages = self.file.read_pages(start, np)?;
-                    result.extend(pages);
-                }
-            }
-            return Ok(result);
         }
-        return self.file.read_pages(pref, n)
+        self.file.read_page(pref)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {

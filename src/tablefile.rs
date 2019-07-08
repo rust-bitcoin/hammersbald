@@ -74,21 +74,10 @@ impl PagedFile for TableFile {
     fn shutdown (&mut self) {}
 
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let result = self.read_pages(pref, 1)?;
-        if let Some (page) = result.first() {
-            Ok(Some(page.clone()))
-        }
-        else {
-            Ok(None)
-        }
-    }
-
-    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
-        let result = self.file.read_pages(pref, n)?;
-        for (i, page) in result.iter().enumerate() {
-            if page.pref() != pref + (i * PAGE_SIZE) as u64 {
-                return Err(HammersbaldError::Corrupted(format!("table page {} does not have the pref of its position",
-                                                               pref + (i * PAGE_SIZE) as u64)));
+        let result = self.file.read_page(pref)?;
+        if let Some(ref page) = result {
+            if page.pref() != pref {
+                return Err(HammersbaldError::Corrupted(format!("table page {} does not have the pref of its position", pref)));
             }
         }
         Ok(result)

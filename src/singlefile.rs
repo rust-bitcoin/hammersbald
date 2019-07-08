@@ -50,36 +50,19 @@ impl SingleFile {
 
 impl PagedFile for SingleFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let result = self.read_pages(pref, 1)?;
-        if let Some (page) = result.first() {
-            Ok(Some(page.clone()))
-        }
-        else {
-            Ok(None)
-        }
-    }
-
-    fn read_pages(&self, pref: PRef, n: usize) -> Result<Vec<Page>, HammersbaldError> {
         let o = pref.as_u64();
         if o < self.base || o >= self.base + self.chunk_size {
             return Err(HammersbaldError::Corrupted("read from wrong file".to_string()));
         }
-        let mut result = Vec::new();
         let pos = o - self.base;
-        if pos >= self.len {
-            return Ok(result);
-        }
-        let available = min(n, ((self.len - pos)/PAGE_SIZE as u64) as usize);
-        if available > 0 {
+        if pos < self.len {
             let mut file = self.file.lock().unwrap();
             file.seek(SeekFrom::Start(pos))?;
-            let mut buffer = vec!(0u8; PAGE_SIZE * available);
-            file.read_exact(&mut buffer)?;
-            for i in 0..available {
-                result.push(Page::from_slice(&buffer[i * PAGE_SIZE..(i + 1) * PAGE_SIZE]));
-            }
+            let mut buffer = [0u8; PAGE_SIZE];
+            file.read_exact(&mut buffer[..])?;
+            return Ok(Some(Page::from_buf(buffer)));
         }
-        Ok(result)
+        Ok(None)
     }
 
     fn len(&self) -> Result<u64, HammersbaldError> {

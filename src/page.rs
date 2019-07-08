@@ -50,13 +50,6 @@ impl Page {
         Page{ content }
     }
 
-    /// create a Page from read buffer
-    pub fn from_slice (content: &[u8]) -> Page {
-        let mut buf = [0u8; PAGE_SIZE];
-        buf.copy_from_slice(content);
-        Page{ content: buf }
-    }
-
     /// interpret the last 6 bytes as an pref
     pub fn pref (&self) -> PRef {
         self.read_pref(PAGE_PAYLOAD_SIZE)
