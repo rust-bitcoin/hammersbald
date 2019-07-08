@@ -181,7 +181,7 @@ impl PagedFile for RolledFile {
         }
 
         if let Some(file) = self.files.get_mut(&chunk) {
-            self.len = file.update_page(page)?  + chunk as u64 * self.chunk_size;
+            self.len = max(self.len, file.update_page(page)?  + chunk as u64 * self.chunk_size);
             Ok(self.len)
         } else {
             return Err(HammersbaldError::Corrupted(format!("missing chunk in write {}", chunk)));
