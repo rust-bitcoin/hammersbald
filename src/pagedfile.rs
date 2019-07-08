@@ -38,7 +38,7 @@ pub trait PagedFile : Send + Sync {
     /// shutdown async write
     fn shutdown (&mut self);
     /// append pages
-    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError>;
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError>;
     /// write a page at its position
     fn update_page (&mut self, page: Page) -> Result<u64, HammersbaldError>;
     /// flush buffered writes
@@ -73,7 +73,6 @@ impl PagedFileAppender {
     }
 
     pub fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError> {
-        let mut pages = Vec::with_capacity(buf.len()/PAGE_SIZE+1);
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -84,7 +83,7 @@ impl PagedFileAppender {
                 page.write(self.pos.in_page_pos(), &buf[wrote..wrote + space]);
                 wrote += space;
                 if self.pos.in_page_pos() + space == PAGE_SIZE {
-                    pages.push(page.clone());
+                    self.file.append_page(page.clone())?;
                 }
                 self.pos += space as u64;
             }
@@ -92,7 +91,6 @@ impl PagedFileAppender {
                 self.page = None;
             }
         }
-        self.file.append_pages(&pages)?;
         Ok(self.pos)
     }
 
@@ -172,8 +170,8 @@ impl PagedFile for PagedFileAppender {
         self.file.shutdown()
     }
 
-    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
-        self.file.append_pages(pages)
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+        self.file.append_page(page)
     }
 
     fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
@@ -183,10 +181,11 @@ impl PagedFile for PagedFileAppender {
     fn flush(&mut self) -> Result<(), HammersbaldError> {
         if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
-                self.file.append_pages(&vec!(page.clone()))?;
+                self.file.append_page(page.clone())?;
                 self.pos += PAGE_SIZE as u64 - self.pos.in_page_pos() as u64;
             }
         }
+        self.page = None;
         Ok(self.file.flush()?)
     }
 }

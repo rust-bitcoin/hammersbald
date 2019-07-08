@@ -119,11 +119,9 @@ impl PagedFile for Transient {
     fn shutdown (&mut self) {
     }
 
-    fn append_pages(&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut inner = self.inner.lock().unwrap();
-        for page in pages {
-            inner.write(&page.clone().into_buf())?;
-        }
+        inner.write(&page.clone().into_buf())?;
         Ok(())
     }
 

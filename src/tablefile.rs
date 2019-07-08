@@ -94,7 +94,7 @@ impl PagedFile for TableFile {
         Ok(result)
     }
 
-    fn append_pages(&mut self, _: &Vec<Page>) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, _: Page) -> Result<(), HammersbaldError> {
         unimplemented!()
     }
 

@@ -63,7 +63,9 @@ impl AsyncFile {
                 queue = inner.work.wait(queue).expect("page queue lock poisoned");
             }
             let mut file = inner.file.lock().expect("file lock poisoned");
-            file.append_pages(&queue).expect("can not write in background");
+            for page in queue.iter() {
+                file.append_page(page.clone()).expect("can not write in background");
+            }
             queue.clear();
             inner.flushed.notify_all();
         }
@@ -135,11 +137,9 @@ impl PagedFile for AsyncFile {
         self.inner.run.store(false, Ordering::Release)
     }
 
-    fn append_pages (&mut self, pages: &Vec<Page>) -> Result<(), HammersbaldError> {
+    fn append_page (&mut self, page: Page) -> Result<(), HammersbaldError> {
         let mut queue = self.inner.queue.lock().unwrap();
-        for page in pages {
-            queue.push(page.clone());
-        }
+        queue.push(page.clone());
         self.inner.work.notify_one();
         Ok(())
     }
