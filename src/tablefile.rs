@@ -18,8 +18,11 @@
 //! Specific implementation details to hash table file
 //!
 
+use std::cmp::max;
+
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use pagedfile::PagedFile;
+use memtable::MemTable;
 use error::HammersbaldError;
 use pref::PRef;
 
@@ -30,12 +33,14 @@ pub const BUCKETS_FIRST_PAGE:usize = (PAGE_PAYLOAD_SIZE - FIRST_PAGE_HEAD)/BUCKE
 
 /// The key file
 pub struct TableFile {
-    file: Box<PagedFile>
+    file: Box<PagedFile>,
+    initialized_until: PRef
 }
 
 impl TableFile {
     pub fn new (file: Box<PagedFile>) -> Result<TableFile, HammersbaldError> {
-        Ok(TableFile {file})
+        let initialized_until = PRef::from(file.len()?);
+        Ok(TableFile {file, initialized_until})
     }
 
     pub fn table_offset (bucket: usize) -> PRef {
@@ -64,6 +69,7 @@ impl PagedFile for TableFile {
     }
 
     fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
+        self.initialized_until = PRef::from(new_len);
         self.file.truncate(new_len)
     }
 
@@ -88,6 +94,13 @@ impl PagedFile for TableFile {
     }
 
     fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
+        if page.pref().as_u64() >= self.len()? {
+            while page.pref() > self.initialized_until {
+                self.file.update_page(MemTable::invalid_offsets_page(self.initialized_until))?;
+                self.initialized_until = self.initialized_until.add_pages(1);
+            }
+        }
+        self.initialized_until = max(self.initialized_until,page.pref().add_pages(1));
         self.file.update_page(page)
     }
 }

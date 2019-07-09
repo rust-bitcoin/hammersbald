@@ -114,9 +114,11 @@ impl RolledFile {
 
 impl PagedFile for RolledFile {
     fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
-        let chunk = (pref.as_u64() / self.chunk_size) as u16;
-        if let Some(file) = self.files.get(&chunk) {
-            return file.read_page(pref);
+        if pref.as_u64() < self.len {
+            let chunk = (pref.as_u64() / self.chunk_size) as u16;
+            if let Some(file) = self.files.get(&chunk) {
+                return file.read_page(pref);
+            }
         }
         Ok(None)
     }

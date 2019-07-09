@@ -205,7 +205,7 @@ impl MemTable {
         Ok(())
     }
 
-    fn invalid_offsets_page(pos: PRef) -> Page {
+    pub fn invalid_offsets_page(pos: PRef) -> Page {
         let mut page = Page::new_table_page(pos);
         if pos.as_u64() == 0 {
             for o in 0 .. BUCKETS_FIRST_PAGE {
