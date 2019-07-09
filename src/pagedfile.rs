@@ -93,11 +93,11 @@ impl PagedFileAppender {
         Ok(self.pos)
     }
 
-    pub fn read(&self, mut pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError> {
+    pub fn read(&self, mut pos: PRef, buf: &mut [u8], len: usize) -> Result<PRef, HammersbaldError> {
         let mut read = 0;
-        while read < buf.len() {
+        while read < len {
             if let Some(ref page) = self.read_page (pos.this_page())? {
-                let have = min(PAGE_SIZE - pos.in_page_pos(), buf.len() - read);
+                let have = min(PAGE_SIZE - pos.in_page_pos(), len - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
                 pos += have as u64;

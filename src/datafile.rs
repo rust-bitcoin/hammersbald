@@ -60,10 +60,18 @@ impl DataFile {
     /// get a stored content at pref
     pub fn get_envelope(&self, mut pref: PRef) -> Result<Envelope, HammersbaldError> {
         let mut len = [0u8;3];
-        pref = self.appender.read(pref, &mut len)?;
-        let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
-        self.appender.read(pref, &mut buf)?;
-        Ok(Envelope::deseralize(buf))
+        pref = self.appender.read(pref, &mut len, 3)?;
+        let blen = BigEndian::read_u24(&len) as usize;
+        if blen > PAGE_SIZE {
+            let mut buf = vec!(0u8; blen);
+            self.appender.read(pref, &mut buf, blen)?;
+            Ok(Envelope::deseralize(buf))
+        }
+        else {
+            let mut buf = [0u8;PAGE_SIZE];
+            self.appender.read(pref, &mut buf, blen)?;
+            Ok(Envelope::deseralize(buf[0..blen].to_vec()))
+        }
     }
 
     /// append link
@@ -156,10 +164,11 @@ impl<'f> Iterator for EnvelopeIterator<'f> {
             let mut pos = self.pos;
             let start = pos;
             let mut len = [0u8;3];
-            pos = self.file.read(pos, &mut len).unwrap();
+            pos = self.file.read(pos, &mut len, 3).unwrap();
             if pos > self.pos {
                 let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
-                self.pos = self.file.read(pos, &mut buf).unwrap();
+                let blen = buf.len();
+                self.pos = self.file.read(pos, &mut buf, blen).unwrap();
                 let envelope = Envelope::deseralize(buf);
                 return Some((start, envelope))
             }
