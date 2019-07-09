@@ -62,7 +62,7 @@ impl DataFile {
         let mut len = [0u8;3];
         pref = self.appender.read(pref, &mut len, 3)?;
         let blen = BigEndian::read_u24(&len) as usize;
-        if blen > PAGE_SIZE {
+        if blen >= PAGE_SIZE {
             let mut buf = vec!(0u8; blen);
             self.appender.read(pref, &mut buf, blen)?;
             Ok(Envelope::deseralize(buf))
