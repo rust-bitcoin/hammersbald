@@ -122,10 +122,10 @@ impl DataFile {
         let pos = self.appender.position();
         if pos.in_page_pos() > 0 {
             if PAGE_SIZE - pos.in_page_pos() >= 7 {
-                let padding = vec!(0u8; PAGE_SIZE - pos.in_page_pos() - 4);
+                let padding = vec!(0u8; PAGE_SIZE - pos.in_page_pos() - 7);
                 self.append_referred(padding.as_slice())?;
             } else {
-                let padding = vec!(0u8; 2 * PAGE_SIZE - pos.in_page_pos() - 4);
+                let padding = vec!(0u8; 2 * PAGE_SIZE - pos.in_page_pos() - 7);
                 self.append_referred(padding.as_slice())?;
             }
         }
