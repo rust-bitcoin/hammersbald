@@ -25,6 +25,7 @@
 #![deny(unused_mut)]
 #![deny(missing_docs)]
 #![deny(unused_must_use)]
+#![forbid(unsafe_code)]
 
 #[cfg(feature="bitcoin_support")]
 extern crate bitcoin;
