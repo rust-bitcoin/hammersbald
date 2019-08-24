@@ -17,11 +17,11 @@
 //! # a file that is read and wrote by pages
 //!
 
-use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
+use page::{Page, PAGE_SIZE};
 use error::HammersbaldError;
 use pref::PRef;
 
-use std::cmp::{max,min};
+use std::cmp::min;
 use std::io::{self, ErrorKind};
 
 /// a paged file

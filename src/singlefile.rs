@@ -26,7 +26,7 @@ use pref::PRef;
 use std::sync::Mutex;
 use std::fs::File;
 use std::io::{Read,Write,Seek,SeekFrom};
-use std::cmp::{max, min};
+use std::cmp::max;
 
 pub struct SingleFile {
     file: Mutex<File>,

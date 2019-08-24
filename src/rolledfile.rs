@@ -27,7 +27,7 @@ use singlefile::SingleFile;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::Path;
-use std::cmp::{max, min};
+use std::cmp::max;
 
 pub struct RolledFile {
     name: String,

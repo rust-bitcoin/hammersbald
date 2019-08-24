@@ -1,6 +1,6 @@
 [package]
 name = "hammersbald"
-version = "2.0.7"
+version = "2.1.0"
 authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
 license = "Apache-2.0"
 homepage = "https://github.com/rust-bitcoin/hammersbald/"
@@ -15,15 +15,15 @@ name = "hammersbald"
 path = "src/lib.rs"
 
 [features]
-bitcoin_support=["bitcoin", "bitcoin_hashes"]
+bitcoin_support=["bitcoin"]
 
 [dependencies]
-rand="0.5"
-siphasher = "0.2"
+rand="0.7"
 byteorder="1.2"
 lru-cache = "0.1.1"
-bitcoin = { version = "0.18", optional = true }
-bitcoin_hashes = { version = "0.3", optional = true }
+bitcoin_hashes = "0.7"
+bitcoin = { version = "0.20", optional = true }
+
 
 [dev-dependencies]
 hex = "0.3"
