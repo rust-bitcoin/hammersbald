@@ -27,8 +27,9 @@
 #![deny(unused_must_use)]
 #![forbid(unsafe_code)]
 
-#[cfg(feature="bitcoin_support")]
-extern crate bitcoin;
+#[cfg(feature="bitcoin_support")]extern crate bitcoin;
+#[cfg(feature="bitcoin_support")]extern crate serde;
+#[cfg(feature="bitcoin_support")]extern crate serde_cbor;
 extern crate bitcoin_hashes;
 extern crate rand;
 extern crate byteorder;
@@ -68,3 +69,9 @@ mod bitcoin_adaptor;
 
 #[cfg(feature="bitcoin_support")]
 pub use bitcoin_adaptor::BitcoinAdaptor;
+
+#[cfg(feature="cbor")]
+mod cbor_adaptor;
+
+#[cfg(feature="cbor")]
+pub use cbor_adaptor::CBORAdaptor;
