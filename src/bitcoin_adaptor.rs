@@ -25,14 +25,13 @@ use HammersbaldIterator;
 use bitcoin_hashes::sha256d;
 
 use bitcoin::{
-    BitcoinHash,
-    consensus::{Decodable, Encodable}
+    BitcoinHash
 };
 
 use std::{
     error::Error
 };
-use bitcoin::consensus::{deserialize, serialize};
+
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -49,68 +48,40 @@ impl BitcoinAdaptor {
 
     /// Store some bitcoin object that has a bitcoin hash
     pub fn put_hash_keyed<T>(&mut self, encodable: &T) -> Result<PRef, Box<Error>>
-        where T: Encodable + BitcoinHash {
-        Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash()[..], serialize(encodable).as_slice())?)
+        where T: Serialize + BitcoinHash {
+        Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash()[..], serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve a bitcoin_object with its hash
     pub fn get_hash_keyed<T>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<Error>>
-        where T: Decodable + BitcoinHash{
+        where T: DeserializeOwned + BitcoinHash{
         if let Some((pref, data)) = self.hammersbald.get_keyed(&id[..])? {
-            return Ok(Some((pref, deserialize(data.as_slice())?)))
+            return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)))
         }
         Ok(None)
     }
 
     /// Store some bitcoin object
     pub fn put_encodable<T>(&mut self, encodable: &T) -> Result<PRef, Box<Error>>
-        where T: Encodable {
-        Ok(self.hammersbald.put(serialize(encodable).as_slice())?)
+        where T: Serialize {
+        Ok(self.hammersbald.put(serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve some bitcoin object
     pub fn get_decodable<T>(&self, pref: PRef) -> Result<(Vec<u8>, T), Box<Error>>
-        where T: Decodable {
-        let (key, data) = self.hammersbald.get(pref)?;
-        Ok((key, deserialize(data.as_slice())?))
-    }
-
-    /// Retrieve some serializable object
-    pub fn get_deserializable<T>(&self, pref: PRef) -> Result<(Vec<u8>, T), Box<Error>>
         where T: DeserializeOwned {
         let (key, data) = self.hammersbald.get(pref)?;
         Ok((key, serde_cbor::from_slice(data.as_slice())?))
     }
 
-    /// Store some serializable object
-    pub fn put_serializable<T>(&mut self, encodable: &T) -> Result<PRef, Box<Error>>
-        where T: Serialize {
-        Ok(self.hammersbald.put(serde_cbor::ser::to_vec_packed(encodable)?.as_slice())?)
-    }
-
     /// Store some bitcoin object with arbitary key
     pub fn put_keyed_encodable<T>( &mut self, key: &[u8], encodable: &T) -> Result<PRef, Box<Error>>
-        where T: Encodable {
-        Ok(self.hammersbald.put_keyed(key, serialize(encodable).as_slice())?)
+        where T: Serialize {
+        Ok(self.hammersbald.put_keyed(key, serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve some bitcoin object with arbitary key
     pub fn get_keyed_decodable<T>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<Error>>
-        where T: Decodable{
-        if let Some((pref, data)) = self.hammersbald.get_keyed(key)? {
-            return Ok(Some((pref, deserialize(data.as_slice())?)));
-        }
-        Ok(None)
-    }
-
-    /// Store some bitcoin object with arbitary key
-    pub fn put_keyed_serializable<T>( &mut self, key: &[u8], encodable: &T) -> Result<PRef, Box<Error>>
-        where T: Serialize {
-        Ok(self.hammersbald.put_keyed(key, serde_cbor::ser::to_vec_packed(encodable)?.as_slice())?)
-    }
-
-    /// Retrieve some bitcoin object with arbitary key
-    pub fn get_keyed_deserializable<T>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<Error>>
         where T: DeserializeOwned{
         if let Some((pref, data)) = self.hammersbald.get_keyed(key)? {
             return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)));
