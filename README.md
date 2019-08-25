@@ -106,7 +106,9 @@ The data storage size is limited to 2^48 (256TiB) due to the use of 6 byte persi
 pointers. A data element can not exceed 2^24 (16MiB) in length. Key length is limited to 255 bytes. 
 
 ## Release Notes
-2.2.0 add storage of cbor serializable objects to bitcoin_adaptor
+2.3.0 all bitcoin objects use CBOR serialization
+
+2.2.0 add storage of CBOR serializable objects to bitcoin_adaptor
 
 2.1.0 upgrade to rust-bitcoin 0.20, use bitcoin_hashes instead of siphasher
 
