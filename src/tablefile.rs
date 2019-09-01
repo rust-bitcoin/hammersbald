@@ -23,7 +23,7 @@ use std::cmp::max;
 use page::{Page, PAGE_SIZE, PAGE_PAYLOAD_SIZE};
 use pagedfile::PagedFile;
 use memtable::MemTable;
-use error::HammersbaldError;
+use error::Error;
 use pref::PRef;
 
 pub const FIRST_PAGE_HEAD:usize = 28;
@@ -38,7 +38,7 @@ pub struct TableFile {
 }
 
 impl TableFile {
-    pub fn new (file: Box<PagedFile>) -> Result<TableFile, HammersbaldError> {
+    pub fn new (file: Box<PagedFile>) -> Result<TableFile, Error> {
         let initialized_until = PRef::from(file.len()?);
         Ok(TableFile {file, initialized_until})
     }
@@ -60,40 +60,40 @@ impl TableFile {
 }
 
 impl PagedFile for TableFile {
-    fn flush(&mut self) -> Result<(), HammersbaldError> {
+    fn flush(&mut self) -> Result<(), Error> {
         self.file.flush()
     }
 
-    fn len(&self) -> Result<u64, HammersbaldError> {
+    fn len(&self) -> Result<u64, Error> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), Error> {
         self.initialized_until = PRef::from(new_len);
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), HammersbaldError> {
+    fn sync(&self) -> Result<(), Error> {
         self.file.sync()
     }
 
     fn shutdown (&mut self) {}
 
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, Error> {
         let result = self.file.read_page(pref)?;
         if let Some(ref page) = result {
             if page.pref() != pref {
-                return Err(HammersbaldError::Corrupted(format!("table page {} does not have the pref of its position", pref)));
+                return Err(Error::Corrupted(format!("table page {} does not have the pref of its position", pref)));
             }
         }
         Ok(result)
     }
 
-    fn append_page(&mut self, _: Page) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, _: Page) -> Result<(), Error> {
         unimplemented!()
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, Error> {
         if page.pref().as_u64() >= self.len()? {
             while page.pref() > self.initialized_until {
                 self.file.update_page(MemTable::invalid_offsets_page(self.initialized_until))?;

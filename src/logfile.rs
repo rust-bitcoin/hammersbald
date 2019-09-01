@@ -20,7 +20,7 @@
 
 use page::Page;
 use pagedfile::{PagedFile, PagedFileIterator};
-use error::HammersbaldError;
+use error::Error;
 use pref::PRef;
 
 use std::collections::HashSet;
@@ -36,7 +36,7 @@ impl LogFile {
         LogFile { file: rw, logged: HashSet::new(), source_len:0 }
     }
 
-    pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), HammersbaldError> {
+    pub fn init (&mut self, data_len: u64, table_len: u64, link_len: u64) -> Result<(), Error> {
         self.truncate(0)?;
         let mut first = Page::new();
         first.write_pref(0, PRef::from(data_len));
@@ -52,7 +52,7 @@ impl LogFile {
         PagedFileIterator::new(self, PRef::from(0))
     }
 
-    pub fn log_page(&mut self, pref: PRef, source: &PagedFile) -> Result<(), HammersbaldError>{
+    pub fn log_page(&mut self, pref: PRef, source: &PagedFile) -> Result<(), Error>{
         if pref.as_u64() < self.source_len && self.logged.insert(pref) {
             if let Some(page) = source.read_page(pref)? {
                 self.append_page(page)?;
@@ -68,33 +68,33 @@ impl LogFile {
 }
 
 impl PagedFile for LogFile {
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, Error> {
         self.file.read_page(pref)
     }
 
-    fn len(&self) -> Result<u64, HammersbaldError> {
+    fn len(&self) -> Result<u64, Error> {
         self.file.len()
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), HammersbaldError> {
+    fn truncate(&mut self, len: u64) -> Result<(), Error> {
         self.file.truncate(len)
     }
 
-    fn sync(&self) -> Result<(), HammersbaldError> {
+    fn sync(&self) -> Result<(), Error> {
         self.file.sync()
     }
 
     fn shutdown (&mut self) {}
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, page: Page) -> Result<(), Error> {
         self.file.append_page(page)
     }
 
-    fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
+    fn update_page(&mut self, _: Page) -> Result<u64, Error> {
         unimplemented!()
     }
 
-    fn flush(&mut self) -> Result<(), HammersbaldError> {
+    fn flush(&mut self) -> Result<(), Error> {
         Ok(self.file.flush()?)
     }
 }

@@ -21,7 +21,7 @@
 use page::PAGE_SIZE;
 use pagedfile::{PagedFile, PagedFileAppender};
 use format::{Envelope, Payload, Data, IndexedData, Link};
-use error::HammersbaldError;
+use error::Error;
 use pref::PRef;
 
 use byteorder::{ByteOrder, BigEndian};
@@ -33,10 +33,10 @@ pub struct DataFile {
 
 impl DataFile {
     /// create new file
-    pub fn new(file: Box<PagedFile>) -> Result<DataFile, HammersbaldError> {
+    pub fn new(file: Box<PagedFile>) -> Result<DataFile, Error> {
         let len = file.len()?;
         if len % PAGE_SIZE as u64 != 0 {
-            return Err(HammersbaldError::Corrupted("data file does not end at page boundary".to_string()));
+            return Err(Error::Corrupted("data file does not end at page boundary".to_string()));
         }
         if len >= PAGE_SIZE as u64 {
             return Ok(DataFile{appender: PagedFileAppender::new(file, PRef::from(len))});
@@ -58,7 +58,7 @@ impl DataFile {
     }
 
     /// get a stored content at pref
-    pub fn get_envelope(&self, mut pref: PRef) -> Result<Envelope, HammersbaldError> {
+    pub fn get_envelope(&self, mut pref: PRef) -> Result<Envelope, Error> {
         let mut len = [0u8;3];
         pref = self.appender.read(pref, &mut len, 3)?;
         let blen = BigEndian::read_u24(&len) as usize;
@@ -75,7 +75,7 @@ impl DataFile {
     }
 
     /// append link
-    pub fn append_link (&mut self, link: Link) -> Result<PRef, HammersbaldError> {
+    pub fn append_link (&mut self, link: Link) -> Result<PRef, Error> {
         let mut payload = vec!();
         Payload::Link(link).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice());
@@ -87,7 +87,7 @@ impl DataFile {
     }
 
     /// append indexed data
-    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
         let indexed = IndexedData::new(key, Data::new(data));
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
@@ -100,7 +100,7 @@ impl DataFile {
     }
 
     /// append referred data
-    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, Error> {
         let data = Data::new(data);
         let mut payload = vec!();
         Payload::Referred(data).serialize(&mut payload);
@@ -113,12 +113,12 @@ impl DataFile {
     }
 
     /// truncate file
-    pub fn truncate(&mut self, pref: u64) -> Result<(), HammersbaldError> {
+    pub fn truncate(&mut self, pref: u64) -> Result<(), Error> {
         self.appender.truncate (pref)
     }
 
     /// flush buffers
-    pub fn flush (&mut self) -> Result<(), HammersbaldError> {
+    pub fn flush (&mut self) -> Result<(), Error> {
         let pos = self.appender.position();
         if pos.in_page_pos() > 0 {
             if PAGE_SIZE - pos.in_page_pos() >= 7 {
@@ -133,12 +133,12 @@ impl DataFile {
     }
 
     /// sync file on file system
-    pub fn sync (&self) -> Result<(), HammersbaldError> {
+    pub fn sync (&self) -> Result<(), Error> {
         self.appender.sync()
     }
 
     /// get file length
-    pub fn len (&self) -> Result<u64, HammersbaldError> {
+    pub fn len (&self) -> Result<u64, Error> {
         self.appender.len()
     }
 }

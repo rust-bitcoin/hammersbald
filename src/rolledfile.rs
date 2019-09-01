@@ -18,7 +18,7 @@
 //!
 //! A file that is split into chunks
 //!
-use error::HammersbaldError;
+use error::Error;
 use pref::PRef;
 use page::{Page, PAGE_SIZE};
 use pagedfile::PagedFile;
@@ -39,13 +39,13 @@ pub struct RolledFile {
 }
 
 impl RolledFile {
-    pub fn new (name: &str, extension: &str, append_only: bool, chunk_size: u64) -> Result<RolledFile, HammersbaldError> {
+    pub fn new (name: &str, extension: &str, append_only: bool, chunk_size: u64) -> Result<RolledFile, Error> {
         let mut rolled = RolledFile { name: name.to_string(), extension: extension.to_string(), files: HashMap::new(), len: 0, append_only, chunk_size};
         rolled.open()?;
         Ok(rolled)
     }
 
-    fn open (&mut self) -> Result<(), HammersbaldError> {
+    fn open (&mut self) -> Result<(), Error> {
         // interesting file names are:
         // name.index.extension
         // where index is a number
@@ -94,12 +94,12 @@ impl RolledFile {
             }
         }
         else {
-            return Err(HammersbaldError::Corrupted("invalid db name".to_string()));
+            return Err(Error::Corrupted("invalid db name".to_string()));
         }
         Ok(())
     }
 
-    fn open_file (append: bool, path: String) -> Result<File, HammersbaldError> {
+    fn open_file (append: bool, path: String) -> Result<File, Error> {
         let mut open_mode = OpenOptions::new();
 
         if append {
@@ -113,7 +113,7 @@ impl RolledFile {
 }
 
 impl PagedFile for RolledFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, Error> {
         if pref.as_u64() < self.len {
             let chunk = (pref.as_u64() / self.chunk_size) as u16;
             if let Some(file) = self.files.get(&chunk) {
@@ -123,13 +123,13 @@ impl PagedFile for RolledFile {
         Ok(None)
     }
 
-    fn len(&self) -> Result<u64, HammersbaldError> {
+    fn len(&self) -> Result<u64, Error> {
         Ok(self.len)
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), Error> {
         if new_len % PAGE_SIZE as u64 != 0 {
-            return Err(HammersbaldError::Corrupted(format!("truncate not to page boundary {}", new_len)));
+            return Err(Error::Corrupted(format!("truncate not to page boundary {}", new_len)));
         }
         let chunk = (new_len / self.chunk_size) as u16;
         for (c, file) in &mut self.files {
@@ -144,7 +144,7 @@ impl PagedFile for RolledFile {
         Ok(())
     }
 
-    fn sync(&self) -> Result<(), HammersbaldError> {
+    fn sync(&self) -> Result<(), Error> {
         for file in self.files.values() {
             file.sync()?;
         }
@@ -153,7 +153,7 @@ impl PagedFile for RolledFile {
 
     fn shutdown (&mut self) {}
 
-    fn append_page (&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_page (&mut self, page: Page) -> Result<(), Error> {
         let chunk = (self.len / self.chunk_size) as u16;
 
         if self.len % self.chunk_size == 0 && !self.files.contains_key(&chunk) {
@@ -167,12 +167,12 @@ impl PagedFile for RolledFile {
             self.len += PAGE_SIZE as u64;
         }
         else {
-            return Err(HammersbaldError::Corrupted(format!("missing chunk in append {}", chunk)));
+            return Err(Error::Corrupted(format!("missing chunk in append {}", chunk)));
         }
         Ok(())
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, Error> {
         let n_offset = page.pref().as_u64();
         let chunk = (n_offset / self.chunk_size) as u16;
 
@@ -186,11 +186,11 @@ impl PagedFile for RolledFile {
             self.len = max(self.len, file.update_page(page)?  + chunk as u64 * self.chunk_size);
             Ok(self.len)
         } else {
-            return Err(HammersbaldError::Corrupted(format!("missing chunk in write {}", chunk)));
+            return Err(Error::Corrupted(format!("missing chunk in write {}", chunk)));
         }
     }
 
-    fn flush(&mut self) -> Result<(), HammersbaldError> {
+    fn flush(&mut self) -> Result<(), Error> {
         for file in &mut self.files.values_mut() {
             file.flush()?;
         }

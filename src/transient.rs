@@ -18,7 +18,7 @@
 //!
 //! Implements in-memory Read and Write for tests
 
-use error::HammersbaldError;
+use error::Error;
 use logfile::LogFile;
 use api::{Hammersbald, HammersbaldAPI};
 use tablefile::TableFile;
@@ -54,7 +54,7 @@ impl Transient {
         Transient {inner: Mutex::new(Inner{data: Vec::new(), pos: 0, append})}
     }
 
-    pub fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+    pub fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));
@@ -74,7 +74,7 @@ impl Transient {
 }
 
 impl PagedFile for Transient {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, Error> {
         let mut inner = self.inner.lock().unwrap();
         let len = inner.seek(SeekFrom::End(0))?;
         if pref.as_u64() < len {
@@ -86,39 +86,39 @@ impl PagedFile for Transient {
         Ok(None)
     }
 
-    fn len(&self) -> Result<u64, HammersbaldError> {
+    fn len(&self) -> Result<u64, Error> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.data.len() as u64)
     }
 
-    fn truncate(&mut self, len: u64) -> Result<(), HammersbaldError> {
+    fn truncate(&mut self, len: u64) -> Result<(), Error> {
         if len % PAGE_SIZE as u64 != 0 {
-            return Err(HammersbaldError::Corrupted(format!("truncate not to page boundary {}", len)));
+            return Err(Error::Corrupted(format!("truncate not to page boundary {}", len)));
         }
         let mut inner = self.inner.lock().unwrap();
         inner.data.truncate(len as usize);
         Ok(())
     }
 
-    fn sync(&self) -> Result<(), HammersbaldError> { Ok(()) }
+    fn sync(&self) -> Result<(), Error> { Ok(()) }
 
     fn shutdown (&mut self) {
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, page: Page) -> Result<(), Error> {
         let mut inner = self.inner.lock().unwrap();
         inner.write(&page.clone().into_buf())?;
         Ok(())
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, Error> {
         let mut inner = self.inner.lock().unwrap();
         inner.seek(SeekFrom::Start(page.pref().as_u64()))?;
         inner.write(&page.into_buf())?;
         Ok(inner.data.len() as u64)
     }
 
-    fn flush(&mut self) -> Result<(), HammersbaldError> {Ok(())}
+    fn flush(&mut self) -> Result<(), Error> {Ok(())}
 }
 
 impl Read for Inner {

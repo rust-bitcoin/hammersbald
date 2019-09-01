@@ -54,7 +54,7 @@ mod stats;
 mod api;
 
 pub use pref::PRef;
-pub use error::HammersbaldError;
+pub use error::Error;
 pub use api::{
     HammersbaldAPI,
     HammersbaldDataWriter,

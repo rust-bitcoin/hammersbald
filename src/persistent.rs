@@ -22,7 +22,7 @@ use api::{Hammersbald, HammersbaldAPI};
 use asyncfile::AsyncFile;
 use cachedfile::CachedFile;
 use datafile::DataFile;
-use error::HammersbaldError;
+use error::Error;
 use logfile::LogFile;
 use rolledfile::RolledFile;
 use tablefile::TableFile;
@@ -36,7 +36,7 @@ pub struct Persistent {}
 
 impl Persistent {
     /// create a new db
-    pub fn new_db(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+    pub fn new_db(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(

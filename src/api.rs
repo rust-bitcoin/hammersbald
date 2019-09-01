@@ -24,7 +24,7 @@ use format::{Payload,Envelope};
 use persistent::Persistent;
 use transient::Transient;
 use pref::PRef;
-use error::HammersbaldError;
+use error::Error;
 
 use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
 
@@ -39,46 +39,46 @@ pub struct Hammersbald {
 }
 
 /// create or open a persistent db
-pub fn persistent(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+pub fn persistent(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
     Persistent::new_db(name, cached_data_pages,bucket_fill_target)
 }
 
 /// create a transient db
-pub fn transient(bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, HammersbaldError> {
+pub fn transient(bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
     Transient::new_db("",0,bucket_fill_target)
 }
 
 /// public API to Hammersbald
 pub trait HammersbaldAPI : Send + Sync {
     /// end current batch and start a new batch
-    fn batch (&mut self)  -> Result<(), HammersbaldError>;
+    fn batch (&mut self)  -> Result<(), Error>;
 
     /// stop background writer
     fn shutdown (&mut self);
 
     /// store data accessible with key
     /// returns a persistent reference to stored data
-    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError>;
+    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error>;
 
     /// retrieve data with key
     /// returns Some(persistent reference, data) or None
-    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError>;
+    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, Error>;
 
     /// store data
     /// returns a persistent reference
-    fn put(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError>;
+    fn put(&mut self, data: &[u8]) -> Result<PRef, Error>;
 
     /// retrieve data using a persistent reference
     /// returns (key, data)
-    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError>;
+    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), Error>;
 
     /// a quick (in-memory) check if the db may have the key
     /// this might return false positive, but if it is false key is definitely not used.
-    fn may_have_key(&self, key: &[u8]) -> Result<bool, HammersbaldError>;
+    fn may_have_key(&self, key: &[u8]) -> Result<bool, Error>;
 
     /// forget a key (if known)
     /// This is not a real delete as data will be still accessible through its PRef, but contains hash table growth
-    fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError>;
+    fn forget(&mut self, key: &[u8]) -> Result<(), Error>;
 
     /// iterator of data
     fn iter(&self) -> HammersbaldIterator;
@@ -146,7 +146,7 @@ impl<'a> Read for HammersbaldDataReader<'a> {
 
 impl Hammersbald {
     /// create a new db with key and data file
-    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Hammersbald, HammersbaldError> {
+    pub fn new(log: LogFile, table: TableFile, data: DataFile, link: DataFile, bucket_fill_target :usize) -> Result<Hammersbald, Error> {
         let mem = MemTable::new(log, table, data, link, bucket_fill_target);
         let mut db = Hammersbald { mem };
         db.recover()?;
@@ -156,11 +156,11 @@ impl Hammersbald {
     }
 
     /// load memtable
-    fn load(&mut self) -> Result<(), HammersbaldError> {
+    fn load(&mut self) -> Result<(), Error> {
         self.mem.load()
     }
 
-    fn recover(&mut self) -> Result<(), HammersbaldError> {
+    fn recover(&mut self) -> Result<(), Error> {
         self.mem.recover()
     }
 
@@ -192,7 +192,7 @@ impl Hammersbald {
 
 impl HammersbaldAPI for Hammersbald {
 
-    fn batch (&mut self)  -> Result<(), HammersbaldError> {
+    fn batch (&mut self)  -> Result<(), Error> {
         self.mem.batch()
     }
 
@@ -200,11 +200,11 @@ impl HammersbaldAPI for Hammersbald {
         self.mem.shutdown()
     }
 
-    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
         #[cfg(debug_assertions)]
         {
             if key.len() > 255 || data.len() >= 1 << 23 {
-                return Err(HammersbaldError::KeyTooLong);
+                return Err(Error::KeyTooLong);
             }
         }
         let data_offset = self.mem.append_data(key, data)?;
@@ -212,29 +212,29 @@ impl HammersbaldAPI for Hammersbald {
         Ok(data_offset)
     }
 
-    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
+    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, Error> {
         self.mem.get(key)
     }
 
-    fn put(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+    fn put(&mut self, data: &[u8]) -> Result<PRef, Error> {
         let data_offset = self.mem.append_referred(data)?;
         Ok(data_offset)
     }
 
-    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError> {
+    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), Error> {
         let envelope = self.mem.get_envelope(pref)?;
         match Payload::deserialize(envelope.payload())? {
             Payload::Referred(referred) => return Ok((vec!(), referred.data.to_vec())),
             Payload::Indexed(indexed) => return Ok((indexed.key.to_vec(), indexed.data.data.to_vec())),
-            _ => Err(HammersbaldError::Corrupted("referred should point to data".to_string()))
+            _ => Err(Error::Corrupted("referred should point to data".to_string()))
         }
     }
 
-    fn may_have_key(&self, key: &[u8]) -> Result<bool, HammersbaldError> {
+    fn may_have_key(&self, key: &[u8]) -> Result<bool, Error> {
         self.mem.may_have_key(key)
     }
 
-    fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {
+    fn forget(&mut self, key: &[u8]) -> Result<(), Error> {
         self.mem.forget(key)
     }
 

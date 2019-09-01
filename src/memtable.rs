@@ -18,7 +18,7 @@
 //! Specific implementation details to in-memory index of the db
 //!
 //!
-use error::HammersbaldError;
+use error::Error;
 use pref::PRef;
 use datafile::{DataFile, EnvelopeIterator};
 use tablefile::{TableFile, FIRST_PAGE_HEAD, BUCKETS_FIRST_PAGE, BUCKETS_PER_PAGE, BUCKET_SIZE};
@@ -72,7 +72,7 @@ impl MemTable {
     }
 
     /// end current batch and start a new batch
-    pub fn batch (&mut self)  -> Result<(), HammersbaldError> {
+    pub fn batch (&mut self)  -> Result<(), Error> {
         self.log_file.flush()?;
         self.log_file.sync()?;
 
@@ -105,7 +105,7 @@ impl MemTable {
         self.log_file.shutdown();
     }
 
-    pub fn recover(&mut self) -> Result<(), HammersbaldError> {
+    pub fn recover(&mut self) -> Result<(), Error> {
         let mut data_len = 0;
         let mut table_len = 0;
         let mut link_len = 0;
@@ -134,7 +134,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn load (&mut self) -> Result<(), HammersbaldError>{
+    pub fn load (&mut self) -> Result<(), Error>{
         if let Some(first) = self.table_file.read_page(PRef::from(0))? {
             let n_buckets = first.read_pref(0).as_u64() as u32;
             self.buckets = RwLock::new(vec![Bucket::default(); n_buckets as usize]);
@@ -154,7 +154,7 @@ impl MemTable {
         Ok(())
     }
 
-    fn resolve_bucket(&self, bucket_number: usize) -> Result<(), HammersbaldError> {
+    fn resolve_bucket(&self, bucket_number: usize) -> Result<(), Error> {
         if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
             if bucket.slots.is_none () {
                 if bucket.stored.is_valid() {
@@ -167,7 +167,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn flush (&mut self) -> Result<(), HammersbaldError> {
+    pub fn flush (&mut self) -> Result<(), Error> {
         {
             // first page
             let fp = PRef::from(0);
@@ -235,19 +235,19 @@ impl MemTable {
         self.link_file.envelopes()
     }
 
-    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
         self.data_file.append_data(key, data)
     }
 
-    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, Error> {
         self.data_file.append_referred(data)
     }
 
-    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, HammersbaldError> {
+    pub fn get_envelope(&self, pref: PRef) -> Result<Envelope, Error> {
         self.data_file.get_envelope(pref)
     }
 
-    pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), HammersbaldError>{
+    pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), Error>{
         let hash = self.hash(key);
         let bucket = self.bucket_for_hash(hash);
 
@@ -278,7 +278,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {
+    pub fn forget(&mut self, key: &[u8]) -> Result<(), Error> {
         let hash = self.hash(key);
         let bucket = self.bucket_for_hash(hash);
         if self.remove_duplicate(key, hash, bucket)? {
@@ -287,7 +287,7 @@ impl MemTable {
         Ok(())
     }
 
-    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket_number: usize) -> Result<bool, HammersbaldError> {
+    fn remove_duplicate(&mut self, key: &[u8], hash: u32, bucket_number: usize) -> Result<bool, Error> {
         let mut remove = None;
         self.resolve_bucket(bucket_number)?;
         if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
@@ -313,7 +313,7 @@ impl MemTable {
         Ok(remove.is_some())
     }
 
-    fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), HammersbaldError> {
+    fn store_to_bucket(&mut self, bucket: usize, hash: u32, pref: PRef) -> Result<(), Error> {
         self.resolve_bucket(bucket)?;
         if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket as usize) {
             if let Some(ref mut slots) = bucket.slots {
@@ -323,13 +323,13 @@ impl MemTable {
                 bucket.slots = Some(vec!((hash, pref)));
             }
         } else {
-            return Err(HammersbaldError::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
+            return Err(Error::Corrupted(format!("memtable does not have the bucket {}", bucket).to_string()))
         }
         self.modify_bucket(bucket)?;
         Ok(())
     }
 
-    fn rehash_bucket(&mut self, bucket: usize) -> Result<(), HammersbaldError> {
+    fn rehash_bucket(&mut self, bucket: usize) -> Result<(), Error> {
         let mut rewrite = false;
         let mut new_bucket_store = Bucket::default();
         let mut moves = HashMap::new();
@@ -353,7 +353,7 @@ impl MemTable {
             }
         }
         else {
-            return Err(HammersbaldError::Corrupted(format!("does not have bucket {} for rehash", bucket)));
+            return Err(Error::Corrupted(format!("does not have bucket {} for rehash", bucket)));
         }
         if rewrite {
             for (bucket, added) in moves {
@@ -367,7 +367,7 @@ impl MemTable {
         Ok(())
     }
 
-    fn modify_bucket(&mut self, bucket: usize) -> Result<(), HammersbaldError> {
+    fn modify_bucket(&mut self, bucket: usize) -> Result<(), Error> {
         self.dirty.set(bucket);
         let bucket_page = if bucket < BUCKETS_FIRST_PAGE { 
             PRef::from(0)
@@ -377,7 +377,7 @@ impl MemTable {
         self.log_file.log_page(bucket_page, &self.table_file)
     }
 
-    pub fn may_have_key(&self, key: &[u8]) -> Result<bool, HammersbaldError> {
+    pub fn may_have_key(&self, key: &[u8]) -> Result<bool, Error> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         self.resolve_bucket(bucket_number)?;
@@ -388,13 +388,13 @@ impl MemTable {
                 }
             }
         } else {
-            return Err(HammersbaldError::Corrupted(format!("bucket {} should exist", bucket_number)));
+            return Err(Error::Corrupted(format!("bucket {} should exist", bucket_number)));
         }
         Ok(false)
     }
 
     // get the data last associated with the key
-    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, Error> {
         let hash = self.hash(key);
         let bucket_number = self.bucket_for_hash(hash);
         self.resolve_bucket(bucket_number)?;
@@ -408,14 +408,14 @@ impl MemTable {
                                 return Ok(Some((*data, indexed.data.data.to_vec())));
                             }
                         } else {
-                            return Err(HammersbaldError::Corrupted("pref should point to indexed data".to_string()));
+                            return Err(Error::Corrupted("pref should point to indexed data".to_string()));
                         }
                     }
                 }
             }
         }
         else {
-            return Err(HammersbaldError::Corrupted(format!("bucket {} should exist", bucket_number)));
+            return Err(Error::Corrupted(format!("bucket {} should exist", bucket_number)));
         }
         Ok(None)
     }

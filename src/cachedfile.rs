@@ -20,7 +20,7 @@
 use page::{Page, PAGE_SIZE};
 use pagedfile::PagedFile;
 use pref::PRef;
-use error::HammersbaldError;
+use error::Error;
 
 use lru_cache::LruCache;
 
@@ -34,14 +34,14 @@ pub struct CachedFile {
 
 impl CachedFile {
     /// create a read cached file with a page cache of given size
-    pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, HammersbaldError> {
+    pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, Error> {
         let len = file.len()?;
         Ok(CachedFile{file, cache: Mutex::new(Cache::new(len, pages))})
     }
 }
 
 impl PagedFile for CachedFile {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, Error> {
         let mut cache = self.cache.lock().unwrap();
         if let Some(page) = cache.get(pref) {
             return Ok(Some(page));
@@ -53,16 +53,16 @@ impl PagedFile for CachedFile {
         Ok(None)
     }
 
-    fn len(&self) -> Result<u64, HammersbaldError> {
+    fn len(&self) -> Result<u64, Error> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), Error> {
         self.cache.lock().unwrap().reset_len(new_len);
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), HammersbaldError> {
+    fn sync(&self) -> Result<(), Error> {
         self.file.sync()
     }
 
@@ -70,19 +70,19 @@ impl PagedFile for CachedFile {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, page: Page) -> Result<(), Error> {
         let mut cache = self.cache.lock().unwrap();
         cache.append(page.clone());
         self.file.append_page(page)
     }
 
-    fn update_page(&mut self, page: Page) -> Result<u64, HammersbaldError> {
+    fn update_page(&mut self, page: Page) -> Result<u64, Error> {
         let mut cache = self.cache.lock().unwrap();
         cache.update(page.clone());
         self.file.update_page(page)
     }
 
-    fn flush(&mut self) -> Result<(), HammersbaldError> {
+    fn flush(&mut self) -> Result<(), Error> {
         self.cache.lock().unwrap().clear();
         self.file.flush()
     }

@@ -18,7 +18,7 @@
 //!
 
 use page::{Page, PAGE_SIZE};
-use error::HammersbaldError;
+use error::Error;
 use pref::PRef;
 
 use std::cmp::min;
@@ -27,31 +27,31 @@ use std::io::{self, ErrorKind};
 /// a paged file
 pub trait PagedFile : Send + Sync {
     /// read a page at pref
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, HammersbaldError>;
+    fn read_page (&self, pref: PRef) -> Result<Option<Page>, Error>;
     /// length of the storage
-    fn len (&self) -> Result<u64, HammersbaldError>;
+    fn len (&self) -> Result<u64, Error>;
     /// truncate storage
-    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError>;
+    fn truncate(&mut self, new_len: u64) -> Result<(), Error>;
     /// tell OS to flush buffers to disk
-    fn sync (&self) -> Result<(), HammersbaldError>;
+    fn sync (&self) -> Result<(), Error>;
     /// shutdown async write
     fn shutdown (&mut self);
     /// append pages
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError>;
+    fn append_page(&mut self, page: Page) -> Result<(), Error>;
     /// write a page at its position
-    fn update_page (&mut self, page: Page) -> Result<u64, HammersbaldError>;
+    fn update_page (&mut self, page: Page) -> Result<u64, Error>;
     /// flush buffered writes
-    fn flush(&mut self) -> Result<(), HammersbaldError>;
+    fn flush(&mut self) -> Result<(), Error>;
 }
 
 pub trait PagedFileRead {
     /// read a slice from a paged file
-    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<PRef, HammersbaldError>;
+    fn read(&self, pos: PRef, buf: &mut [u8]) -> Result<PRef, Error>;
 }
 
 pub trait PagedFileWrite {
     /// write a slice to a paged file
-    fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError>;
+    fn append(&mut self, buf: &[u8]) -> Result<PRef, Error>;
 }
 
 /// a reader for a paged file
@@ -71,7 +71,7 @@ impl PagedFileAppender {
         self.pos
     }
 
-    pub fn append(&mut self, buf: &[u8]) -> Result<PRef, HammersbaldError> {
+    pub fn append(&mut self, buf: &[u8]) -> Result<PRef, Error> {
         let mut wrote = 0;
         while wrote < buf.len() {
             if self.page.is_none () {
@@ -93,7 +93,7 @@ impl PagedFileAppender {
         Ok(self.pos)
     }
 
-    pub fn read(&self, mut pos: PRef, buf: &mut [u8], len: usize) -> Result<PRef, HammersbaldError> {
+    pub fn read(&self, mut pos: PRef, buf: &mut [u8], len: usize) -> Result<PRef, Error> {
         let mut read = 0;
         while read < len {
             if let Some(ref page) = self.read_page (pos.this_page())? {
@@ -103,7 +103,7 @@ impl PagedFileAppender {
                 pos += have as u64;
             }
             else {
-                return Err(HammersbaldError::IO(io::Error::from(ErrorKind::UnexpectedEof)));
+                return Err(Error::IO(io::Error::from(ErrorKind::UnexpectedEof)));
             }
         }
         Ok(pos)
@@ -111,7 +111,7 @@ impl PagedFileAppender {
 }
 
 impl PagedFile for PagedFileAppender {
-    fn read_page(&self, pref: PRef) -> Result<Option<Page>, HammersbaldError> {
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, Error> {
         if let Some(ref page) = self.page {
             if pref.this_page() == self.pos.this_page() {
                 return Ok(Some(page.clone()));
@@ -120,16 +120,16 @@ impl PagedFile for PagedFileAppender {
         self.file.read_page(pref)
     }
 
-    fn len(&self) -> Result<u64, HammersbaldError> {
+    fn len(&self) -> Result<u64, Error> {
         self.file.len()
     }
 
-    fn truncate(&mut self, new_len: u64) -> Result<(), HammersbaldError> {
+    fn truncate(&mut self, new_len: u64) -> Result<(), Error> {
         self.pos = PRef::from(new_len);
         self.file.truncate(new_len)
     }
 
-    fn sync(&self) -> Result<(), HammersbaldError> {
+    fn sync(&self) -> Result<(), Error> {
         self.file.sync()
     }
 
@@ -137,15 +137,15 @@ impl PagedFile for PagedFileAppender {
         self.file.shutdown()
     }
 
-    fn append_page(&mut self, page: Page) -> Result<(), HammersbaldError> {
+    fn append_page(&mut self, page: Page) -> Result<(), Error> {
         self.file.append_page(page)
     }
 
-    fn update_page(&mut self, _: Page) -> Result<u64, HammersbaldError> {
+    fn update_page(&mut self, _: Page) -> Result<u64, Error> {
         unimplemented!()
     }
 
-    fn flush(&mut self) -> Result<(), HammersbaldError> {
+    fn flush(&mut self) -> Result<(), Error> {
         if let Some(ref mut page) = self.page {
             if self.pos.in_page_pos() > 0 {
                 self.file.append_page(page.clone())?;

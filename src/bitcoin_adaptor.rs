@@ -19,7 +19,6 @@
 
 use PRef;
 use HammersbaldAPI;
-use HammersbaldError;
 use HammersbaldIterator;
 
 use bitcoin_hashes::sha256d;
@@ -28,12 +27,10 @@ use bitcoin::{
     BitcoinHash
 };
 
-use std::{
-    error::Error
-};
-
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+use std::error::Error;
 
 /// Bitcoin adaptor
 pub struct BitcoinAdaptor {
@@ -96,7 +93,7 @@ impl BitcoinAdaptor {
 }
 
 impl HammersbaldAPI for BitcoinAdaptor {
-    fn batch(&mut self) -> Result<(), HammersbaldError> {
+    fn batch(&mut self) -> Result<(), crate::error::Error> {
         self.hammersbald.batch()
     }
 
@@ -104,27 +101,27 @@ impl HammersbaldAPI for BitcoinAdaptor {
         self.hammersbald.shutdown()
     }
 
-    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, HammersbaldError> {
+    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, crate::error::Error> {
         self.hammersbald.put_keyed(key, data)
     }
 
-    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, HammersbaldError> {
+    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, crate::error::Error> {
         self.hammersbald.get_keyed(key)
     }
 
-    fn put(&mut self, data: &[u8]) -> Result<PRef, HammersbaldError> {
+    fn put(&mut self, data: &[u8]) -> Result<PRef, crate::error::Error> {
         self.hammersbald.put(data)
     }
 
-    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), HammersbaldError> {
+    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), crate::error::Error> {
         self.hammersbald.get(pref)
     }
 
-    fn may_have_key (&self, key: &[u8]) -> Result<bool, HammersbaldError> {
+    fn may_have_key (&self, key: &[u8]) -> Result<bool, crate::error::Error> {
         self.hammersbald.may_have_key(key)
     }
 
-    fn forget(&mut self, key: &[u8]) -> Result<(), HammersbaldError> {
+    fn forget(&mut self, key: &[u8]) -> Result<(), crate::error::Error> {
         self.hammersbald.forget(key)
     }
 
