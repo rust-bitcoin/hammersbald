@@ -52,7 +52,7 @@ impl AsyncFile {
     pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFile, Error> {
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
-        thread::spawn(move || { AsyncFile::background(inner2) });
+        thread::Builder::new().name("hammersbald".to_string()).spawn(move || { AsyncFile::background(inner2) }).expect("hammersbald can not start thread for async file IO");
         Ok(AsyncFile { inner })
     }
 
