@@ -33,12 +33,12 @@ pub const BUCKETS_FIRST_PAGE:usize = (PAGE_PAYLOAD_SIZE - FIRST_PAGE_HEAD)/BUCKE
 
 /// The key file
 pub struct TableFile {
-    file: Box<PagedFile>,
+    file: Box<dyn PagedFile>,
     initialized_until: PRef
 }
 
 impl TableFile {
-    pub fn new (file: Box<PagedFile>) -> Result<TableFile, Error> {
+    pub fn new (file: Box<dyn PagedFile>) -> Result<TableFile, Error> {
         let initialized_until = PRef::from(file.len()?);
         Ok(TableFile {file, initialized_until})
     }

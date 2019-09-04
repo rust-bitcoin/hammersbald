@@ -56,14 +56,14 @@ pub trait PagedFileWrite {
 
 /// a reader for a paged file
 pub struct PagedFileAppender {
-    file: Box<PagedFile>,
+    file: Box<dyn PagedFile>,
     pos: PRef,
     page: Option<Page>
 }
 
 impl PagedFileAppender {
     /// create a reader that starts at a position
-    pub fn new (file: Box<PagedFile>, pos: PRef) -> PagedFileAppender {
+    pub fn new (file: Box<dyn PagedFile>, pos: PRef) -> PagedFileAppender {
         PagedFileAppender {file, pos, page: None}
     }
 
@@ -162,13 +162,13 @@ pub struct PagedFileIterator<'file> {
     // the current page of the iterator
     pagenumber: u64,
     // the iterated file
-    file: &'file PagedFile
+    file: &'file dyn PagedFile
 }
 
 /// page iterator
 impl<'file> PagedFileIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file PagedFile, pref: PRef) -> PagedFileIterator {
+    pub fn new (file: &'file dyn PagedFile, pref: PRef) -> PagedFileIterator {
         PagedFileIterator {pagenumber: pref.page_number(), file}
     }
 }

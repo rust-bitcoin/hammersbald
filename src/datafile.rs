@@ -33,7 +33,7 @@ pub struct DataFile {
 
 impl DataFile {
     /// create new file
-    pub fn new(file: Box<PagedFile>) -> Result<DataFile, Error> {
+    pub fn new(file: Box<dyn PagedFile>) -> Result<DataFile, Error> {
         let len = file.len()?;
         if len % PAGE_SIZE as u64 != 0 {
             return Err(Error::Corrupted("data file does not end at page boundary".to_string()));

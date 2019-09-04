@@ -26,13 +26,13 @@ use pref::PRef;
 use std::collections::HashSet;
 
 pub struct LogFile {
-    file: Box<PagedFile>,
+    file: Box<dyn PagedFile>,
     logged: HashSet<PRef>,
     source_len: u64
 }
 
 impl LogFile {
-    pub fn new(rw: Box<PagedFile>) -> LogFile {
+    pub fn new(rw: Box<dyn PagedFile>) -> LogFile {
         LogFile { file: rw, logged: HashSet::new(), source_len:0 }
     }
 
@@ -52,7 +52,7 @@ impl LogFile {
         PagedFileIterator::new(self, PRef::from(0))
     }
 
-    pub fn log_page(&mut self, pref: PRef, source: &PagedFile) -> Result<(), Error>{
+    pub fn log_page(&mut self, pref: PRef, source: &dyn PagedFile) -> Result<(), Error>{
         if pref.as_u64() < self.source_len && self.logged.insert(pref) {
             if let Some(page) = source.read_page(pref)? {
                 self.append_page(page)?;

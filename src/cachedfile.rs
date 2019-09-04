@@ -28,13 +28,13 @@ use std::sync::{Arc, Mutex};
 use std::cmp::max;
 
 pub struct CachedFile {
-    file: Box<PagedFile>,
+    file: Box<dyn PagedFile>,
     cache: Mutex<Cache>
 }
 
 impl CachedFile {
     /// create a read cached file with a page cache of given size
-    pub fn new (file: Box<PagedFile>, pages: usize) -> Result<CachedFile, Error> {
+    pub fn new (file: Box<dyn PagedFile>, pages: usize) -> Result<CachedFile, Error> {
         let len = file.len()?;
         Ok(CachedFile{file, cache: Mutex::new(Cache::new(len, pages))})
     }

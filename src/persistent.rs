@@ -36,7 +36,7 @@ pub struct Persistent {}
 
 impl Persistent {
     /// create a new db
-    pub fn new_db(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
+    pub fn new_db(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<dyn HammersbaldAPI>, Error> {
         let data = DataFile::new(
             Box::new(CachedFile::new(
                 Box::new(AsyncFile::new(

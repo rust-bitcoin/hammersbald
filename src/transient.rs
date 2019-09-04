@@ -54,7 +54,7 @@ impl Transient {
         Transient {inner: Mutex::new(Inner{data: Vec::new(), pos: 0, append})}
     }
 
-    pub fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
+    pub fn new_db (_name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<dyn HammersbaldAPI>, Error> {
         let log = LogFile::new(
             Box::new(AsyncFile::new(
             Box::new(Transient::new(true)))?));

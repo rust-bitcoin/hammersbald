@@ -39,12 +39,12 @@ pub struct Hammersbald {
 }
 
 /// create or open a persistent db
-pub fn persistent(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
+pub fn persistent(name: &str, cached_data_pages: usize, bucket_fill_target: usize) -> Result<Box<dyn HammersbaldAPI>, Error> {
     Persistent::new_db(name, cached_data_pages,bucket_fill_target)
 }
 
 /// create a transient db
-pub fn transient(bucket_fill_target: usize) -> Result<Box<HammersbaldAPI>, Error> {
+pub fn transient(bucket_fill_target: usize) -> Result<Box<dyn HammersbaldAPI>, Error> {
     Transient::new_db("",0,bucket_fill_target)
 }
 

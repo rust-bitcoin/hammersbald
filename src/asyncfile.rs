@@ -33,7 +33,7 @@ pub struct AsyncFile {
 }
 
 struct AsyncFileInner {
-    file: Mutex<Box<PagedFile + Send + Sync>>,
+    file: Mutex<Box<dyn PagedFile + Send + Sync>>,
     work: Condvar,
     flushed: Condvar,
     run: AtomicBool,
@@ -41,7 +41,7 @@ struct AsyncFileInner {
 }
 
 impl AsyncFileInner {
-    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFileInner, Error> {
+    pub fn new (file: Box<dyn PagedFile + Send + Sync>) -> Result<AsyncFileInner, Error> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
             queue: Mutex::new(Vec::new())})
@@ -49,7 +49,7 @@ impl AsyncFileInner {
 }
 
 impl AsyncFile {
-    pub fn new (file: Box<PagedFile + Send + Sync>) -> Result<AsyncFile, Error> {
+    pub fn new (file: Box<dyn PagedFile + Send + Sync>) -> Result<AsyncFile, Error> {
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::Builder::new().name("hammersbald".to_string()).spawn(move || { AsyncFile::background(inner2) }).expect("hammersbald can not start thread for async file IO");

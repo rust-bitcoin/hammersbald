@@ -40,7 +40,7 @@ impl Envelope {
     }
 
     /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
+    pub fn serialize (&self, result: &mut dyn Write) {
         result.write_u24::<BigEndian>(self.buffer.len() as u32).unwrap();
         result.write(self.buffer.as_slice()).unwrap();
     }
@@ -63,7 +63,7 @@ pub enum Payload<'e> {
 
 impl<'e> Payload<'e> {
     /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
+    pub fn serialize (&self, result: &mut dyn Write) {
         match self {
             Payload::Indexed(indexed) => {
                 result.write_u8(0).unwrap();
@@ -106,7 +106,7 @@ impl<'e> Data<'e> {
     }
 
     /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
+    pub fn serialize (&self, result: &mut dyn Write) {
         result.write_u24::<BigEndian>(self.data.len() as u32).unwrap();
         result.write(self.data).unwrap();
     }
@@ -134,7 +134,7 @@ impl<'e> IndexedData<'e> {
     }
 
     /// serialize for storage
-    pub fn serialize (&self, result: &mut Write) {
+    pub fn serialize (&self, result: &mut dyn Write) {
         result.write_u8(self.key.len() as u8).unwrap();
         result.write(self.key).unwrap();
         self.data.serialize(result);
@@ -178,7 +178,7 @@ impl<'e> Link<'e> {
     }
 
     /// serialize for storage
-    pub fn serialize (&self, write: &mut Write) {
+    pub fn serialize (&self, write: &mut dyn Write) {
         write.write(&self.links).unwrap();
     }
 
