@@ -148,7 +148,12 @@ impl MemTable {
         let mut buckets = self.buckets.write().unwrap();
 
         for (i, link) in self.table_file.iter().enumerate() {
-            buckets[i].stored = link;
+            if i < buckets.len() {
+                buckets[i].stored = link;
+            }
+            else {
+                break;
+            }
         }
 
         Ok(())
