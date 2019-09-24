@@ -163,12 +163,14 @@ impl<'f> Iterator for EnvelopeIterator<'f> {
         if self.pos.is_valid() {
             let start = self.pos;
             let mut len = [0u8;3];
-            if let Ok(pos) = self.file.read(self.pos, &mut len, 3) {
-                let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
-                let blen = buf.len();
-                self.pos = self.file.read(pos, &mut buf, blen).unwrap();
-                let envelope = Envelope::deseralize(buf);
-                return Some((start, envelope))
+            if let Ok(pos) = self.file.read(start, &mut len, 3) {
+                let length = BigEndian::read_u24(&len) as usize;
+                if length > 0 {
+                    let mut buf = vec!(0u8; length);
+                    self.pos = self.file.read(pos, &mut buf, length).unwrap();
+                    let envelope = Envelope::deseralize(buf);
+                    return Some((start, envelope))
+                }
             }
         }
         None

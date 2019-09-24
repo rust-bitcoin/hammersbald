@@ -109,8 +109,10 @@ impl<'a, D> Iterator for HammersbaldDecodableIterator<'a, D>
     type Item = (PRef, D);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if let Some((pref, _, data)) = self.inner.next() {
-            return Some((pref, serde_cbor::from_slice(data.as_slice()).expect("can node deserialize data")));
+        while let Some((pref, _, data)) = self.inner.next() {
+            if let Ok(d) = serde_cbor::from_slice(data.as_slice()) {
+                return Some((pref, d));
+            }
         }
         None
     }
