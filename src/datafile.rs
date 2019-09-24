@@ -161,11 +161,9 @@ impl<'f> Iterator for EnvelopeIterator<'f> {
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if self.pos.is_valid() {
-            let mut pos = self.pos;
-            let start = pos;
+            let start = self.pos;
             let mut len = [0u8;3];
-            pos = self.file.read(pos, &mut len, 3).unwrap();
-            if pos > self.pos {
+            if let Ok(pos) = self.file.read(self.pos, &mut len, 3) {
                 let mut buf = vec!(0u8; BigEndian::read_u24(&len) as usize);
                 let blen = buf.len();
                 self.pos = self.file.read(pos, &mut buf, blen).unwrap();
