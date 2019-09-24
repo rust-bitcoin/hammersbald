@@ -31,6 +31,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use std::error::Error;
+use serde::export::PhantomData;
 
 /// Bitcoin adaptor
 pub struct BitcoinAdaptor {
@@ -89,6 +90,29 @@ impl BitcoinAdaptor {
     /// quick check if the db contains a key. This might return false positive.
     pub fn may_have_hash_key (&self, key: &sha256d::Hash) -> Result<bool, Box<Error>> {
         Ok(self.hammersbald.may_have_key(&key[..])?)
+    }
+
+    /// iterate over all data, useful only if data is homogenous
+    pub fn iter_decodable<D: ?Sized> (&self) -> HammersbaldDecodableIterator<D>
+        where D: DeserializeOwned {
+        HammersbaldDecodableIterator{inner: self.iter(), data: PhantomData{}}
+    }
+}
+
+pub struct HammersbaldDecodableIterator<'a, D> {
+    inner: HammersbaldIterator<'a>,
+    data: PhantomData<D>
+}
+
+impl<'a, D> Iterator for HammersbaldDecodableIterator<'a, D>
+    where D: DeserializeOwned{
+    type Item = (PRef, D);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if let Some((pref, _, data)) = self.inner.next() {
+            return Some((pref, serde_cbor::from_slice(data.as_slice()).expect("can node deserialize data")));
+        }
+        None
     }
 }
 

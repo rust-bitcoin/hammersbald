@@ -69,9 +69,3 @@ mod bitcoin_adaptor;
 
 #[cfg(feature="bitcoin_support")]
 pub use bitcoin_adaptor::BitcoinAdaptor;
-
-#[cfg(feature="cbor")]
-mod cbor_adaptor;
-
-#[cfg(feature="cbor")]
-pub use cbor_adaptor::CBORAdaptor;
