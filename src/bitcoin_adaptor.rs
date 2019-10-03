@@ -35,23 +35,23 @@ use serde::export::PhantomData;
 
 /// Bitcoin adaptor
 pub struct BitcoinAdaptor {
-    hammersbald: Box<HammersbaldAPI>
+    hammersbald: Box<dyn HammersbaldAPI>
 }
 
 impl BitcoinAdaptor {
     /// Create a new Adaptor
-    pub fn new (hammersbald: Box<HammersbaldAPI>) -> BitcoinAdaptor {
+    pub fn new (hammersbald: Box<dyn HammersbaldAPI>) -> BitcoinAdaptor {
         BitcoinAdaptor { hammersbald }
     }
 
     /// Store some bitcoin object that has a bitcoin hash
-    pub fn put_hash_keyed<T>(&mut self, encodable: &T) -> Result<PRef, Box<Error>>
+    pub fn put_hash_keyed<T>(&mut self, encodable: &T) -> Result<PRef, Box<dyn Error>>
         where T: Serialize + BitcoinHash {
         Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash()[..], serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve a bitcoin_object with its hash
-    pub fn get_hash_keyed<T>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<Error>>
+    pub fn get_hash_keyed<T>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<dyn Error>>
         where T: DeserializeOwned + BitcoinHash{
         if let Some((pref, data)) = self.hammersbald.get_keyed(&id[..])? {
             return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)))
@@ -60,26 +60,26 @@ impl BitcoinAdaptor {
     }
 
     /// Store some bitcoin object
-    pub fn put_encodable<T>(&mut self, encodable: &T) -> Result<PRef, Box<Error>>
+    pub fn put_encodable<T>(&mut self, encodable: &T) -> Result<PRef, Box<dyn Error>>
         where T: Serialize {
         Ok(self.hammersbald.put(serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve some bitcoin object
-    pub fn get_decodable<T>(&self, pref: PRef) -> Result<(Vec<u8>, T), Box<Error>>
+    pub fn get_decodable<T>(&self, pref: PRef) -> Result<(Vec<u8>, T), Box<dyn Error>>
         where T: DeserializeOwned {
         let (key, data) = self.hammersbald.get(pref)?;
         Ok((key, serde_cbor::from_slice(data.as_slice())?))
     }
 
     /// Store some bitcoin object with arbitary key
-    pub fn put_keyed_encodable<T>( &mut self, key: &[u8], encodable: &T) -> Result<PRef, Box<Error>>
+    pub fn put_keyed_encodable<T>( &mut self, key: &[u8], encodable: &T) -> Result<PRef, Box<dyn Error>>
         where T: Serialize {
         Ok(self.hammersbald.put_keyed(key, serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve some bitcoin object with arbitary key
-    pub fn get_keyed_decodable<T>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<Error>>
+    pub fn get_keyed_decodable<T>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<dyn Error>>
         where T: DeserializeOwned{
         if let Some((pref, data)) = self.hammersbald.get_keyed(key)? {
             return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)));
@@ -88,7 +88,7 @@ impl BitcoinAdaptor {
     }
 
     /// quick check if the db contains a key. This might return false positive.
-    pub fn may_have_hash_key (&self, key: &sha256d::Hash) -> Result<bool, Box<Error>> {
+    pub fn may_have_hash_key (&self, key: &sha256d::Hash) -> Result<bool, Box<dyn Error>> {
         Ok(self.hammersbald.may_have_key(&key[..])?)
     }
 
