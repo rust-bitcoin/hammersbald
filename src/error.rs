@@ -46,16 +46,7 @@ pub enum Error {
 
 impl std::error::Error for Error {
     fn description(&self) -> &str {
-        match *self {
-            Error::InvalidOffset => "invalid pref",
-            Error::KeyTooLong => "key too long",
-            Error::Corrupted (ref s) => s.as_str(),
-            Error::IO(_) => "IO Error",
-            #[cfg(feature="bitcoin_support")]
-            Error::BitcoinSerialize(_) => "Bitcoin Serialize Error",
-            Error::Poisoned(ref s) => s.as_str(),
-            Error::Queue(ref s) => s.as_str()
-        }
+        "description() is deprecated; use Display"
     }
 
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -74,8 +65,16 @@ impl std::error::Error for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-        write!(f, "Hammersbald error: {} cause: {:?}", self.description(), self.source())
+        match &self {
+            Error::InvalidOffset => write!(f, "invalid pref"),
+            Error::KeyTooLong => write!(f, "key too long"),
+            Error::Corrupted(ref s) => write!(f, "corrupted data: {}", s),
+            Error::IO(e) => e.fmt(f),
+            #[cfg(feature = "bitcoin_support")]
+            Error::BitcoinSerialize(e) => write!(f, "bitcoin serialize error: {}", e),
+            Error::Poisoned(ref s) => write!(f, "lock poisoned: {}", s),
+            Error::Queue(ref s) => write!(f, "queue error {}", s),
+        }
     }
 }
 
