@@ -23,9 +23,6 @@ use HammersbaldIterator;
 
 use bitcoin_hashes::sha256d;
 
-use bitcoin::{
-    BitcoinHash
-};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -45,14 +42,14 @@ impl BitcoinAdaptor {
     }
 
     /// Store some bitcoin object that has a bitcoin hash
-    pub fn put_hash_keyed<T>(&mut self, encodable: &T) -> Result<PRef, Box<dyn Error>>
-        where T: Serialize + BitcoinHash {
-        Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash()[..], serde_cbor::to_vec(encodable)?.as_slice())?)
+    pub fn put_hash_keyed<T>(&mut self, id: &sha256d::Hash, encodable: &T) -> Result<PRef, Box<dyn Error>>
+        where T: Serialize {
+        Ok(self.hammersbald.put_keyed(&id[..], serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve a bitcoin_object with its hash
     pub fn get_hash_keyed<T>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<dyn Error>>
-        where T: DeserializeOwned + BitcoinHash{
+        where T: DeserializeOwned {
         if let Some((pref, data)) = self.hammersbald.get_keyed(&id[..])? {
             return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)))
         }
@@ -170,7 +167,7 @@ mod test {
     use bitcoin::network::constants::Network;
     use transient;
     use super::*;
-    use bitcoin::consensus::deserialize;
+    use bitcoin::{consensus::deserialize, BitcoinHash};
 
     #[test]
     pub fn bitcoin_test () {
@@ -189,9 +186,9 @@ mod test {
         assert_eq!(tx, tx2);
 
         // store the transaction with its hash as key
-        let txref2 = bdb.put_hash_keyed(&tx).unwrap();
+        let txref2 = bdb.put_hash_keyed(&tx.txid().as_hash(), &tx).unwrap();
         // retrieve by hash
-        if let Some((pref, tx3)) = bdb.get_hash_keyed::<Transaction>(&tx.bitcoin_hash()).unwrap() {
+        if let Some((pref, tx3)) = bdb.get_hash_keyed::<Transaction>(&tx.txid().as_hash()).unwrap() {
             assert_eq!(pref, txref2);
             assert_eq!(tx3, tx);
         }
@@ -201,9 +198,9 @@ mod test {
 
         let genesis = genesis_block(Network::Bitcoin);
         // store the genesist block
-        bdb.put_hash_keyed(&genesis).unwrap();
+        bdb.put_hash_keyed(&genesis.bitcoin_hash().as_hash(), &genesis).unwrap();
         // find it
-        if let Some((_, block)) = bdb.get_hash_keyed::<Block>(&genesis.bitcoin_hash()).unwrap() {
+        if let Some((_, block)) = bdb.get_hash_keyed::<Block>(&genesis.bitcoin_hash().as_hash()).unwrap() {
             assert_eq!(block, genesis);
         }
         else {
