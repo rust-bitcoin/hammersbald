@@ -48,9 +48,9 @@ impl BitcoinAdaptor {
     }
 
     /// Retrieve a bitcoin_object with its hash
-    pub fn get_hash_keyed<T>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<dyn Error>>
+    pub fn get_hash_keyed<ID: Into<sha256d::Hash>, T>(&self, id: ID) -> Result<Option<(PRef, T)>, Box<dyn Error>>
         where T: DeserializeOwned {
-        if let Some((pref, data)) = self.hammersbald.get_keyed(&id[..])? {
+        if let Some((pref, data)) = self.hammersbald.get_keyed(&id.into()[..])? {
             return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)))
         }
         Ok(None)
@@ -188,7 +188,7 @@ mod test {
         // store the transaction with its hash as key
         let txref2 = bdb.put_hash_keyed(tx.txid(), &tx).unwrap();
         // retrieve by hash
-        if let Some((pref, tx3)) = bdb.get_hash_keyed::<Transaction>(&tx.txid().as_hash()).unwrap() {
+        if let Some((pref, tx3)) = bdb.get_hash_keyed::<_, Transaction>(tx.txid()).unwrap() {
             assert_eq!(pref, txref2);
             assert_eq!(tx3, tx);
         }
@@ -200,7 +200,7 @@ mod test {
         // store the genesist block
         bdb.put_hash_keyed(genesis.block_hash(), &genesis).unwrap();
         // find it
-        if let Some((_, block)) = bdb.get_hash_keyed::<Block>(&genesis.block_hash().as_hash()).unwrap() {
+        if let Some((_, block)) = bdb.get_hash_keyed::<_, Block>(genesis.block_hash()).unwrap() {
             assert_eq!(block, genesis);
         }
         else {
