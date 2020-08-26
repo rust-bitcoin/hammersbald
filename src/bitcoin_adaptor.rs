@@ -42,9 +42,9 @@ impl BitcoinAdaptor {
     }
 
     /// Store some bitcoin object that has a bitcoin hash
-    pub fn put_hash_keyed<T>(&mut self, id: &sha256d::Hash, encodable: &T) -> Result<PRef, Box<dyn Error>>
+    pub fn put_hash_keyed<ID: Into<sha256d::Hash>, T>(&mut self, id: ID, encodable: &T) -> Result<PRef, Box<dyn Error>>
         where T: Serialize {
-        Ok(self.hammersbald.put_keyed(&id[..], serde_cbor::to_vec(encodable)?.as_slice())?)
+        Ok(self.hammersbald.put_keyed(&id.into()[..], serde_cbor::to_vec(encodable)?.as_slice())?)
     }
 
     /// Retrieve a bitcoin_object with its hash
@@ -167,7 +167,7 @@ mod test {
     use bitcoin::network::constants::Network;
     use transient;
     use super::*;
-    use bitcoin::{consensus::deserialize, BitcoinHash};
+    use bitcoin::{consensus::deserialize};
 
     #[test]
     pub fn bitcoin_test () {
@@ -186,7 +186,7 @@ mod test {
         assert_eq!(tx, tx2);
 
         // store the transaction with its hash as key
-        let txref2 = bdb.put_hash_keyed(&tx.txid().as_hash(), &tx).unwrap();
+        let txref2 = bdb.put_hash_keyed(tx.txid(), &tx).unwrap();
         // retrieve by hash
         if let Some((pref, tx3)) = bdb.get_hash_keyed::<Transaction>(&tx.txid().as_hash()).unwrap() {
             assert_eq!(pref, txref2);
@@ -198,9 +198,9 @@ mod test {
 
         let genesis = genesis_block(Network::Bitcoin);
         // store the genesist block
-        bdb.put_hash_keyed(&genesis.bitcoin_hash().as_hash(), &genesis).unwrap();
+        bdb.put_hash_keyed(genesis.block_hash(), &genesis).unwrap();
         // find it
-        if let Some((_, block)) = bdb.get_hash_keyed::<Block>(&genesis.bitcoin_hash().as_hash()).unwrap() {
+        if let Some((_, block)) = bdb.get_hash_keyed::<Block>(&genesis.block_hash().as_hash()).unwrap() {
             assert_eq!(block, genesis);
         }
         else {
