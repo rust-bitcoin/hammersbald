@@ -21,8 +21,7 @@ use PRef;
 use HammersbaldAPI;
 use HammersbaldIterator;
 
-use bitcoin_hashes::sha256d;
-
+use bitcoin::hashes::sha256d;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
