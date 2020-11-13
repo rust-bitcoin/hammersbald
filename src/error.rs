@@ -17,13 +17,8 @@
 //! # Error type
 //!
 //!
-#[cfg(feature="bitcoin_support")]
-use bitcoin::consensus::encode;
 
-use std::convert;
-use std::fmt;
-use std::io;
-use std::sync;
+use std::{fmt, io, sync};
 
 /// Errors returned by this library
 pub enum Error {
@@ -35,13 +30,13 @@ pub enum Error {
     KeyTooLong,
     /// wrapped IO error
     IO(io::Error),
-    /// Wrapped bitcoin util error
-    #[cfg(feature="bitcoin_support")]
-    BitcoinSerialize(encode::Error),
     /// Lock poisoned
     Poisoned(String),
     /// Queue error
-    Queue(String)
+    Queue(String),
+    /// Bitcoin encoding error.
+    #[cfg(feature = "bitcoin_support")]
+    BitcoinDecode(bitcoin::consensus::encode::Error),
 }
 
 impl std::error::Error for Error {
@@ -55,10 +50,10 @@ impl std::error::Error for Error {
             Error::KeyTooLong => None,
             Error::Corrupted (_) => None,
             Error::IO(ref e) => Some(e),
-            #[cfg(feature="bitcoin_support")]
-            Error::BitcoinSerialize(ref e) => Some(e),
             Error::Poisoned(_) => None,
-            Error::Queue(_) => None
+            Error::Queue(_) => None,
+            #[cfg(feature = "bitcoin_support")]
+            Error::BitcoinDecode(ref e) => Some(e),
         }
     }
 }
@@ -70,10 +65,10 @@ impl fmt::Display for Error {
             Error::KeyTooLong => write!(f, "key too long"),
             Error::Corrupted(ref s) => write!(f, "corrupted data: {}", s),
             Error::IO(e) => e.fmt(f),
-            #[cfg(feature = "bitcoin_support")]
-            Error::BitcoinSerialize(e) => write!(f, "bitcoin serialize error: {}", e),
             Error::Poisoned(ref s) => write!(f, "lock poisoned: {}", s),
             Error::Queue(ref s) => write!(f, "queue error {}", s),
+            #[cfg(feature = "bitcoin_support")]
+            Error::BitcoinDecode(e) => write!(f, "bitcoin parsing error: {}", e),
         }
     }
 }
@@ -84,26 +79,33 @@ impl fmt::Debug for Error {
     }
 }
 
-impl convert::From<io::Error> for Error {
+impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::IO(err)
     }
 }
 
-impl convert::From<Error> for io::Error {
+impl From<Error> for io::Error {
     fn from(_: Error) -> io::Error {
         io::Error::from(io::ErrorKind::UnexpectedEof)
     }
 }
 
-impl<T> convert::From<sync::PoisonError<T>> for Error {
+impl<T> From<sync::PoisonError<T>> for Error {
     fn from(err: sync::PoisonError<T>) -> Error {
         Error::Poisoned(err.to_string())
     }
 }
 
-impl<T> convert::From<sync::mpsc::SendError<T>> for Error {
+impl<T> From<sync::mpsc::SendError<T>> for Error {
     fn from(err: sync::mpsc::SendError<T>) -> Error {
         Error::Queue(err.to_string())
+    }
+}
+
+#[cfg(feature = "bitcoin_support")]
+impl From<bitcoin::consensus::encode::Error> for Error {
+    fn from(e: bitcoin::consensus::encode::Error) -> Error {
+        Error::BitcoinDecode(e)
     }
 }
