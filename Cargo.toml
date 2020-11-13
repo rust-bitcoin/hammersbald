@@ -1,7 +1,10 @@
 [package]
 name = "hammersbald"
-version = "2.4.0"
-authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
+version = "3.0.0"
+authors = [
+    "Tamas Blummer <tamas.blummer@gmail.com>",
+    "Steven Roose <steven@stevenroose.org>",
+]
 license = "Apache-2.0"
 homepage = "https://github.com/rust-bitcoin/hammersbald/"
 repository = "https://github.com/rust-bitcoin/hammersbald/"
