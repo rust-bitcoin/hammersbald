@@ -17,12 +17,12 @@
 //! # Hammersbald bitcoin support
 //!
 
-use std::io::Write;
+use std::io;
 use std::marker::PhantomData;
 
 use bitcoin_hashes::Hash;
 use bitcoin::{Block, BlockHash, BlockHeader, Transaction, Txid, Wtxid};
-use bitcoin::consensus::encode::{Encodable, Decodable, serialize, deserialize};
+use bitcoin::consensus::encode::{Decodable, Encodable, serialize, deserialize};
 
 use Error;
 use HammersbaldAPI;
@@ -35,26 +35,65 @@ use PRef;
 /// Multiple hash identifiers are possible, f.e. a [Transaction] can be stored
 /// by either [Txid] or [Wtxid]. Note that a [Transaction] is not automatically
 /// stored by both hashes; one must be selected as a type parameter.
-pub trait BitcoinObject<Key>: Encodable + Decodable
-	where Key: Hash, <Key as Hash>::Engine: Write,
-{
+pub trait BitcoinObject<Key>: Sized where Key: Hash, <Key as Hash>::Engine: io::Write {
+	/// Encode the object into the writer.
+	///
+	/// Should not return errors except passthrough errors from the writer.
+	//TODO(stevenroose) return io::Error here once bitcoin 0.26 lands
+    fn encode<W: io::Write>(&self, w: W) -> Result<usize, Error>;
+
+	/// Decode an object from the reader.
+    fn decode<D: io::Read>(d: D) -> Result<Self, Error>;
+
 	/// The key of the item.
 	fn hash(&self) -> Key {
 		let mut engine = <Key as Hash>::engine();
-		self.consensus_encode(&mut engine).expect("engines don't error");
+		self.encode(&mut engine).expect("engines don't error");
 		<Key as Hash>::from_engine(engine)
+	}
+
+	/// Encode into bytes.
+	fn to_bytes(&self) -> Vec<u8> {
+		let mut buf = Vec::new();
+		self.encode(&mut buf).expect("vecs don't error");
+		buf
+	}
+
+	/// Convert object from bytes.
+	fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+		let mut decoder = io::Cursor::new(bytes);
+		let object = Self::decode(&mut decoder)?;
+
+		if decoder.position() as usize != bytes.len() {
+			return Err(Error::Corrupted("corrupt data".to_owned()));
+		}
+
+		Ok(object)
 	}
 }
 
+macro_rules! bitcoin_encode {
+	() => {
+		fn encode<W: io::Write>(&self, w: W) -> Result<usize, Error> {
+			Ok(bitcoin::consensus::encode::Encodable::consensus_encode(self, w)?)
+		}
+		fn decode<D: io::Read>(d: D) -> Result<Self, Error> {
+			Ok(bitcoin::consensus::encode::Decodable::consensus_decode(d)?)
+		}
+	};
+}
+
 impl BitcoinObject<Txid> for Transaction {
+	bitcoin_encode!();
 	fn hash(&self) -> Txid {
 		self.txid()
 	}
 }
-impl BitcoinObject<Wtxid> for Transaction {}
+impl BitcoinObject<Wtxid> for Transaction { bitcoin_encode!(); }
 
-impl BitcoinObject<BlockHash> for BlockHeader {}
+impl BitcoinObject<BlockHash> for BlockHeader { bitcoin_encode!(); }
 impl BitcoinObject<BlockHash> for Block {
+	bitcoin_encode!();
 	fn hash(&self) -> BlockHash {
 		BitcoinObject::hash(&self.header)
 	}
@@ -73,17 +112,17 @@ impl BitcoinAdaptor {
 
     /// Store some bitcoin object that has a bitcoin hash
     pub fn put_object_by_hash<H, T>(&mut self, object: &T) -> Result<PRef, Error>
-		where H: Hash, <H as Hash>::Engine: Write, T: BitcoinObject<H>
+		where H: Hash, <H as Hash>::Engine: io::Write, T: BitcoinObject<H>
 	{
-        Ok(self.hammersbald.put_keyed(&object.hash()[..], &serialize(object)[..])?)
+        Ok(self.hammersbald.put_keyed(&object.hash()[..], &object.to_bytes()[..])?)
     }
 
     /// Retrieve a bitcoin object with its hash
     pub fn get_object_by_hash<H, T>(&self, id: H) -> Result<Option<(PRef, T)>, Error>
-        where H: Hash, <H as Hash>::Engine: Write, T: BitcoinObject<H>
+        where H: Hash, <H as Hash>::Engine: io::Write, T: BitcoinObject<H>
 	{
         match self.hammersbald.get_keyed(&id[..])? {
-            Some((pref, data)) => Ok(Some((pref, deserialize(&data[..])?))),
+            Some((pref, data)) => Ok(Some((pref, BitcoinObject::from_bytes(&data[..])?))),
 			None => Ok(None),
         }
     }
