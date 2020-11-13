@@ -69,4 +69,4 @@ pub use api::{
 mod bitcoin_adaptor;
 
 #[cfg(feature = "bitcoin_support")]
-pub use bitcoin_adaptor::BitcoinAdaptor;
+pub use bitcoin_adaptor::{BitcoinAdaptor, BitcoinObject};

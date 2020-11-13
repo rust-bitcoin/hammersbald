@@ -55,7 +55,7 @@ pub struct MemTable {
 }
 
 impl MemTable {
-    pub fn new (log_file: LogFile, table_file: TableFile, data_file: DataFile, link_file: DataFile, bucket_fill_target: usize) -> MemTable {
+    pub fn new(log_file: LogFile, table_file: TableFile, data_file: DataFile, link_file: DataFile, bucket_fill_target: usize) -> MemTable {
         let mut rng = thread_rng();
 
         MemTable {log_mod: INIT_LOGMOD as u32, step: 0, forget: 0,
@@ -72,7 +72,7 @@ impl MemTable {
     }
 
     /// end current batch and start a new batch
-    pub fn batch (&mut self)  -> Result<(), Error> {
+    pub fn batch(&mut self)  -> Result<(), Error> {
         self.log_file.flush()?;
         self.log_file.sync()?;
 
@@ -98,7 +98,7 @@ impl MemTable {
     }
 
     /// stop background writer
-    pub fn shutdown (&mut self) {
+    pub fn shutdown(&mut self) {
         self.data_file.shutdown();
         self.link_file.shutdown();
         self.table_file.shutdown();
@@ -134,7 +134,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn load (&mut self) -> Result<(), Error>{
+    pub fn load(&mut self) -> Result<(), Error>{
         if let Some(first) = self.table_file.read_page(PRef::from(0))? {
             let n_buckets = first.read_pref(0).as_u64() as u32;
             self.buckets = RwLock::new(vec![Bucket::default(); n_buckets as usize]);
@@ -161,7 +161,7 @@ impl MemTable {
 
     fn resolve_bucket(&self, bucket_number: usize) -> Result<(), Error> {
         if let Some(bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
-            if bucket.slots.is_none () {
+            if bucket.slots.is_none() {
                 if bucket.stored.is_valid() {
                     if let Ok(Payload::Link(link)) = Payload::deserialize(self.link_file.get_envelope(bucket.stored)?.payload()) {
                         bucket.slots = Some(link.slots());
@@ -172,7 +172,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn flush (&mut self) -> Result<(), Error> {
+    pub fn flush(&mut self) -> Result<(), Error> {
         {
             // first page
             let fp = PRef::from(0);
@@ -189,7 +189,7 @@ impl MemTable {
                 let bucket_pref= TableFile::table_offset(bucket_number);
                 if let Some(mut bucket) = self.buckets.write().unwrap().get_mut(bucket_number) {
                     let mut page = self.table_file.read_page(bucket_pref.this_page())?.unwrap_or(Self::invalid_offsets_page(bucket_pref.this_page()));
-                    if let Some (ref slots) = bucket.slots {
+                    if let Some(ref slots) = bucket.slots {
                         let link = if slots.len() > 0 {
                             let slots = Link::from_slots(slots.as_slice());
                             self.link_file.append_link(Link::deserialize(slots.as_slice()))?
@@ -240,11 +240,11 @@ impl MemTable {
         self.link_file.envelopes()
     }
 
-    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
+    pub fn append_data(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
         self.data_file.append_data(key, data)
     }
 
-    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, Error> {
+    pub fn append_referred(&mut self, data: &[u8]) -> Result<PRef, Error> {
         self.data_file.append_referred(data)
     }
 
@@ -252,7 +252,7 @@ impl MemTable {
         self.data_file.get_envelope(pref)
     }
 
-    pub fn put (&mut self, key: &[u8], data_offset: PRef) -> Result<(), Error>{
+    pub fn put(&mut self, key: &[u8], data_offset: PRef) -> Result<(), Error>{
         let hash = self.hash(key);
         let bucket = self.bucket_for_hash(hash);
 
@@ -387,7 +387,7 @@ impl MemTable {
         let bucket_number = self.bucket_for_hash(hash);
         self.resolve_bucket(bucket_number)?;
         if let Some(bucket) = self.buckets.read().unwrap().get(bucket_number) {
-            if let Some (ref slots) = bucket.slots {
+            if let Some(ref slots) = bucket.slots {
                 if slots.iter().any(|(h, _)| *h == hash) {
                     return Ok(true);
                 }
@@ -433,7 +433,7 @@ impl MemTable {
         bucket
     }
 
-    fn hash (&self, key: &[u8]) -> u32 {
+    fn hash(&self, key: &[u8]) -> u32 {
         siphash24::Hash::hash_to_u64_with_keys(self.sip0, self.sip1, key) as u32
     }
 }
@@ -453,7 +453,7 @@ impl fmt::Debug for Dirty {
 }
 
 impl Dirty {
-    pub fn new (n: usize) -> Dirty {
+    pub fn new(n: usize) -> Dirty {
         Dirty{bits: vec!(0u64; (n >> 6) + 1), used: n}
     }
 
@@ -471,7 +471,7 @@ impl Dirty {
         }
     }
 
-    pub fn is_dirty (&self) -> bool {
+    pub fn is_dirty(&self) -> bool {
         self.bits.iter().any(|n| *n != 0)
     }
 

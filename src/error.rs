@@ -48,7 +48,7 @@ impl std::error::Error for Error {
         match *self {
             Error::InvalidOffset => None,
             Error::KeyTooLong => None,
-            Error::Corrupted (_) => None,
+            Error::Corrupted(_) => None,
             Error::IO(ref e) => Some(e),
             Error::Poisoned(_) => None,
             Error::Queue(_) => None,

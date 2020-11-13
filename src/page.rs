@@ -46,12 +46,12 @@ impl Page {
     }
 
     /// create a Page from read buffer
-    pub fn from_buf (content: [u8; PAGE_SIZE]) -> Page {
+    pub fn from_buf(content: [u8; PAGE_SIZE]) -> Page {
         Page{ content }
     }
 
     /// interpret the last 6 bytes as an pref
-    pub fn pref (&self) -> PRef {
+    pub fn pref(&self) -> PRef {
         self.read_pref(PAGE_PAYLOAD_SIZE)
     }
 
@@ -61,7 +61,7 @@ impl Page {
     }
 
     /// read at position
-    pub fn read (&self, pos: usize, buf: &mut [u8]) {
+    pub fn read(&self, pos: usize, buf: &mut [u8]) {
         let len = buf.len();
         buf.copy_from_slice(&self.content[pos .. pos+len])
     }
@@ -91,7 +91,7 @@ impl Page {
     }
 
     /// into write buffer
-    pub fn into_buf (self) -> [u8; PAGE_SIZE] {
+    pub fn into_buf(self) -> [u8; PAGE_SIZE] {
         self.content
     }
 }

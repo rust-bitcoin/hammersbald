@@ -53,7 +53,7 @@ impl DataFile {
     }
 
     /// shutdown
-    pub fn shutdown (&mut self) {
+    pub fn shutdown(&mut self) {
         self.appender.shutdown()
     }
 
@@ -75,7 +75,7 @@ impl DataFile {
     }
 
     /// append link
-    pub fn append_link (&mut self, link: Link) -> Result<PRef, Error> {
+    pub fn append_link(&mut self, link: Link) -> Result<PRef, Error> {
         let mut payload = vec!();
         Payload::Link(link).serialize(&mut payload);
         let envelope = Envelope::new(payload.as_slice());
@@ -87,7 +87,7 @@ impl DataFile {
     }
 
     /// append indexed data
-    pub fn append_data (&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
+    pub fn append_data(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
         let indexed = IndexedData::new(key, Data::new(data));
         let mut payload = vec!();
         Payload::Indexed(indexed).serialize(&mut payload);
@@ -100,7 +100,7 @@ impl DataFile {
     }
 
     /// append referred data
-    pub fn append_referred (&mut self, data: &[u8]) -> Result<PRef, Error> {
+    pub fn append_referred(&mut self, data: &[u8]) -> Result<PRef, Error> {
         let data = Data::new(data);
         let mut payload = vec!();
         Payload::Referred(data).serialize(&mut payload);
@@ -114,11 +114,11 @@ impl DataFile {
 
     /// truncate file
     pub fn truncate(&mut self, pref: u64) -> Result<(), Error> {
-        self.appender.truncate (pref)
+        self.appender.truncate(pref)
     }
 
     /// flush buffers
-    pub fn flush (&mut self) -> Result<(), Error> {
+    pub fn flush(&mut self) -> Result<(), Error> {
         let pos = self.appender.position();
         if pos.in_page_pos() > 0 {
             if PAGE_SIZE - pos.in_page_pos() >= 7 {
@@ -133,12 +133,12 @@ impl DataFile {
     }
 
     /// sync file on file system
-    pub fn sync (&self) -> Result<(), Error> {
+    pub fn sync(&self) -> Result<(), Error> {
         self.appender.sync()
     }
 
     /// get file length
-    pub fn len (&self) -> Result<u64, Error> {
+    pub fn len(&self) -> Result<u64, Error> {
         self.appender.len()
     }
 }
@@ -151,7 +151,7 @@ pub struct EnvelopeIterator<'f> {
 
 impl<'f> EnvelopeIterator<'f> {
     /// create a new iterator
-    pub fn new (file: &'f PagedFileAppender) -> EnvelopeIterator<'f> {
+    pub fn new(file: &'f PagedFileAppender) -> EnvelopeIterator<'f> {
         EnvelopeIterator {file, pos: PRef::from(0)}
     }
 }

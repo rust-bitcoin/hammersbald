@@ -30,17 +30,17 @@ pub struct Envelope {
 
 impl Envelope {
     /// create a new envelope
-    pub fn new (payload: &[u8]) -> Envelope {
+    pub fn new(payload: &[u8]) -> Envelope {
         Envelope{buffer: payload.to_vec()}
     }
 
     /// envelope payload
-    pub fn payload (&self) -> &[u8] {
+    pub fn payload(&self) -> &[u8] {
         self.buffer.as_slice()
     }
 
     /// serialize for storage
-    pub fn serialize (&self, result: &mut dyn Write) {
+    pub fn serialize(&self, result: &mut dyn Write) {
         result.write_u24::<BigEndian>(self.buffer.len() as u32).unwrap();
         result.write(self.buffer.as_slice()).unwrap();
     }
@@ -63,7 +63,7 @@ pub enum Payload<'e> {
 
 impl<'e> Payload<'e> {
     /// serialize for storage
-    pub fn serialize (&self, result: &mut dyn Write) {
+    pub fn serialize(&self, result: &mut dyn Write) {
         match self {
             Payload::Indexed(indexed) => {
                 result.write_u8(0).unwrap();
@@ -106,7 +106,7 @@ impl<'e> Data<'e> {
     }
 
     /// serialize for storage
-    pub fn serialize (&self, result: &mut dyn Write) {
+    pub fn serialize(&self, result: &mut dyn Write) {
         result.write_u24::<BigEndian>(self.data.len() as u32).unwrap();
         result.write(self.data).unwrap();
     }
@@ -129,12 +129,12 @@ pub struct IndexedData<'e> {
 
 impl<'e> IndexedData<'e> {
     /// new indexed data
-    pub fn new (key: &'e [u8], data: Data<'e>) -> IndexedData<'e> {
+    pub fn new(key: &'e [u8], data: Data<'e>) -> IndexedData<'e> {
         IndexedData {key, data}
     }
 
     /// serialize for storage
-    pub fn serialize (&self, result: &mut dyn Write) {
+    pub fn serialize(&self, result: &mut dyn Write) {
         result.write_u8(self.key.len() as u8).unwrap();
         result.write(self.key).unwrap();
         self.data.serialize(result);
@@ -178,7 +178,7 @@ impl<'e> Link<'e> {
     }
 
     /// serialize for storage
-    pub fn serialize (&self, write: &mut dyn Write) {
+    pub fn serialize(&self, write: &mut dyn Write) {
         write.write(&self.links).unwrap();
     }
 
