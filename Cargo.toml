@@ -1,6 +1,6 @@
 [package]
 name = "hammersbald"
-version = "3.0.0"
+version = "3.0.1"
 authors = [
     "Tamas Blummer <tamas.blummer@gmail.com>",
     "Steven Roose <steven@stevenroose.org>",
