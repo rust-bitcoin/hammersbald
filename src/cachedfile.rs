@@ -34,7 +34,7 @@ pub struct CachedFile {
 
 impl CachedFile {
     /// create a read cached file with a page cache of given size
-    pub fn new (file: Box<dyn PagedFile>, pages: usize) -> Result<CachedFile, Error> {
+    pub fn new(file: Box<dyn PagedFile>, pages: usize) -> Result<CachedFile, Error> {
         let len = file.len()?;
         Ok(CachedFile{file, cache: Mutex::new(Cache::new(len, pages))})
     }
@@ -46,7 +46,7 @@ impl PagedFile for CachedFile {
         if let Some(page) = cache.get(pref) {
             return Ok(Some(page));
         }
-        if let Some(page) = self.file.read_page (pref)? {
+        if let Some(page) = self.file.read_page(pref)? {
             cache.cache(pref, Arc::new(page.clone()));
             return Ok(Some(page));
         }
@@ -95,7 +95,7 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn new (len: u64, size: usize) -> Cache {
+    pub fn new(len: u64, size: usize) -> Cache {
         Cache { reads: LruCache::new(size), len }
     }
 
@@ -107,7 +107,7 @@ impl Cache {
         self.reads.clear();
     }
 
-    pub fn append (&mut self, page: Page) ->u64 {
+    pub fn append(&mut self, page: Page) ->u64 {
         let pref = PRef::from(self.len);
         let page = Arc::new(page);
         self.cache(pref, page);
@@ -115,7 +115,7 @@ impl Cache {
         self.len
     }
 
-    pub fn update (&mut self, page: Page) ->u64 {
+    pub fn update(&mut self, page: Page) ->u64 {
         let pref = page.pref();
         let page = Arc::new(page);
         self.cache(pref, page);

@@ -41,7 +41,7 @@ struct AsyncFileInner {
 }
 
 impl AsyncFileInner {
-    pub fn new (file: Box<dyn PagedFile + Send + Sync>) -> Result<AsyncFileInner, Error> {
+    pub fn new(file: Box<dyn PagedFile + Send + Sync>) -> Result<AsyncFileInner, Error> {
         Ok(AsyncFileInner { file: Mutex::new(file), flushed: Condvar::new(), work: Condvar::new(),
             run: AtomicBool::new(true),
             queue: Mutex::new(Vec::new())})
@@ -49,14 +49,14 @@ impl AsyncFileInner {
 }
 
 impl AsyncFile {
-    pub fn new (file: Box<dyn PagedFile + Send + Sync>) -> Result<AsyncFile, Error> {
+    pub fn new(file: Box<dyn PagedFile + Send + Sync>) -> Result<AsyncFile, Error> {
         let inner = Arc::new(AsyncFileInner::new(file)?);
         let inner2 = inner.clone();
         thread::Builder::new().name("hammersbald".to_string()).spawn(move || { AsyncFile::background(inner2) }).expect("hammersbald can not start thread for async file IO");
         Ok(AsyncFile { inner })
     }
 
-    fn background (inner: Arc<AsyncFileInner>) {
+    fn background(inner: Arc<AsyncFileInner>) {
         let mut queue = inner.queue.lock().expect("page queue lock poisoned");
         while inner.run.load(Ordering::Acquire) {
             while queue.is_empty() {
@@ -71,9 +71,9 @@ impl AsyncFile {
         }
     }
 
-    fn read_in_queue (&self, pref: PRef) -> Result<Option<Page>, Error> {
+    fn read_in_queue(&self, pref: PRef) -> Result<Option<Page>, Error> {
         let queue = self.inner.queue.lock().expect("page queue lock poisoned");
-        if queue.len () > 0 {
+        if queue.len() > 0 {
             let file = self.inner.file.lock().expect("file lock poisoned");
             let len = PRef::from(file.len()?);
             if pref >= len {
@@ -109,7 +109,7 @@ impl PagedFile for AsyncFile {
         self.inner.file.lock().unwrap().sync()
     }
 
-    fn shutdown (&mut self) {
+    fn shutdown(&mut self) {
         let mut queue = self.inner.queue.lock().unwrap();
         self.inner.work.notify_one();
         while !queue.is_empty() {
@@ -120,7 +120,7 @@ impl PagedFile for AsyncFile {
         self.inner.run.store(false, Ordering::Release)
     }
 
-    fn append_page (&mut self, page: Page) -> Result<(), Error> {
+    fn append_page(&mut self, page: Page) -> Result<(), Error> {
         let mut queue = self.inner.queue.lock().unwrap();
         queue.push(page.clone());
         self.inner.work.notify_one();

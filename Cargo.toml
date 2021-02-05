@@ -1,7 +1,10 @@
 [package]
 name = "hammersbald"
-version = "2.4.0"
-authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
+version = "3.0.0"
+authors = [
+    "Tamas Blummer <tamas.blummer@gmail.com>",
+    "Steven Roose <steven@stevenroose.org>",
+]
 license = "Apache-2.0"
 homepage = "https://github.com/rust-bitcoin/hammersbald/"
 repository = "https://github.com/rust-bitcoin/hammersbald/"
@@ -15,16 +18,15 @@ name = "hammersbald"
 path = "src/lib.rs"
 
 [features]
-bitcoin_support=["bitcoin","serde","serde_cbor"]
+bitcoin_support = [ "bitcoin" ]
 
 [dependencies]
-rand="0.7"
-byteorder="1.2"
+rand = "0.7"
+byteorder = "1.2"
 lru-cache = "0.1.1"
-bitcoin_hashes = "0.7"
-bitcoin = { version= "0.21", features=["serde"], optional = true }
-serde = { version ="1", optional = true }
-serde_cbor = { version="0.10", optional = true }
+bitcoin_hashes = "0.9"
+
+bitcoin = { version= "0.25.2", features = [ "use-serde" ], optional = true }
 
 [dev-dependencies]
 hex = "0.3"

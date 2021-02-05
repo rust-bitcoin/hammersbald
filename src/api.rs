@@ -51,10 +51,10 @@ pub fn transient(bucket_fill_target: usize) -> Result<Box<dyn HammersbaldAPI>, E
 /// public API to Hammersbald
 pub trait HammersbaldAPI : Send + Sync {
     /// end current batch and start a new batch
-    fn batch (&mut self)  -> Result<(), Error>;
+    fn batch(&mut self)  -> Result<(), Error>;
 
     /// stop background writer
-    fn shutdown (&mut self);
+    fn shutdown(&mut self);
 
     /// store data accessible with key
     /// returns a persistent reference to stored data
@@ -91,7 +91,7 @@ pub struct HammersbaldDataWriter {
 
 impl HammersbaldDataWriter {
     /// create a new builder
-    pub fn new () -> HammersbaldDataWriter {
+    pub fn new() -> HammersbaldDataWriter {
         HammersbaldDataWriter { data: vec!() }
     }
 
@@ -128,12 +128,12 @@ pub struct HammersbaldDataReader<'a> {
 
 impl<'a> HammersbaldDataReader<'a> {
     /// create a new reader
-    pub fn new (data: &'a [u8]) -> HammersbaldDataReader<'a> {
+    pub fn new(data: &'a [u8]) -> HammersbaldDataReader<'a> {
         HammersbaldDataReader{ reader: Cursor::new(data) }
     }
 
     /// read a persistent reference
-    pub fn read_ref (&mut self) -> Result<PRef, io::Error> {
+    pub fn read_ref(&mut self) -> Result<PRef, io::Error> {
         Ok(PRef::from(self.reader.read_u48::<BigEndian>()?))
     }
 }
@@ -192,11 +192,11 @@ impl Hammersbald {
 
 impl HammersbaldAPI for Hammersbald {
 
-    fn batch (&mut self)  -> Result<(), Error> {
+    fn batch(&mut self)  -> Result<(), Error> {
         self.mem.batch()
     }
 
-    fn shutdown (&mut self) {
+    fn shutdown(&mut self) {
         self.mem.shutdown()
     }
 
@@ -279,7 +279,7 @@ mod test {
     use api::test::rand::RngCore;
 
     #[test]
-    fn test_two_batches () {
+    fn test_two_batches() {
         let mut db = Transient::new_db("first", 1, 1).unwrap();
 
         let mut rng = thread_rng();

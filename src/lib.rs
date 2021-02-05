@@ -27,13 +27,14 @@
 #![deny(unused_must_use)]
 #![forbid(unsafe_code)]
 
-#[cfg(feature="bitcoin_support")]extern crate bitcoin;
-#[cfg(feature="bitcoin_support")]extern crate serde;
-#[cfg(feature="bitcoin_support")]extern crate serde_cbor;
 extern crate bitcoin_hashes;
-extern crate rand;
 extern crate byteorder;
 extern crate lru_cache;
+extern crate rand;
+
+#[cfg(feature = "bitcoin_support")]
+extern crate bitcoin;
+
 
 mod page;
 mod pagedfile;
@@ -64,8 +65,8 @@ pub use api::{
     transient
 };
 
-#[cfg(feature="bitcoin_support")]
+#[cfg(feature = "bitcoin_support")]
 mod bitcoin_adaptor;
 
-#[cfg(feature="bitcoin_support")]
-pub use bitcoin_adaptor::BitcoinAdaptor;
+#[cfg(feature = "bitcoin_support")]
+pub use bitcoin_adaptor::{BitcoinAdaptor, BitcoinObject};

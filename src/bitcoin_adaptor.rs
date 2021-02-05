@@ -17,21 +17,87 @@
 //! # Hammersbald bitcoin support
 //!
 
-use PRef;
+use std::io;
+use std::marker::PhantomData;
+
+use bitcoin_hashes::Hash;
+use bitcoin::{Block, BlockHash, BlockHeader, Transaction, Txid, Wtxid};
+use bitcoin::consensus::encode::{Decodable, Encodable, serialize, deserialize};
+
+use Error;
 use HammersbaldAPI;
 use HammersbaldIterator;
+use PRef;
 
-use bitcoin_hashes::sha256d;
+/// A trait implemented for Bitcoin object that should be retrievable
+/// by a hash identifier.
+///
+/// Multiple hash identifiers are possible, f.e. a [Transaction] can be stored
+/// by either [Txid] or [Wtxid]. Note that a [Transaction] is not automatically
+/// stored by both hashes; one must be selected as a type parameter.
+pub trait BitcoinObject<Key>: Sized where Key: Hash, <Key as Hash>::Engine: io::Write {
+	/// Encode the object into the writer.
+	///
+	/// Should not return errors except passthrough errors from the writer.
+	//TODO(stevenroose) return io::Error here once bitcoin 0.26 lands
+    fn encode<W: io::Write>(&self, w: W) -> Result<usize, Error>;
 
-use bitcoin::{
-    BitcoinHash
-};
+	/// Decode an object from the reader.
+    fn decode<D: io::Read>(d: D) -> Result<Self, Error>;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+	/// The key of the item.
+	fn hash(&self) -> Key {
+		let mut engine = <Key as Hash>::engine();
+		self.encode(&mut engine).expect("engines don't error");
+		<Key as Hash>::from_engine(engine)
+	}
 
-use std::error::Error;
-use serde::export::PhantomData;
+	/// Encode into bytes.
+	fn to_bytes(&self) -> Vec<u8> {
+		let mut buf = Vec::new();
+		self.encode(&mut buf).expect("vecs don't error");
+		buf
+	}
+
+	/// Convert object from bytes.
+	fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+		let mut decoder = io::Cursor::new(bytes);
+		let object = Self::decode(&mut decoder)?;
+
+		if decoder.position() as usize != bytes.len() {
+			return Err(Error::Corrupted("corrupt data".to_owned()));
+		}
+
+		Ok(object)
+	}
+}
+
+macro_rules! bitcoin_encode {
+	() => {
+		fn encode<W: io::Write>(&self, w: W) -> Result<usize, Error> {
+			Ok(bitcoin::consensus::encode::Encodable::consensus_encode(self, w)?)
+		}
+		fn decode<D: io::Read>(d: D) -> Result<Self, Error> {
+			Ok(bitcoin::consensus::encode::Decodable::consensus_decode(d)?)
+		}
+	};
+}
+
+impl BitcoinObject<Txid> for Transaction {
+	bitcoin_encode!();
+	fn hash(&self) -> Txid {
+		self.txid()
+	}
+}
+impl BitcoinObject<Wtxid> for Transaction { bitcoin_encode!(); }
+
+impl BitcoinObject<BlockHash> for BlockHeader { bitcoin_encode!(); }
+impl BitcoinObject<BlockHash> for Block {
+	bitcoin_encode!();
+	fn hash(&self) -> BlockHash {
+		BitcoinObject::hash(&self.header)
+	}
+}
 
 /// Bitcoin adaptor
 pub struct BitcoinAdaptor {
@@ -40,77 +106,87 @@ pub struct BitcoinAdaptor {
 
 impl BitcoinAdaptor {
     /// Create a new Adaptor
-    pub fn new (hammersbald: Box<dyn HammersbaldAPI>) -> BitcoinAdaptor {
+    pub fn new(hammersbald: Box<dyn HammersbaldAPI>) -> BitcoinAdaptor {
         BitcoinAdaptor { hammersbald }
     }
 
     /// Store some bitcoin object that has a bitcoin hash
-    pub fn put_hash_keyed<T>(&mut self, encodable: &T) -> Result<PRef, Box<dyn Error>>
-        where T: Serialize + BitcoinHash {
-        Ok(self.hammersbald.put_keyed(&encodable.bitcoin_hash()[..], serde_cbor::to_vec(encodable)?.as_slice())?)
+    pub fn put_object_by_hash<H, T>(&mut self, object: &T) -> Result<PRef, Error>
+		where H: Hash, <H as Hash>::Engine: io::Write, T: BitcoinObject<H>
+	{
+        Ok(self.hammersbald.put_keyed(&object.hash()[..], &object.to_bytes()[..])?)
     }
 
-    /// Retrieve a bitcoin_object with its hash
-    pub fn get_hash_keyed<T>(&self, id: &sha256d::Hash) -> Result<Option<(PRef, T)>, Box<dyn Error>>
-        where T: DeserializeOwned + BitcoinHash{
-        if let Some((pref, data)) = self.hammersbald.get_keyed(&id[..])? {
-            return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)))
+    /// Retrieve a bitcoin object with its hash
+    pub fn get_object_by_hash<H, T>(&self, id: H) -> Result<Option<(PRef, T)>, Error>
+        where H: Hash, <H as Hash>::Engine: io::Write, T: BitcoinObject<H>
+	{
+        match self.hammersbald.get_keyed(&id[..])? {
+            Some((pref, data)) => Ok(Some((pref, BitcoinObject::from_bytes(&data[..])?))),
+			None => Ok(None),
         }
-        Ok(None)
     }
 
     /// Store some bitcoin object
-    pub fn put_encodable<T>(&mut self, encodable: &T) -> Result<PRef, Box<dyn Error>>
-        where T: Serialize {
-        Ok(self.hammersbald.put(serde_cbor::to_vec(encodable)?.as_slice())?)
+    pub fn put_object<T>(&mut self, object: &T) -> Result<PRef, Error>
+        where T: Encodable
+	{
+        self.hammersbald.put(&serialize(object))
     }
 
     /// Retrieve some bitcoin object
-    pub fn get_decodable<T>(&self, pref: PRef) -> Result<(Vec<u8>, T), Box<dyn Error>>
-        where T: DeserializeOwned {
+    pub fn get_object<T>(&self, pref: PRef) -> Result<(Vec<u8>, T), Error>
+        where T: Decodable
+	{
         let (key, data) = self.hammersbald.get(pref)?;
-        Ok((key, serde_cbor::from_slice(data.as_slice())?))
+        Ok((key, deserialize(&data[..])?))
     }
 
-    /// Store some bitcoin object with arbitary key
-    pub fn put_keyed_encodable<T>( &mut self, key: &[u8], encodable: &T) -> Result<PRef, Box<dyn Error>>
-        where T: Serialize {
-        Ok(self.hammersbald.put_keyed(key, serde_cbor::to_vec(encodable)?.as_slice())?)
+    /// Store some bitcoin object with arbitary key.
+    pub fn put_object_by_key<T>(&mut self, key: &[u8], object: &T) -> Result<PRef, Error>
+        where T: Encodable
+	{
+        Ok(self.hammersbald.put_keyed(key, &serialize(object))?)
     }
 
     /// Retrieve some bitcoin object with arbitary key
-    pub fn get_keyed_decodable<T>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Box<dyn Error>>
-        where T: DeserializeOwned{
+    pub fn get_object_by_key<T>(&self, key: &[u8]) -> Result<Option<(PRef, T)>, Error>
+        where T: Decodable
+	{
         if let Some((pref, data)) = self.hammersbald.get_keyed(key)? {
-            return Ok(Some((pref, serde_cbor::from_slice(data.as_slice())?)));
+            return Ok(Some((pref, deserialize(&data[..])?)));
         }
         Ok(None)
     }
 
     /// quick check if the db contains a key. This might return false positive.
-    pub fn may_have_hash_key (&self, key: &sha256d::Hash) -> Result<bool, Box<dyn Error>> {
+    pub fn may_have_hash<H: Hash>(&self, key: H) -> Result<bool, Error> {
         Ok(self.hammersbald.may_have_key(&key[..])?)
     }
 
     /// iterate over all data, useful only if data is homogenous
-    pub fn iter_decodable<D: ?Sized> (&self) -> HammersbaldDecodableIterator<D>
-        where D: DeserializeOwned {
-        HammersbaldDecodableIterator{inner: self.iter(), data: PhantomData{}}
+    pub fn iter_decodable<T> (&self) -> HammersbaldDecodableIterator<T>
+        where T: Decodable + ?Sized
+	{
+        HammersbaldDecodableIterator{
+			inner: self.iter(),
+			data: PhantomData,
+		}
     }
 }
 
-pub struct HammersbaldDecodableIterator<'a, D> {
+/// An iterator over a stream of decodable data.
+pub struct HammersbaldDecodableIterator<'a, T> {
     inner: HammersbaldIterator<'a>,
-    data: PhantomData<D>
+    data: PhantomData<T>
 }
 
-impl<'a, D> Iterator for HammersbaldDecodableIterator<'a, D>
-    where D: DeserializeOwned{
-    type Item = (PRef, D);
+impl<'a, T: Decodable> Iterator for HammersbaldDecodableIterator<'a, T> {
+    type Item = (PRef, T);
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         while let Some((pref, _, data)) = self.inner.next() {
-            if let Ok(d) = serde_cbor::from_slice(data.as_slice()) {
+            if let Ok(d) = deserialize(&data[..]) {
                 return Some((pref, d));
             }
         }
@@ -119,7 +195,7 @@ impl<'a, D> Iterator for HammersbaldDecodableIterator<'a, D>
 }
 
 impl HammersbaldAPI for BitcoinAdaptor {
-    fn batch(&mut self) -> Result<(), crate::error::Error> {
+    fn batch(&mut self) -> Result<(), Error> {
         self.hammersbald.batch()
     }
 
@@ -127,23 +203,23 @@ impl HammersbaldAPI for BitcoinAdaptor {
         self.hammersbald.shutdown()
     }
 
-    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, crate::error::Error> {
+    fn put_keyed(&mut self, key: &[u8], data: &[u8]) -> Result<PRef, Error> {
         self.hammersbald.put_keyed(key, data)
     }
 
-    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, crate::error::Error> {
+    fn get_keyed(&self, key: &[u8]) -> Result<Option<(PRef, Vec<u8>)>, Error> {
         self.hammersbald.get_keyed(key)
     }
 
-    fn put(&mut self, data: &[u8]) -> Result<PRef, crate::error::Error> {
+    fn put(&mut self, data: &[u8]) -> Result<PRef, Error> {
         self.hammersbald.put(data)
     }
 
-    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), crate::error::Error> {
+    fn get(&self, pref: PRef) -> Result<(Vec<u8>, Vec<u8>), Error> {
         self.hammersbald.get(pref)
     }
 
-    fn may_have_key (&self, key: &[u8]) -> Result<bool, crate::error::Error> {
+    fn may_have_key(&self, key: &[u8]) -> Result<bool, Error> {
         self.hammersbald.may_have_key(key)
     }
 
@@ -162,18 +238,15 @@ mod test {
 
     extern crate hex;
 
-    use bitcoin::blockdata::{
-        block::{Block},
-        transaction::Transaction,
-        constants::genesis_block
-    };
-    use bitcoin::network::constants::Network;
+    use bitcoin::{Block, BlockHeader, Network, Transaction};
+	use bitcoin::blockdata::constants::genesis_block;
+
     use transient;
     use super::*;
     use bitcoin::consensus::deserialize;
 
     #[test]
-    pub fn bitcoin_test () {
+    pub fn bitcoin_test() {
         // create a transient hammersbald
         let db = transient(1).unwrap();
         // promote to a bitcoin adapter
@@ -183,30 +256,37 @@ mod test {
         let tx = deserialize::<Transaction> (hex::decode("02000000000101ed30ca30ee83f13579da294e15c9d339b35d33c5e76d2fda68990107d30ff00700000000006db7b08002360b0000000000001600148154619cb0e7513fcdb1eb90cc9f86f3793b9d8ec382ff000000000022002027a5000c7917f785d8fc6e5a55adfca8717ecb973ebb7743849ff956d896a7ed04004730440220503890e657773607fb05c9ef4c4e73b0ab847497ee67b3b8cefb3688a73333180220066db0ca943a5932f309ac9d4f191300711a5fc206d7c3babd85f025eac30bca01473044022055f05c3072dfd389104af1f5ccd56fb5433efc602694f1f384aab703c77ac78002203c1133981d66dc48183e72a19cc0974b93002d35ad7d6ee4278d46b4e96f871a0147522102989711912d88acf5a4a18081104f99c2f8680a7de23f829f28db31fdb45b7a7a2102f0406fa1b49a9bb10c191fd83e2359867ecdace5ea990ce63d11478ed5877f1852ae81534220").unwrap().as_slice()).unwrap();
 
         // store the transaction without associating a key
-        let txref = bdb.put_encodable(&tx).unwrap();
+        let txref = bdb.put_object(&tx).unwrap();
         // retrieve by direct reference
-        let (_, tx2) = bdb.get_decodable::<Transaction>(txref).unwrap();
+        let (_, tx2) = bdb.get_object::<Transaction>(txref).unwrap();
         assert_eq!(tx, tx2);
 
         // store the transaction with its hash as key
-        let txref2 = bdb.put_hash_keyed(&tx).unwrap();
+        let txref2 = bdb.put_object_by_hash::<Txid, _>(&tx).unwrap();
         // retrieve by hash
-        if let Some((pref, tx3)) = bdb.get_hash_keyed::<Transaction>(&tx.bitcoin_hash()).unwrap() {
+        if let Some((pref, tx3)) = bdb.get_object_by_hash::<_, Transaction>(tx.txid()).unwrap() {
             assert_eq!(pref, txref2);
             assert_eq!(tx3, tx);
-        }
-        else {
+        } else {
             panic!("can not find tx");
         }
 
         let genesis = genesis_block(Network::Bitcoin);
-        // store the genesist block
-        bdb.put_hash_keyed(&genesis).unwrap();
+        // store the genesist block header
+        bdb.put_object_by_hash(&genesis.header).unwrap();
         // find it
-        if let Some((_, block)) = bdb.get_hash_keyed::<Block>(&genesis.bitcoin_hash()).unwrap() {
-            assert_eq!(block, genesis);
+        if let Some((_, block)) = bdb.get_object_by_hash::<_, BlockHeader>(genesis.block_hash()).unwrap() {
+            assert_eq!(block, genesis.header);
+        } else {
+            panic!("can not find genesis block header");
         }
-        else {
+
+        // store the genesist block
+        bdb.put_object_by_hash(&genesis).unwrap();
+        // find it
+        if let Some((_, block)) = bdb.get_object_by_hash::<_, Block>(genesis.block_hash()).unwrap() {
+            assert_eq!(block, genesis);
+        } else {
             panic!("can not find genesis block");
         }
     }

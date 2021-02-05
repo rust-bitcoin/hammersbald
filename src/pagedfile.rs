@@ -27,19 +27,19 @@ use std::io::{self, ErrorKind};
 /// a paged file
 pub trait PagedFile : Send + Sync {
     /// read a page at pref
-    fn read_page (&self, pref: PRef) -> Result<Option<Page>, Error>;
+    fn read_page(&self, pref: PRef) -> Result<Option<Page>, Error>;
     /// length of the storage
-    fn len (&self) -> Result<u64, Error>;
+    fn len(&self) -> Result<u64, Error>;
     /// truncate storage
     fn truncate(&mut self, new_len: u64) -> Result<(), Error>;
     /// tell OS to flush buffers to disk
-    fn sync (&self) -> Result<(), Error>;
+    fn sync(&self) -> Result<(), Error>;
     /// shutdown async write
-    fn shutdown (&mut self);
+    fn shutdown(&mut self);
     /// append pages
     fn append_page(&mut self, page: Page) -> Result<(), Error>;
     /// write a page at its position
-    fn update_page (&mut self, page: Page) -> Result<u64, Error>;
+    fn update_page(&mut self, page: Page) -> Result<u64, Error>;
     /// flush buffered writes
     fn flush(&mut self) -> Result<(), Error>;
 }
@@ -63,18 +63,18 @@ pub struct PagedFileAppender {
 
 impl PagedFileAppender {
     /// create a reader that starts at a position
-    pub fn new (file: Box<dyn PagedFile>, pos: PRef) -> PagedFileAppender {
+    pub fn new(file: Box<dyn PagedFile>, pos: PRef) -> PagedFileAppender {
         PagedFileAppender {file, pos, page: None}
     }
 
-    pub fn position (&self) -> PRef {
+    pub fn position(&self) -> PRef {
         self.pos
     }
 
     pub fn append(&mut self, buf: &[u8]) -> Result<PRef, Error> {
         let mut wrote = 0;
         while wrote < buf.len() {
-            if self.page.is_none () {
+            if self.page.is_none() {
                 self.page = Some(Page::new());
             }
             if let Some(ref mut page) = self.page {
@@ -96,7 +96,7 @@ impl PagedFileAppender {
     pub fn read(&self, mut pos: PRef, buf: &mut [u8], len: usize) -> Result<PRef, Error> {
         let mut read = 0;
         while read < len {
-            if let Some(ref page) = self.read_page (pos.this_page())? {
+            if let Some(ref page) = self.read_page(pos.this_page())? {
                 let have = min(PAGE_SIZE - pos.in_page_pos(), len - read);
                 page.read(pos.in_page_pos(), &mut buf[read .. read + have]);
                 read += have;
@@ -168,7 +168,7 @@ pub struct PagedFileIterator<'file> {
 /// page iterator
 impl<'file> PagedFileIterator<'file> {
     /// create a new iterator starting at given page
-    pub fn new (file: &'file dyn PagedFile, pref: PRef) -> PagedFileIterator {
+    pub fn new(file: &'file dyn PagedFile, pref: PRef) -> PagedFileIterator {
         PagedFileIterator {pagenumber: pref.page_number(), file}
     }
 }
