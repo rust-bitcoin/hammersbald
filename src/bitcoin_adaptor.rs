@@ -39,8 +39,7 @@ pub trait BitcoinObject<Key>: Sized where Key: Hash, <Key as Hash>::Engine: io::
     /// Encode the object into the writer.
     ///
     /// Should not return errors except passthrough errors from the writer.
-    //TODO(stevenroose) return io::Error here once bitcoin 0.26 lands
-    fn encode<W: io::Write>(&self, w: W) -> Result<usize, Error>;
+    fn encode<W: io::Write>(&self, w: W) -> Result<usize, io::Error>;
 
     /// Decode an object from the reader.
     fn decode<D: io::Read>(d: D) -> Result<Self, Error>;
@@ -74,7 +73,7 @@ pub trait BitcoinObject<Key>: Sized where Key: Hash, <Key as Hash>::Engine: io::
 
 macro_rules! bitcoin_encode {
     () => {
-        fn encode<W: io::Write>(&self, w: W) -> Result<usize, Error> {
+        fn encode<W: io::Write>(&self, w: W) -> Result<usize, io::Error> {
             Ok(bitcoin::consensus::encode::Encodable::consensus_encode(self, w)?)
         }
         fn decode<D: io::Read>(d: D) -> Result<Self, Error> {
