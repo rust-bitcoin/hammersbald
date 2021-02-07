@@ -23,9 +23,16 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
+#[cfg(feature="bitcoin_support")]
+use serde::{Serialize,Deserialize};
+
+#[cfg(feature="bitcoin_support")]
+use bitcoin::consensus::{Decodable, Encodable, encode, encode::ReadExt};
+
 const INVALID: u64 = 0xffffffffffff;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
+#[cfg_attr(feature="bitcoin_support", derive(Serialize, Deserialize))]
 /// Pointer to persistent data. Limited to 2^48
 pub struct PRef(u64);
 
@@ -148,5 +155,21 @@ impl PRef {
     /// add n pages
     pub fn add_pages(&self, n: usize) -> PRef {
         PRef(self.0 + n as u64 *PAGE_SIZE as u64)
+    }
+}
+
+#[cfg(feature="bitcoin_support")]
+impl Encodable for PRef {
+    fn consensus_encode<S: std::io::Write>(&self, mut s: S) -> Result<usize, encode::Error> {
+        let mut len = 0;
+        len += self.0.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+#[cfg(feature="bitcoin_support")]
+impl Decodable for PRef {
+    fn consensus_decode<D: std::io::Read>(mut d: D) -> Result<PRef, encode::Error> {
+        Ok(PRef(ReadExt::read_u64(&mut d)?))
     }
 }
